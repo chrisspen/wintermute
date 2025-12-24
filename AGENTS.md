@@ -97,3 +97,15 @@ A source is “done” when it can: authenticate, poll, emit deterministic WorkI
 
 ## License & contributions
 Contributions should add tests for scheduling behavior (preemption, de-dupe, retries) and must not expand tool authority without explicit admin configuration and documentation updates.
+
+## Logging
+
+Log all your actions in .<agent>/log.txt.
+
+A log entry will be in the format of "<datetime>,<description>"
+
+e.g. If you are Codex write a log entry for each action in .codex/log.txt.
+
+e.g. If you are Gemini write a log entry for each action in .gemini/log.txt.
+
+e.g. If you are Claude write a log entry for each action in .claude/log.txt.
