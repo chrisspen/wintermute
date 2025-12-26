@@ -15,6 +15,7 @@ from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext
 from wintermute.sources.demo import DemoSource
 from wintermute.sources.slack import SlackSource, SLACK_BOT_TOKEN_NAME, SLACK_PROVIDER
+from wintermute.sources.sessions import SessionSource
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
 from wintermute.tools.fs import ReadFileTool
@@ -227,6 +228,7 @@ def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:
 async def main() -> None:
     register(DemoSource())
     register(SlackSource())
+    register(SessionSource())
     db = Database()
     executor = Executor()
     tools = build_default_tools(db)

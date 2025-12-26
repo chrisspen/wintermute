@@ -10,7 +10,8 @@ from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
-from wintermute.db import Database, utc_now
+from wintermute.db import Database
+from wintermute.runner import build_ssh_spec, ensure_repo, send_input, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 
@@ -30,62 +31,142 @@ class SlackMessage:
 
 
 @dataclass
-class SlackWorkItem(WorkItem):
+class SlackCommandWorkItem(WorkItem):
     work_id: str
     priority: int
     source_id: str
     message: SlackMessage
 
     async def resume(self, ctx: WorkItemContext) -> None:
-        state = {
-            "work_id": self.work_id,
-            "source": "slack",
-            "channel": self.message.channel,
-            "thread_ts": self.message.thread_ts,
-        }
-        observation: dict[str, Any] = {
-            "event": {
-                "channel": self.message.channel,
-                "user": self.message.user,
-                "text": self.message.text,
-                "ts": self.message.ts,
-                "thread_ts": self.message.thread_ts,
-            },
-            "instruction": (
-                "If responding in Slack, use the slack_post_message tool. "
-                "Prefer replying in thread using thread_ts."
-            ),
-        }
-        tool_schema = [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.input_schema,
-            }
-            for tool in ctx.tools.definitions()
-        ]
-        for _ in range(5):
-            if ctx.should_preempt():
-                return
-            decision = ctx.executor.decide_next_action(state, observation, tool_schema)
-            if decision.type == "tool":
-                result = await ctx.tools.call(decision.payload["name"], decision.payload["args"])
-                observation = {"tool_result": result, "tool_name": decision.payload["name"]}
-                continue
-            if decision.type == "update":
-                await ctx.checkpoint(decision.payload["patch"])
-                observation = {"checkpoint_updated": decision.payload["patch"]}
-                continue
-            if decision.type == "escalate":
-                ctx.db.update_work_item_status(
-                    self.work_id, "queued", priority=int(decision.payload["priority"])
+        if self.message.thread_ts and self.message.thread_ts != self.message.ts:
+            session = ctx.db.get_session_by_thread(self.message.thread_ts)
+            if session:
+                project_vm = ctx.db.get_project_vm(session.project_vm_id)
+                agent = ctx.db.get_agent(session.agent_id)
+                vm = ctx.db.get_vm_target(project_vm.vm_target_id) if project_vm else None
+                if project_vm and agent and vm:
+                    spec = build_ssh_spec(vm, agent.required_ssh_options)
+                    send_input(spec, session, self.message.text)
+            return
+
+        text = (self.message.text or "").strip()
+        if not text.lower().startswith("start "):
+            return
+
+        parts = text.split()
+        if len(parts) < 3:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": "Usage: start <projectslug> <agentslug>",
+                },
+            )
+            return
+
+        project_slug = parts[1].lower()
+        agent_slug = parts[2].lower()
+        project = ctx.db.get_project_by_slug(project_slug)
+        if not project:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": f"Project not found: {project_slug}",
+                },
+            )
+            return
+        if project.slack_channel_id != self.message.channel:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": "This channel is not linked to that project.",
+                },
+            )
+            return
+        agent = ctx.db.get_agent_by_slug(agent_slug)
+        if not agent:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": f"Agent not found: {agent_slug}",
+                },
+            )
+            return
+        project_vm = ctx.db.get_project_vm_for_project(project.id)
+        if not project_vm:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": "No VM configured for this project.",
+                },
+            )
+            return
+        existing = ctx.db.list_sessions(project_id=project.id, status="running")
+        for session in existing:
+            if session.project_vm_id == project_vm.id:
+                await ctx.tools.call(
+                    "slack_post_message",
+                    {
+                        "channel": self.message.channel,
+                        "thread_ts": self.message.ts,
+                        "text": "A session is already running for this project/VM.",
+                    },
                 )
                 return
-            if decision.type == "yield":
-                ctx.db.update_work_item_status(self.work_id, "queued", run_after=utc_now())
-                return
-            if decision.type == "done":
-                return
+        vm = ctx.db.get_vm_target(project_vm.vm_target_id)
+        if not vm:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": "VM target not found.",
+                },
+            )
+            return
+
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+        repo_path = ensure_repo(spec, project_vm)
+        if not repo_path:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": "Repository not configured for this project VM.",
+                },
+            )
+            return
+
+        session_id = f"{project_slug}-{agent_slug}-{self.message.ts.replace('.', '')}"
+        ctx.db.insert_session(
+            session_id=session_id,
+            project_id=project.id,
+            project_vm_id=project_vm.id,
+            agent_id=agent.id,
+            ticket_id=None,
+            status="running",
+            repo_path=repo_path,
+            thread_ts=self.message.ts,
+        )
+        start_session(spec, session_id, agent, repo_path)
+        await ctx.tools.call(
+            "slack_post_message",
+            {
+                "channel": self.message.channel,
+                "thread_ts": self.message.ts,
+                "text": f"[{agent.slug}] session started in {repo_path}",
+            },
+        )
 
 
 class SlackSource(TaskSource):
@@ -145,7 +226,7 @@ class SlackSource(TaskSource):
             ts=checkpoint["ts"],
             thread_ts=checkpoint["thread_ts"],
         )
-        return SlackWorkItem(
+        return SlackCommandWorkItem(
             work_id=record.work_id,
             priority=record.priority,
             source_id=record.source_id,

@@ -9,6 +9,10 @@ Foreman is a local, persistent “work supervisor” that runs an async priority
 - **Supervisor**: the single asyncio event loop that owns scheduling, preemption, retries, and state persistence.
 - **Executor**: the LLM-facing component that asks “what next?” and returns a structured action.
 - **Tools**: constrained capabilities (GitHub/Jira/FS/etc.) exposed to the executor via explicit, typed calls.
+- **Project**: top-level workspace with Slack channel and linked VM targets.
+- **Ticket**: lightweight work item tracking (title, status, estimate, assigned).
+- **Agent**: CLI agent definition (command + required SSH options).
+- **AgentSession**: persistent SSH+screen session for an agent working on a project VM.
 
 ## Interfaces (contract-first)
 ### TaskSource
@@ -58,6 +62,8 @@ The web admin console provides:
 - Supervisor status: running/stopped/crashed, uptime, current WorkItem, last action, queue depth.
 - WorkItems views: queued/running/failed/done, checkpoint viewer, retry controls, “requeue”, “cancel”.
 - Logs: tail view (structured JSON logs preferred).
+- Projects, Tickets, VM targets, Agents, and Project VM mappings.
+- Slack channel per project; Slack command `start <projectslug> <agentslug>` to launch sessions.
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.
@@ -72,11 +78,11 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 
 ## Repository layout (recommended)
 - `wintermute/supervisor.py` — scheduler, heap, polling, preemption, persistence
-- `wintermute/sources/` — TaskSources (chat, jira, github, slack)
+- `wintermute/sources/` — TaskSources (chat, jira, github, slack, sessions)
 - `wintermute/executor.py` — LLM adapter + structured output parsing
 - `wintermute/tools/` — tool definitions + permission gating
 - `wintermute/web/` — FastAPI app + UI
-- `wintermute/db.py` — SQLite models/migrations
+- `wintermute/db.py` — SQLite ORM models/migrations
 - `tests/` — unit + integration tests with mocked endpoints
 - `alembic/` + `alembic.ini` — SQLAlchemy migrations
 - `setup.sh`, `run_web.sh`, `run_supervisor.sh` — local setup and runners

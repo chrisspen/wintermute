@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import uuid
 from typing import Any, Optional
@@ -15,6 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi import Query
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
+from slack_sdk.web.client import WebClient
 
 from wintermute.db import Database, utc_now
 from wintermute.sources.slack import (
@@ -74,6 +76,56 @@ def _parse_channels(raw: str) -> list[str]:
         if cleaned:
             channels.append(cleaned)
     return channels
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "project"
+
+
+def _slack_client(database: Database) -> WebClient:
+    bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+    if not bot:
+        raise HTTPException(status_code=400, detail="Slack bot token not configured")
+    return WebClient(token=bot.reference)
+
+
+def _slack_admin_user_id(database: Database) -> Optional[str]:
+    record = database.get_credential_by_name(SLACK_PROVIDER, "admin_user_id")
+    if not record:
+        return None
+    return record.reference
+
+
+def _update_slack_channel_filter(database: Database) -> None:
+    channels = []
+    for project in database.list_projects():
+        if project.slack_channel_id:
+            channels.append(project.slack_channel_id)
+    source = database.get_task_source(SlackSource.id)
+    if source:
+        config = dict(source.config)
+        config["channels"] = channels
+        database.upsert_task_source(
+            SlackSource.id,
+            source.enabled,
+            source.base_priority,
+            source.poll_interval_seconds,
+            config,
+        )
+
+
+def _find_channel_id(client: WebClient, channel_name: str) -> Optional[str]:
+    cursor = None
+    while True:
+        resp = client.conversations_list(cursor=cursor, limit=200)
+        for channel in resp.get("channels", []):
+            if channel.get("name") == channel_name:
+                return channel.get("id")
+        cursor = resp.get("response_metadata", {}).get("next_cursor") or None
+        if not cursor:
+            break
+    return None
 
 
 def _render_page(title: str, body: str) -> HTMLResponse:
@@ -181,8 +233,8 @@ def _render_page(title: str, body: str) -> HTMLResponse:
         margin: 0;
       }}
       button {{
-        background: linear-gradient(135deg, var(--accent), var(--accent-dark));
-        color: #fff5e9;
+        background: #1f8a3b;
+        color: #ecfff0;
         font-weight: bold;
         border: none;
         cursor: pointer;
@@ -191,6 +243,40 @@ def _render_page(title: str, body: str) -> HTMLResponse:
       }}
       button:hover {{
         filter: brightness(1.05);
+      }}
+      .danger {{
+        background: #b3261e;
+        color: #fff4f2;
+      }}
+      .ghost {{
+        background: transparent;
+        border: 1px solid var(--edge);
+        color: var(--ink);
+      }}
+      .modal {{
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 12, 9, 0.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        z-index: 1000;
+      }}
+      .modal.open {{
+        display: flex;
+      }}
+      .modal-card {{
+        background: #fffdf7;
+        border-radius: 18px;
+        padding: 24px;
+        width: min(420px, 100%);
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+      }}
+      .modal-actions {{
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
       }}
       .grid {{
         display: grid;
@@ -237,6 +323,52 @@ def _render_page(title: str, body: str) -> HTMLResponse:
         letter-spacing: 1px;
         text-transform: uppercase;
       }}
+      .nav {{
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        margin-top: 16px;
+      }}
+      .nav a {{
+        text-decoration: none;
+        font-size: 13px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: #f6efe6;
+        border-bottom: 2px solid transparent;
+        padding-bottom: 2px;
+      }}
+      .nav a.active {{
+        font-weight: bold;
+        border-bottom-color: #f6efe6;
+      }}
+      .growl {{
+        position: fixed;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 999;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+      }}
+      .growl-pill {{
+        background: #2f7d32;
+        color: #f4fff5;
+        padding: 10px 16px;
+        border-radius: 999px;
+        font-size: 13px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+        animation: fadeout 0.5s ease-in-out 2.5s forwards;
+      }}
+      @keyframes fadeout {{
+        to {{
+          opacity: 0;
+          transform: translateY(-6px);
+        }}
+      }}
     </style>
   </head>
   <body>
@@ -245,6 +377,10 @@ def _render_page(title: str, body: str) -> HTMLResponse:
         <div>
           <h1>Foreman Admin</h1>
           <p class="subtitle">Supervisory control room</p>
+          <div class="nav">
+            <a href="/ui">Home</a>
+            <a href="/ui/tickets">Tickets</a>
+          </div>
         </div>
         <span class="badge">Local</span>
       </header>
@@ -273,6 +409,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             SlackSource.poll_interval_seconds,
             config={"channels": []},
         )
+    else:
+        _update_slack_channel_filter(database)
     app = FastAPI(title="Foreman Admin")
     secret_key = (
         os.environ.get("WINTERMUTE_WEB_SECRET") or secrets.token_urlsafe(32)
@@ -339,9 +477,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Source not found")
         enabled = form.get("enabled") == "on"
         poll_interval = form.get("poll_interval_seconds")
-        channels_raw = str(form.get("channels", ""))
         config = dict(row.config)
-        config["channels"] = _parse_channels(channels_raw)
+        if source_id == SlackSource.id:
+            _update_slack_channel_filter(database)
+            config = database.get_task_source(SlackSource.id).config
+        else:
+            channels_raw = str(form.get("channels", ""))
+            config["channels"] = _parse_channels(channels_raw)
         poll_interval_seconds = row.poll_interval_seconds
         if poll_interval:
             poll_interval_seconds = int(poll_interval)
@@ -352,7 +494,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             poll_interval_seconds,
             config,
         )
-        return RedirectResponse("/ui", status_code=303)
+        return RedirectResponse("/ui?saved=project_deleted", status_code=303)
 
     @app.get("/work-items")
     def list_work_items(
@@ -437,19 +579,256 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         bot_token = str(form.get("bot_token", "")).strip()
         app_token = str(form.get("app_token", "")).strip()
-        if not bot_token or not app_token:
-            raise HTTPException(status_code=400, detail="Missing Slack tokens")
-        database.upsert_credential(
-            cred_id=f"{SLACK_PROVIDER}:{SLACK_BOT_TOKEN_NAME}",
-            name=SLACK_BOT_TOKEN_NAME,
-            provider=SLACK_PROVIDER,
-            reference=bot_token,
+        admin_user_id = str(form.get("admin_user_id", "")).strip()
+        if bot_token:
+            database.upsert_credential(
+                cred_id=f"{SLACK_PROVIDER}:{SLACK_BOT_TOKEN_NAME}",
+                name=SLACK_BOT_TOKEN_NAME,
+                provider=SLACK_PROVIDER,
+                reference=bot_token,
+            )
+        if app_token:
+            database.upsert_credential(
+                cred_id=f"{SLACK_PROVIDER}:{SLACK_APP_TOKEN_NAME}",
+                name=SLACK_APP_TOKEN_NAME,
+                provider=SLACK_PROVIDER,
+                reference=app_token,
+            )
+        if admin_user_id:
+            database.upsert_credential(
+                cred_id=f"{SLACK_PROVIDER}:admin_user_id",
+                name="admin_user_id",
+                provider=SLACK_PROVIDER,
+                reference=admin_user_id,
+            )
+        return RedirectResponse("/ui?saved=slack", status_code=303)
+
+    @app.post("/projects")
+    async def create_project(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        slug_raw = str(form.get("slug", "")).strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Missing project name")
+        slug = slug_raw or f"proj-{_slugify(name)}"
+        channel_name = slug
+        channel_id = None
+        channel_id_raw = str(form.get("slack_channel_id", "")).strip()
+        if channel_id_raw:
+            channel_id = channel_id_raw
+        if not channel_id:
+            client = _slack_client(database)
+            try:
+                resp = client.conversations_create(name=channel_name, is_private=False)
+                channel_id = resp.get("channel", {}).get("id")
+            except Exception as exc:
+                error_text = str(exc)
+                if "name_taken" in error_text:
+                    channel_id = _find_channel_id(client, channel_name)
+                elif "missing_scope" in error_text:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Slack channel create failed (missing scope: channels:manage).",
+                    ) from exc
+                else:
+                    raise HTTPException(
+                        status_code=400, detail=f"Slack channel create failed: {exc}"
+                    ) from exc
+        if not channel_id:
+            raise HTTPException(status_code=400, detail="Slack channel id missing")
+        admin_user_id = _slack_admin_user_id(database)
+        client = _slack_client(database)
+        try:
+            client.conversations_join(channel=channel_id)
+        except Exception:
+            pass
+        if admin_user_id:
+            invited = False
+            try:
+                client.conversations_invite(channel=channel_id, users=admin_user_id)
+                invited = True
+            except Exception:
+                try:
+                    client.channels_invite(channel=channel_id, user=admin_user_id)
+                    invited = True
+                except Exception:
+                    invited = False
+            if not invited:
+                client.chat_postMessage(
+                    channel=channel_id,
+                    text="Channel created. Please /join to receive updates.",
+                )
+        else:
+            client.chat_postMessage(
+                channel=channel_id,
+                text="Channel created. Please /join to receive updates.",
+            )
+        project_id = str(uuid.uuid4())
+        database.insert_project(project_id, name, slug, channel_id)
+        _update_slack_channel_filter(database)
+        return RedirectResponse("/ui", status_code=303)
+
+    @app.get("/ui/projects/{project_id}/edit", response_class=HTMLResponse)
+    def edit_project_ui(project_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+        project = database.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Edit Project</h3>
+              <form method="post" action="/projects/{project.id}">
+                <label>Name</label>
+                <input type="text" name="name" value="{project.name}" required />
+                <label>Slug</label>
+                <input type="text" name="slug" value="{project.slug}" required />
+                <label>Slack Channel ID</label>
+                <input type="text" name="slack_channel_id" value="{project.slack_channel_id or ''}" />
+                <button type="submit">Save Project</button>
+              </form>
+              <button type="button" class="danger" onclick="openDeleteModal()">Delete Project</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal" id="delete-modal" aria-hidden="true">
+          <div class="modal-card">
+            <h3>Are you sure?</h3>
+            <p class="muted">This cannot be undone. To delete type <strong>delete me</strong> below.</p>
+              <form method="post" action="/projects/{project.id}/delete" onsubmit="return validateDelete()">
+                <input type="text" name="confirm" id="delete-confirm" placeholder="delete me" required />
+                <div class="checkbox-row">
+                  <input type="checkbox" name="delete_slack" />
+                  <label>Delete Slack channel too</label>
+                </div>
+                <div class="modal-actions">
+                  <button type="button" class="ghost" onclick="closeDeleteModal()">Cancel</button>
+                  <button type="submit" class="danger">Permanently delete project</button>
+                </div>
+              </form>
+          </div>
+        </div>
+        <script>
+          function openDeleteModal() {{
+            document.getElementById('delete-modal').classList.add('open');
+          }}
+          function closeDeleteModal() {{
+            document.getElementById('delete-modal').classList.remove('open');
+          }}
+          function validateDelete() {{
+            var value = document.getElementById('delete-confirm').value.trim().toLowerCase();
+            if (value !== 'delete me') {{
+              alert('Type \"delete me\" to confirm.');
+              return false;
+            }}
+            return true;
+          }}
+        </script>
+        """
+        return _render_page("Edit Project", body)
+
+    @app.post("/projects/{project_id}")
+    async def update_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        project = database.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        slug = str(form.get("slug", "")).strip()
+        channel_id = str(form.get("slack_channel_id", "")).strip() or None
+        if not name or not slug:
+            raise HTTPException(status_code=400, detail="Missing name or slug")
+        database.update_project(project_id, name=name, slug=slug, slack_channel_id=channel_id)
+        _update_slack_channel_filter(database)
+        return RedirectResponse("/ui", status_code=303)
+
+    @app.post("/projects/{project_id}/delete")
+    async def delete_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        confirm = str(form.get("confirm", "")).strip().lower()
+        delete_slack = form.get("delete_slack") == "on"
+        if confirm != "delete me":
+            raise HTTPException(status_code=400, detail="Confirmation text mismatch")
+        if delete_slack:
+            project = database.get_project(project_id)
+            if project and project.slack_channel_id:
+                client = _slack_client(database)
+                try:
+                    client.conversations_archive(channel=project.slack_channel_id)
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Slack channel delete failed: {exc}",
+                    ) from exc
+        database.delete_project(project_id)
+        _update_slack_channel_filter(database)
+        return RedirectResponse("/ui?saved=project_deleted", status_code=303)
+
+    @app.post("/tickets")
+    async def create_ticket(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        title = str(form.get("title", "")).strip()
+        description = str(form.get("description", "")).strip() or None
+        assigned_to = str(form.get("assigned_to", "")).strip() or None
+        estimate = str(form.get("estimate", "")).strip() or None
+        status = str(form.get("status", "open")).strip() or "open"
+        if not project_id or not title:
+            raise HTTPException(status_code=400, detail="Missing project or title")
+        database.insert_ticket(
+            ticket_id=str(uuid.uuid4()),
+            project_id=project_id,
+            title=title,
+            description=description,
+            assigned_to=assigned_to,
+            estimate=estimate,
+            status=status,
         )
-        database.upsert_credential(
-            cred_id=f"{SLACK_PROVIDER}:{SLACK_APP_TOKEN_NAME}",
-            name=SLACK_APP_TOKEN_NAME,
-            provider=SLACK_PROVIDER,
-            reference=app_token,
+        return RedirectResponse("/ui", status_code=303)
+
+    @app.post("/vms")
+    async def create_vm(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        host = str(form.get("host", "")).strip()
+        user_name = str(form.get("user", "")).strip()
+        port = int(form.get("port", 22))
+        if not name or not host or not user_name:
+            raise HTTPException(status_code=400, detail="Missing VM fields")
+        database.insert_vm_target(str(uuid.uuid4()), name, host, user_name, port)
+        return RedirectResponse("/ui", status_code=303)
+
+    @app.post("/agents")
+    async def create_agent(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        slug = str(form.get("slug", "")).strip()
+        command = str(form.get("command", "")).strip()
+        ssh_options = str(form.get("required_ssh_options", "")).strip() or None
+        if not name or not slug or not command:
+            raise HTTPException(status_code=400, detail="Missing agent fields")
+        database.insert_agent(str(uuid.uuid4()), name, slug, command, ssh_options)
+        return RedirectResponse("/ui", status_code=303)
+
+    @app.post("/project_vms")
+    async def create_project_vm(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        vm_target_id = str(form.get("vm_target_id", "")).strip()
+        repo_mode = str(form.get("repo_mode", "mirror")).strip()
+        repo_path = str(form.get("repo_path", "")).strip() or None
+        repo_url = str(form.get("repo_url", "")).strip() or None
+        if not project_id or not vm_target_id:
+            raise HTTPException(status_code=400, detail="Missing project or VM")
+        database.insert_project_vm(
+            project_vm_id=str(uuid.uuid4()),
+            project_id=project_id,
+            vm_target_id=vm_target_id,
+            repo_mode=repo_mode,
+            repo_path=repo_path,
+            repo_url=repo_url,
         )
         return RedirectResponse("/ui", status_code=303)
 
@@ -552,12 +931,64 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
         status = database.get_supervisor_state()
         work_items = database.fetch_ready_work_items(utc_now())
+        projects = database.list_projects()
+        vm_targets = database.list_vm_targets()
+        agents = database.list_agents()
+        project_vms = database.list_project_vms()
+        sessions = database.list_sessions()
         slack_source = database.get_task_source("slack")
         slack_config = slack_source.config if slack_source else {}
         slack_channels = ", ".join(slack_config.get("channels", []))
         slack_bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
         slack_app = database.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
+        slack_admin = database.get_credential_by_name(SLACK_PROVIDER, "admin_user_id")
+        project_options = "".join(
+            f"<option value=\"{project.id}\">{project.name}</option>" for project in projects
+        )
+        vm_options = "".join(
+            f"<option value=\"{vm.id}\">{vm.name} ({vm.host})</option>" for vm in vm_targets
+        )
+        project_list = "".join(
+            f"<li><a href=\"/ui/projects/{project.id}/edit\">{project.name}</a> ({project.slug})</li>"
+            for project in projects[:10]
+        )
+        session_list = "".join(
+            f"<li>{session.id} [{session.status}]</li>" for session in sessions[:10]
+        )
+        saved = request.query_params.get("saved")
+        growl = ""
+        if saved == "slack":
+            growl = (
+                "<div class=\"growl\"><div class=\"growl-pill\">"
+                "Saved Slack token data"
+                "</div></div>"
+            )
+            growl += (
+                "<script>"
+                "setTimeout(function(){"
+                "var url=new URL(window.location.href);"
+                "url.searchParams.delete('saved');"
+                "window.history.replaceState({}, '', url.toString());"
+                "}, 3200);"
+                "</script>"
+            )
+        if saved == "project_deleted":
+            growl = (
+                "<div class=\"growl\"><div class=\"growl-pill\">"
+                "Deletion of project successful"
+                "</div></div>"
+            )
+            growl += (
+                "<script>"
+                "setTimeout(function(){"
+                "var url=new URL(window.location.href);"
+                "url.searchParams.delete('saved');"
+                "window.history.replaceState({}, '', url.toString());"
+                "}, 3200);"
+                "</script>"
+            )
         body = f"""
+        {growl}
         <div class="panel">
           <p class="muted">Signed in as <strong>{user}</strong>. <a href="/logout">Logout</a></p>
           <div class="grid">
@@ -581,12 +1012,15 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 <h3>Slack Tokens</h3>
                 <p>Bot token: {"configured" if slack_bot else "missing"}</p>
                 <p>App token: {"configured" if slack_app else "missing"}</p>
+                <p>Admin user: {"configured" if slack_admin else "missing"}</p>
                 <form method="post" action="/slack/credentials">
                   <label>Bot Token (xoxb-...)</label>
-                  <input type="password" name="bot_token" required />
+                  <input type="password" name="bot_token" placeholder="leave blank to keep existing" />
                   <label>App Token (xapp-...)</label>
-                  <input type="password" name="app_token" required />
-                  <button type="submit">Save Tokens</button>
+                  <input type="password" name="app_token" placeholder="leave blank to keep existing" />
+                  <label>Slack User ID to Auto-Invite (U...)</label>
+                  <input type="text" name="admin_user_id" placeholder="U0123456789" />
+                  <button type="submit">Save Slack Settings</button>
                 </form>
               </div>
               <div class="tile">
@@ -598,15 +1032,189 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                   </div>
                   <label>Poll Interval (seconds)</label>
                   <input type="number" name="poll_interval_seconds" min="1" value="{slack_source.poll_interval_seconds if slack_source else 2}" />
-                  <label>Channels (comma-separated IDs)</label>
-                  <input type="text" name="channels" value="{slack_channels}" />
+                <label>Channels (auto-managed)</label>
+                <input type="text" name="channels" value="{slack_channels}" readonly />
                   <button type="submit">Update Slack Source</button>
                 </form>
+              </div>
+            </div>
+            <div class="group">
+              <p class="group-title">Projects</p>
+              <div class="tile">
+                <h3>Create Project</h3>
+                <form method="post" action="/projects">
+                  <label>Name</label>
+                  <input type="text" name="name" required />
+                  <label>Slug (optional)</label>
+                  <input type="text" name="slug" placeholder="proj-name" />
+                  <label>Slack Channel ID (optional)</label>
+                  <input type="text" name="slack_channel_id" placeholder="C0123456789" />
+                  <button type="submit">Create Project</button>
+                </form>
+                <p class="muted">Creates a public Slack channel (requires channels:manage) or use a channel ID.</p>
+              </div>
+              <div class="tile">
+                <h3>Projects</h3>
+                <ul>
+                  {project_list}
+                </ul>
+              </div>
+            </div>
+            <div class="group">
+              <p class="group-title">VM Targets</p>
+              <div class="tile">
+                <h3>Add VM</h3>
+                <form method="post" action="/vms">
+                  <label>Name</label>
+                  <input type="text" name="name" required />
+                  <label>Host</label>
+                  <input type="text" name="host" required />
+                  <label>User</label>
+                  <input type="text" name="user" required />
+                  <label>Port</label>
+                  <input type="number" name="port" value="22" />
+                  <button type="submit">Add VM</button>
+                </form>
+              </div>
+              <div class="tile">
+                <h3>VM Targets</h3>
+                <ul>
+                  {''.join(f"<li>{vm.name} ({vm.host})</li>" for vm in vm_targets[:10])}
+                </ul>
+              </div>
+            </div>
+            <div class="group">
+              <p class="group-title">Agents</p>
+              <div class="tile">
+                <h3>Add Agent</h3>
+                <form method="post" action="/agents">
+                  <label>Name</label>
+                  <input type="text" name="name" required />
+                  <label>Slug</label>
+                  <input type="text" name="slug" required />
+                  <label>Command</label>
+                  <input type="text" name="command" required />
+                  <label>Required SSH Options</label>
+                  <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
+                  <button type="submit">Add Agent</button>
+                </form>
+              </div>
+              <div class="tile">
+                <h3>Agents</h3>
+                <ul>
+                  {''.join(f"<li>{agent.name} ({agent.slug})</li>" for agent in agents[:10])}
+                </ul>
+              </div>
+            </div>
+            <div class="group">
+              <p class="group-title">Project VM Mapping</p>
+              <div class="tile">
+                <h3>Attach VM</h3>
+                <form method="post" action="/project_vms">
+                  <label>Project</label>
+                  <select name="project_id" required>
+                    {project_options}
+                  </select>
+                  <label>VM Target</label>
+                  <select name="vm_target_id" required>
+                    {vm_options}
+                  </select>
+                  <label>Repo Mode</label>
+                  <select name="repo_mode">
+                    <option value="mirror">mirror</option>
+                    <option value="clone">clone</option>
+                  </select>
+                  <label>Repo Path</label>
+                  <input type="text" name="repo_path" />
+                  <label>Repo URL (clone mode)</label>
+                  <input type="text" name="repo_url" />
+                  <button type="submit">Attach VM</button>
+                </form>
+              </div>
+              <div class="tile">
+                <h3>Mappings</h3>
+                <ul>
+                  {''.join(f"<li>{mapping.project_id} → {mapping.vm_target_id} ({mapping.repo_mode})</li>" for mapping in project_vms[:10])}
+                </ul>
+              </div>
+            </div>
+            <div class="group">
+              <p class="group-title">Sessions</p>
+              <div class="tile">
+                <h3>Recent Sessions</h3>
+                <ul>
+                  {session_list}
+                </ul>
+                <p class="muted">Start from Slack: <code>start projectslug agentslug</code></p>
+              </div>
+              <div class="tile">
+                <h3>Active Agents</h3>
+                <p>Available: {len(agents)}</p>
+                <p>VM Targets: {len(vm_targets)}</p>
               </div>
             </div>
           </div>
         </div>
         """
         return _render_page("Admin", body)
+
+    @app.get("/ui/tickets", response_class=HTMLResponse)
+    def tickets_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        tickets = database.list_tickets()
+        ticket_list = "".join(
+            f"<li>{ticket.title} [{ticket.status}]</li>" for ticket in tickets[:50]
+        )
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Tickets</h3>
+              <p class="muted">All current tickets.</p>
+              <a href="/ui/tickets/create">Create Ticket</a>
+            </div>
+            <div class="tile">
+              <h3>Ticket List</h3>
+              <ul>
+                {ticket_list}
+              </ul>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Tickets", body)
+
+    @app.get("/ui/tickets/create", response_class=HTMLResponse)
+    def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        projects = database.list_projects()
+        project_options = "".join(
+            f"<option value=\"{project.id}\">{project.name}</option>" for project in projects
+        )
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Create Ticket</h3>
+              <form method="post" action="/tickets">
+                <label>Project</label>
+                <select name="project_id" required>
+                  {project_options}
+                </select>
+                <label>Title</label>
+                <input type="text" name="title" required />
+                <label>Description</label>
+                <input type="text" name="description" />
+                <label>Assigned To</label>
+                <input type="text" name="assigned_to" />
+                <label>Estimate</label>
+                <input type="text" name="estimate" />
+                <label>Status</label>
+                <input type="text" name="status" value="open" />
+                <button type="submit">Create Ticket</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Create Ticket", body)
 
     return app
