@@ -827,6 +827,10 @@ class Database:
                 row.status = status
             row.updated_at = utc_now()
 
+    def delete_ticket(self, ticket_id: str) -> None:
+        with self.session() as session:
+            session.query(TicketModel).filter(TicketModel.id == ticket_id).delete()
+
     def list_vm_targets(self) -> list[VMTargetRecord]:
         with self.session() as session:
             rows = session.execute(select(VMTargetModel).order_by(VMTargetModel.name)).scalars().all()
@@ -880,6 +884,10 @@ class Database:
             if port is not None:
                 row.port = port
             row.updated_at = utc_now()
+
+    def delete_vm_target(self, vm_id: str) -> None:
+        with self.session() as session:
+            session.query(VMTargetModel).filter(VMTargetModel.id == vm_id).delete()
 
     def get_vm_target(self, vm_id: str) -> Optional[VMTargetRecord]:
         with self.session() as session:
@@ -944,6 +952,8 @@ class Database:
         self,
         project_vm_id: str,
         *,
+        project_id: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
         repo_mode: Optional[str] = None,
         repo_path: Optional[str] = None,
         repo_url: Optional[str] = None,
@@ -952,6 +962,10 @@ class Database:
             row = session.get(ProjectVMModel, project_vm_id)
             if not row:
                 return
+            if project_id is not None:
+                row.project_id = project_id
+            if vm_target_id is not None:
+                row.vm_target_id = vm_target_id
             if repo_mode is not None:
                 row.repo_mode = repo_mode
             if repo_path is not None:
@@ -959,6 +973,10 @@ class Database:
             if repo_url is not None:
                 row.repo_url = repo_url
             row.updated_at = utc_now()
+
+    def delete_project_vm(self, project_vm_id: str) -> None:
+        with self.session() as session:
+            session.query(ProjectVMModel).filter(ProjectVMModel.id == project_vm_id).delete()
 
     def get_project_vm(self, project_vm_id: str) -> Optional[ProjectVMRecord]:
         with self.session() as session:
@@ -1056,6 +1074,10 @@ class Database:
             if required_ssh_options is not None:
                 row.required_ssh_options = required_ssh_options
             row.updated_at = utc_now()
+
+    def delete_agent(self, agent_id: str) -> None:
+        with self.session() as session:
+            session.query(AgentModel).filter(AgentModel.id == agent_id).delete()
 
     def get_agent(self, agent_id: str) -> Optional[AgentRecord]:
         with self.session() as session:

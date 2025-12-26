@@ -13,6 +13,7 @@ Foreman is a local, persistent “work supervisor” that runs an async priority
 - **Ticket**: lightweight work item tracking (title, status, estimate, assigned).
 - **Agent**: CLI agent definition (command + required SSH options).
 - **AgentSession**: persistent SSH+screen session for an agent working on a project VM.
+- **Project VM Mapping**: link between a Project and a VM target with repo mode settings.
 
 ## Interfaces (contract-first)
 ### TaskSource
@@ -64,6 +65,7 @@ The web admin console provides:
 - Logs: tail view (structured JSON logs preferred).
 - Projects, Tickets, VM targets, Agents, and Project VM mappings.
 - Slack channel per project; Slack command `start <projectslug> <agentslug>` to launch sessions.
+- Project VM mapping edit page with repo mode/path/url controls.
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.
@@ -75,6 +77,7 @@ The web admin console provides:
 Foreman uses the OpenAI-compatible Chat Completions API:
 - Default: `base_url=http://localhost:11434/v1` (Ollama), `api_key=ollama`
 - Models are configurable per TaskSource or globally (e.g., fast model for triage, stronger model for coding).
+- OpenWebUI-compatible API is supported via `WINTERMUTE_BASE_URL` + `WINTERMUTE_API_KEY`.
 
 ## Repository layout (recommended)
 - `wintermute/supervisor.py` — scheduler, heap, polling, preemption, persistence
@@ -83,6 +86,7 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - `wintermute/tools/` — tool definitions + permission gating
 - `wintermute/web/` — FastAPI app + UI
 - `wintermute/db.py` — SQLite ORM models/migrations
+- `wintermute/runner.py` — SSH + screen session runner for agent sessions
 - `tests/` — unit + integration tests with mocked endpoints
 - `alembic/` + `alembic.ini` — SQLAlchemy migrations
 - `setup.sh`, `run_web.sh`, `run_supervisor.sh` — local setup and runners
@@ -95,7 +99,7 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 
 ## Minimal local run (dev)
 Run setup:
-- `./setup.sh` (creates `.venv`, installs deps, creates `.env`, tests API, runs migrations)
+- `./setup.sh` (first run creates `.venv` and `.env`, second run tests API and runs migrations)
 Then run:
 - `./run_web.sh` (admin console)
 - `./run_supervisor.sh` (supervisor loop)

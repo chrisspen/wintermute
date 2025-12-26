@@ -128,6 +128,40 @@ def _find_channel_id(client: WebClient, channel_name: str) -> Optional[str]:
     return None
 
 
+def _growl(saved: Optional[str]) -> str:
+    messages = {
+        "slack": "Saved Slack token data",
+        "project_created": "Project created",
+        "project_updated": "Project updated",
+        "project_deleted": "Deletion of project successful",
+        "ticket_created": "Ticket created",
+        "ticket_deleted": "Ticket deleted",
+        "vm_created": "VM target created",
+        "vm_updated": "VM target updated",
+        "vm_deleted": "VM target deleted",
+        "agent_created": "Agent created",
+        "agent_updated": "Agent updated",
+        "agent_deleted": "Agent deleted",
+        "mapping_created": "Project mapping created",
+        "mapping_updated": "Project mapping updated",
+        "mapping_deleted": "Project mapping deleted",
+    }
+    if not saved or saved not in messages:
+        return ""
+    return (
+        "<div class=\"growl\"><div class=\"growl-pill\">"
+        f"{messages[saved]}"
+        "</div></div>"
+        "<script>"
+        "setTimeout(function(){"
+        "var url=new URL(window.location.href);"
+        "url.searchParams.delete('saved');"
+        "window.history.replaceState({}, '', url.toString());"
+        "}, 3200);"
+        "</script>"
+    )
+
+
 def _render_page(title: str, body: str) -> HTMLResponse:
     html = f"""<!doctype html>
 <html lang="en">
@@ -232,6 +266,26 @@ def _render_page(title: str, body: str) -> HTMLResponse:
       .checkbox-row label {{
         margin: 0;
       }}
+      .inline-field {{
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }}
+      .inline-field select {{
+        flex: 1;
+        margin-bottom: 0;
+      }}
+      .inline-link {{
+        align-self: center;
+        color: var(--accent-dark);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        display: flex;
+        align-items: center;
+        height: 44px;
+      }}
       button {{
         background: #1f8a3b;
         color: #ecfff0;
@@ -328,6 +382,7 @@ def _render_page(title: str, body: str) -> HTMLResponse:
         gap: 16px;
         align-items: center;
         margin-top: 16px;
+        flex-wrap: wrap;
       }}
       .nav a {{
         text-decoration: none;
@@ -379,7 +434,11 @@ def _render_page(title: str, body: str) -> HTMLResponse:
           <p class="subtitle">Supervisory control room</p>
           <div class="nav">
             <a href="/ui">Home</a>
+            <a href="/ui/projects">Projects</a>
             <a href="/ui/tickets">Tickets</a>
+            <a href="/ui/vms">VMs</a>
+            <a href="/ui/agents">Agents</a>
+            <a href="/ui/project-vms">Mappings</a>
           </div>
         </div>
         <span class="badge">Local</span>
@@ -608,6 +667,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         name = str(form.get("name", "")).strip()
         slug_raw = str(form.get("slug", "")).strip()
+        return_to = str(form.get("return_to", "/ui/projects")).strip() or "/ui/projects"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/projects"
         if not name:
             raise HTTPException(status_code=400, detail="Missing project name")
         slug = slug_raw or f"proj-{_slugify(name)}"
@@ -666,7 +728,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         project_id = str(uuid.uuid4())
         database.insert_project(project_id, name, slug, channel_id)
         _update_slack_channel_filter(database)
-        return RedirectResponse("/ui", status_code=303)
+        return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
 
     @app.get("/ui/projects/{project_id}/edit", response_class=HTMLResponse)
     def edit_project_ui(project_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
@@ -740,7 +802,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Missing name or slug")
         database.update_project(project_id, name=name, slug=slug, slack_channel_id=channel_id)
         _update_slack_channel_filter(database)
-        return RedirectResponse("/ui", status_code=303)
+        return RedirectResponse("/ui/projects?saved=project_updated", status_code=303)
 
     @app.post("/projects/{project_id}/delete")
     async def delete_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -762,7 +824,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     ) from exc
         database.delete_project(project_id)
         _update_slack_channel_filter(database)
-        return RedirectResponse("/ui?saved=project_deleted", status_code=303)
+        return RedirectResponse("/ui/projects?saved=project_deleted", status_code=303)
 
     @app.post("/tickets")
     async def create_ticket(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -773,6 +835,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         assigned_to = str(form.get("assigned_to", "")).strip() or None
         estimate = str(form.get("estimate", "")).strip() or None
         status = str(form.get("status", "open")).strip() or "open"
+        return_to = str(form.get("return_to", "/ui/tickets")).strip() or "/ui/tickets"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/tickets"
         if not project_id or not title:
             raise HTTPException(status_code=400, detail="Missing project or title")
         database.insert_ticket(
@@ -784,7 +849,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             estimate=estimate,
             status=status,
         )
-        return RedirectResponse("/ui", status_code=303)
+        return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
+
+    @app.post("/tickets/{ticket_id}/delete")
+    async def delete_ticket(ticket_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_ticket(ticket_id)
+        return RedirectResponse("/ui/tickets?saved=ticket_deleted", status_code=303)
 
     @app.post("/vms")
     async def create_vm(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -793,10 +863,57 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         host = str(form.get("host", "")).strip()
         user_name = str(form.get("user", "")).strip()
         port = int(form.get("port", 22))
+        return_to = str(form.get("return_to", "/ui/vms")).strip() or "/ui/vms"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/vms"
         if not name or not host or not user_name:
             raise HTTPException(status_code=400, detail="Missing VM fields")
         database.insert_vm_target(str(uuid.uuid4()), name, host, user_name, port)
-        return RedirectResponse("/ui", status_code=303)
+        return RedirectResponse(f"{return_to}?saved=vm_created", status_code=303)
+
+    @app.get("/ui/vms/{vm_id}/edit", response_class=HTMLResponse)
+    def edit_vm_ui(vm_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+        vm = database.get_vm_target(vm_id)
+        if not vm:
+            raise HTTPException(status_code=404, detail="VM not found")
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Edit VM</h3>
+              <form method="post" action="/vms/{vm.id}/edit">
+                <label>Name</label>
+                <input type="text" name="name" value="{vm.name}" required />
+                <label>Host</label>
+                <input type="text" name="host" value="{vm.host}" required />
+                <label>User</label>
+                <input type="text" name="user" value="{vm.user}" required />
+                <label>Port</label>
+                <input type="number" name="port" value="{vm.port}" />
+                <button type="submit">Save VM</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Edit VM", body)
+
+    @app.post("/vms/{vm_id}/edit")
+    async def update_vm(vm_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        host = str(form.get("host", "")).strip()
+        user_name = str(form.get("user", "")).strip()
+        port = int(form.get("port", 22))
+        if not name or not host or not user_name:
+            raise HTTPException(status_code=400, detail="Missing VM fields")
+        database.update_vm_target(vm_id, name=name, host=host, user=user_name, port=port)
+        return RedirectResponse("/ui/vms?saved=vm_updated", status_code=303)
+
+    @app.post("/vms/{vm_id}/delete")
+    async def delete_vm(vm_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_vm_target(vm_id)
+        return RedirectResponse("/ui/vms?saved=vm_deleted", status_code=303)
 
     @app.post("/agents")
     async def create_agent(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -805,10 +922,57 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slug = str(form.get("slug", "")).strip()
         command = str(form.get("command", "")).strip()
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
+        return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/agents"
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
         database.insert_agent(str(uuid.uuid4()), name, slug, command, ssh_options)
-        return RedirectResponse("/ui", status_code=303)
+        return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
+
+    @app.get("/ui/agents/{agent_id}/edit", response_class=HTMLResponse)
+    def edit_agent_ui(agent_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Edit Agent</h3>
+              <form method="post" action="/agents/{agent.id}/edit">
+                <label>Name</label>
+                <input type="text" name="name" value="{agent.name}" required />
+                <label>Slug</label>
+                <input type="text" name="slug" value="{agent.slug}" required />
+                <label>Command</label>
+                <input type="text" name="command" value="{agent.command}" required />
+                <label>Required SSH Options</label>
+                <input type="text" name="required_ssh_options" value="{agent.required_ssh_options or ''}" />
+                <button type="submit">Save Agent</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Edit Agent", body)
+
+    @app.post("/agents/{agent_id}/edit")
+    async def update_agent(agent_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        slug = str(form.get("slug", "")).strip()
+        command = str(form.get("command", "")).strip()
+        ssh_options = str(form.get("required_ssh_options", "")).strip() or None
+        if not name or not slug or not command:
+            raise HTTPException(status_code=400, detail="Missing agent fields")
+        database.update_agent(agent_id, name=name, slug=slug, command=command, required_ssh_options=ssh_options)
+        return RedirectResponse("/ui/agents?saved=agent_updated", status_code=303)
+
+    @app.post("/agents/{agent_id}/delete")
+    async def delete_agent(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_agent(agent_id)
+        return RedirectResponse("/ui/agents?saved=agent_deleted", status_code=303)
 
     @app.post("/project_vms")
     async def create_project_vm(
@@ -820,6 +984,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         repo_mode = str(form.get("repo_mode", "mirror")).strip()
         repo_path = str(form.get("repo_path", "")).strip() or None
         repo_url = str(form.get("repo_url", "")).strip() or None
+        return_to = str(form.get("return_to", "/ui/project-vms")).strip() or "/ui/project-vms"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/project-vms"
         if not project_id or not vm_target_id:
             raise HTTPException(status_code=400, detail="Missing project or VM")
         database.insert_project_vm(
@@ -830,7 +997,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             repo_path=repo_path,
             repo_url=repo_url,
         )
-        return RedirectResponse("/ui", status_code=303)
+        return RedirectResponse(f"{return_to}?saved=mapping_created", status_code=303)
+
+    @app.post("/project_vms/{mapping_id}/delete")
+    async def delete_project_vm(mapping_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_project_vm(mapping_id)
+        return RedirectResponse("/ui/project-vms?saved=mapping_deleted", status_code=303)
 
     @app.get("/logs/tail")
     def tail_logs(
@@ -948,6 +1120,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         vm_options = "".join(
             f"<option value=\"{vm.id}\">{vm.name} ({vm.host})</option>" for vm in vm_targets
         )
+        project_lookup = {project.id: project.name for project in projects}
+        vm_lookup = {vm.id: vm.name for vm in vm_targets}
         project_list = "".join(
             f"<li><a href=\"/ui/projects/{project.id}/edit\">{project.name}</a> ({project.slug})</li>"
             for project in projects[:10]
@@ -955,38 +1129,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         session_list = "".join(
             f"<li>{session.id} [{session.status}]</li>" for session in sessions[:10]
         )
-        saved = request.query_params.get("saved")
-        growl = ""
-        if saved == "slack":
-            growl = (
-                "<div class=\"growl\"><div class=\"growl-pill\">"
-                "Saved Slack token data"
-                "</div></div>"
-            )
-            growl += (
-                "<script>"
-                "setTimeout(function(){"
-                "var url=new URL(window.location.href);"
-                "url.searchParams.delete('saved');"
-                "window.history.replaceState({}, '', url.toString());"
-                "}, 3200);"
-                "</script>"
-            )
-        if saved == "project_deleted":
-            growl = (
-                "<div class=\"growl\"><div class=\"growl-pill\">"
-                "Deletion of project successful"
-                "</div></div>"
-            )
-            growl += (
-                "<script>"
-                "setTimeout(function(){"
-                "var url=new URL(window.location.href);"
-                "url.searchParams.delete('saved');"
-                "window.history.replaceState({}, '', url.toString());"
-                "}, 3200);"
-                "</script>"
-            )
+        growl = _growl(request.query_params.get("saved"))
         body = f"""
         {growl}
         <div class="panel">
@@ -1043,6 +1186,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               <div class="tile">
                 <h3>Create Project</h3>
                 <form method="post" action="/projects">
+                  <input type="hidden" name="return_to" value="/ui" />
                   <label>Name</label>
                   <input type="text" name="name" required />
                   <label>Slug (optional)</label>
@@ -1065,6 +1209,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               <div class="tile">
                 <h3>Add VM</h3>
                 <form method="post" action="/vms">
+                  <input type="hidden" name="return_to" value="/ui" />
                   <label>Name</label>
                   <input type="text" name="name" required />
                   <label>Host</label>
@@ -1079,7 +1224,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               <div class="tile">
                 <h3>VM Targets</h3>
                 <ul>
-                  {''.join(f"<li>{vm.name} ({vm.host})</li>" for vm in vm_targets[:10])}
+                  {''.join(f"<li><a href='/ui/vms/{vm.id}/edit'>{vm.name}</a> ({vm.host})</li>" for vm in vm_targets[:10])}
                 </ul>
               </div>
             </div>
@@ -1088,6 +1233,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               <div class="tile">
                 <h3>Add Agent</h3>
                 <form method="post" action="/agents">
+                  <input type="hidden" name="return_to" value="/ui" />
                   <label>Name</label>
                   <input type="text" name="name" required />
                   <label>Slug</label>
@@ -1102,7 +1248,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               <div class="tile">
                 <h3>Agents</h3>
                 <ul>
-                  {''.join(f"<li>{agent.name} ({agent.slug})</li>" for agent in agents[:10])}
+                  {''.join(f"<li><a href='/ui/agents/{agent.id}/edit'>{agent.name}</a> ({agent.slug})</li>" for agent in agents[:10])}
                 </ul>
               </div>
             </div>
@@ -1111,6 +1257,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               <div class="tile">
                 <h3>Attach VM</h3>
                 <form method="post" action="/project_vms">
+                  <input type="hidden" name="return_to" value="/ui" />
                   <label>Project</label>
                   <select name="project_id" required>
                     {project_options}
@@ -1134,7 +1281,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               <div class="tile">
                 <h3>Mappings</h3>
                 <ul>
-                  {''.join(f"<li>{mapping.project_id} → {mapping.vm_target_id} ({mapping.repo_mode})</li>" for mapping in project_vms[:10])}
+                  {''.join(
+                    f"<li><a href='/ui/project-vms/{mapping.id}/edit'>{project_lookup.get(mapping.project_id, mapping.project_id)} → {vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id)}</a> ({mapping.repo_mode})</li>"
+                    for mapping in project_vms[:10]
+                  )}
                 </ul>
               </div>
             </div>
@@ -1158,14 +1308,320 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         """
         return _render_page("Admin", body)
 
+    @app.get("/ui/projects", response_class=HTMLResponse)
+    def projects_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        projects = database.list_projects()
+        project_list = "".join(
+            f"<li><a href='/ui/projects/{project.id}/edit'>{project.name}</a> ({project.slug})"
+            f"<form method='post' action='/projects/{project.id}/delete' style='display:inline; margin-left:8px;'>"
+            "<input type='hidden' name='confirm' value='delete me' />"
+            "<button type='submit' class='danger'>Delete</button>"
+            "</form></li>"
+            for project in projects
+        )
+        body = f"""
+        <div class="panel">
+          {_growl(request.query_params.get('saved'))}
+          <div class="grid">
+            <div class="tile">
+              <h3>Projects</h3>
+              <a href="/ui/projects/create">Create Project</a>
+            </div>
+            <div class="tile">
+              <h3>Project List</h3>
+              <ul>{project_list}</ul>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Projects", body)
+
+    @app.get("/ui/projects/create", response_class=HTMLResponse)
+    def projects_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        body = """
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Create Project</h3>
+              <form method="post" action="/projects">
+                <input type="hidden" name="return_to" value="/ui/projects" />
+                <label>Name</label>
+                <input type="text" name="name" required />
+                <label>Slug (optional)</label>
+                <input type="text" name="slug" placeholder="proj-name" />
+                <label>Slack Channel ID (optional)</label>
+                <input type="text" name="slack_channel_id" placeholder="C0123456789" />
+                <button type="submit">Create Project</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Create Project", body)
+
+    @app.get("/ui/vms", response_class=HTMLResponse)
+    def vms_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        vm_targets = database.list_vm_targets()
+        vm_list = "".join(
+            f"<li><a href='/ui/vms/{vm.id}/edit'>{vm.name}</a> ({vm.host})"
+            f"<form method='post' action='/vms/{vm.id}/delete' style='display:inline; margin-left:8px;'>"
+            "<button type='submit' class='danger'>Delete</button>"
+            "</form></li>"
+            for vm in vm_targets
+        )
+        body = f"""
+        <div class="panel">
+          {_growl(request.query_params.get('saved'))}
+          <div class="grid">
+            <div class="tile">
+              <h3>VM Targets</h3>
+              <a href="/ui/vms/create">Add VM</a>
+            </div>
+            <div class="tile">
+              <h3>VM List</h3>
+              <ul>{vm_list}</ul>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("VM Targets", body)
+
+    @app.get("/ui/vms/create", response_class=HTMLResponse)
+    def vms_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        body = """
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Add VM</h3>
+              <form method="post" action="/vms">
+                <input type="hidden" name="return_to" value="/ui/vms" />
+                <label>Name</label>
+                <input type="text" name="name" required />
+                <label>Host</label>
+                <input type="text" name="host" required />
+                <label>User</label>
+                <input type="text" name="user" required />
+                <label>Port</label>
+                <input type="number" name="port" value="22" />
+                <button type="submit">Add VM</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Add VM", body)
+
+    @app.get("/ui/agents", response_class=HTMLResponse)
+    def agents_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        agents = database.list_agents()
+        agent_list = "".join(
+            f"<li><a href='/ui/agents/{agent.id}/edit'>{agent.name}</a> ({agent.slug})"
+            f"<form method='post' action='/agents/{agent.id}/delete' style='display:inline; margin-left:8px;'>"
+            "<button type='submit' class='danger'>Delete</button>"
+            "</form></li>"
+            for agent in agents
+        )
+        body = f"""
+        <div class="panel">
+          {_growl(request.query_params.get('saved'))}
+          <div class="grid">
+            <div class="tile">
+              <h3>Agents</h3>
+              <a href="/ui/agents/create">Add Agent</a>
+            </div>
+            <div class="tile">
+              <h3>Agent List</h3>
+              <ul>{agent_list}</ul>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Agents", body)
+
+    @app.get("/ui/agents/create", response_class=HTMLResponse)
+    def agents_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        body = """
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Add Agent</h3>
+              <form method="post" action="/agents">
+                <input type="hidden" name="return_to" value="/ui/agents" />
+                <label>Name</label>
+                <input type="text" name="name" required />
+                <label>Slug</label>
+                <input type="text" name="slug" required />
+                <label>Command</label>
+                <input type="text" name="command" required />
+                <label>Required SSH Options</label>
+                <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
+                <button type="submit">Add Agent</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Add Agent", body)
+
+    @app.get("/ui/project-vms", response_class=HTMLResponse)
+    def project_vms_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        project_vms = database.list_project_vms()
+        project_lookup = {project.id: project.name for project in database.list_projects()}
+        vm_lookup = {vm.id: vm.name for vm in database.list_vm_targets()}
+        mapping_list = "".join(
+            f"<li><a href='/ui/project-vms/{mapping.id}/edit'>{project_lookup.get(mapping.project_id, mapping.project_id)} "
+            f"→ {vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id)}</a> "
+            f"({mapping.repo_mode})"
+            f"<form method='post' action='/project_vms/{mapping.id}/delete' style='display:inline; margin-left:8px;'>"
+            "<button type='submit' class='danger'>Delete</button>"
+            "</form></li>"
+            for mapping in project_vms
+        )
+        body = f"""
+        <div class="panel">
+          {_growl(request.query_params.get('saved'))}
+          <div class="grid">
+            <div class="tile">
+              <h3>Project VM Mappings</h3>
+              <a href="/ui/project-vms/create">Attach VM</a>
+            </div>
+            <div class="tile">
+              <h3>Mappings</h3>
+              <ul>{mapping_list}</ul>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Mappings", body)
+
+    @app.get("/ui/project-vms/create", response_class=HTMLResponse)
+    def project_vms_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        projects = database.list_projects()
+        vm_targets = database.list_vm_targets()
+        project_options = "".join(
+            f"<option value='{project.id}'>{project.name}</option>" for project in projects
+        )
+        vm_options = "".join(
+            f"<option value='{vm.id}'>{vm.name} ({vm.host})</option>" for vm in vm_targets
+        )
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Attach VM</h3>
+              <form method="post" action="/project_vms">
+                <input type="hidden" name="return_to" value="/ui/project-vms" />
+                <label>Project</label>
+                <select name="project_id" required>
+                  {project_options}
+                </select>
+                <label>VM Target</label>
+                <select name="vm_target_id" required>
+                  {vm_options}
+                </select>
+                <label>Repo Mode</label>
+                <select name="repo_mode">
+                  <option value="mirror">mirror</option>
+                  <option value="clone">clone</option>
+                </select>
+                <label>Repo Path</label>
+                <input type="text" name="repo_path" />
+                <label>Repo URL (clone mode)</label>
+                <input type="text" name="repo_url" />
+                <button type="submit">Attach VM</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Attach VM", body)
+
+    @app.get("/ui/project-vms/{mapping_id}/edit", response_class=HTMLResponse)
+    def project_vms_edit_ui(mapping_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+        mapping = database.get_project_vm(mapping_id)
+        if not mapping:
+            raise HTTPException(status_code=404, detail="Mapping not found")
+        projects = database.list_projects()
+        vm_targets = database.list_vm_targets()
+        project_options = "".join(
+            f"<option value='{project.id}' {'selected' if project.id == mapping.project_id else ''}>{project.name}</option>"
+            for project in projects
+        )
+        vm_options = "".join(
+            f"<option value='{vm.id}' {'selected' if vm.id == mapping.vm_target_id else ''}>{vm.name} ({vm.host})</option>"
+            for vm in vm_targets
+        )
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Edit Mapping</h3>
+              <form method="post" action="/project_vms/{mapping.id}/edit">
+                <label>Project</label>
+                <div class="inline-field">
+                  <select name="project_id" required>
+                    {project_options}
+                  </select>
+                  <a class="inline-link" href="/ui/projects/{mapping.project_id}/edit">Edit project</a>
+                </div>
+                <label>VM Target</label>
+                <div class="inline-field">
+                  <select name="vm_target_id" required>
+                    {vm_options}
+                  </select>
+                  <a class="inline-link" href="/ui/vms/{mapping.vm_target_id}/edit">Edit VM target</a>
+                </div>
+                <label>Repo Mode</label>
+                <select name="repo_mode">
+                  <option value="mirror" {"selected" if mapping.repo_mode == "mirror" else ""}>mirror</option>
+                  <option value="clone" {"selected" if mapping.repo_mode == "clone" else ""}>clone</option>
+                </select>
+                <label>Repo Path</label>
+                <input type="text" name="repo_path" value="{mapping.repo_path or ''}" />
+                <label>Repo URL (clone mode)</label>
+                <input type="text" name="repo_url" value="{mapping.repo_url or ''}" />
+                <button type="submit">Save Mapping</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Edit Mapping", body)
+
+    @app.post("/project_vms/{mapping_id}/edit")
+    async def project_vms_update(
+        mapping_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        vm_target_id = str(form.get("vm_target_id", "")).strip()
+        repo_mode = str(form.get("repo_mode", "mirror")).strip()
+        repo_path = str(form.get("repo_path", "")).strip() or None
+        repo_url = str(form.get("repo_url", "")).strip() or None
+        if not project_id or not vm_target_id:
+            raise HTTPException(status_code=400, detail="Missing project or VM")
+        database.update_project_vm(
+            mapping_id,
+            project_id=project_id,
+            vm_target_id=vm_target_id,
+            repo_mode=repo_mode,
+            repo_path=repo_path,
+            repo_url=repo_url,
+        )
+        return RedirectResponse("/ui/project-vms?saved=mapping_updated", status_code=303)
     @app.get("/ui/tickets", response_class=HTMLResponse)
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
         tickets = database.list_tickets()
         ticket_list = "".join(
-            f"<li>{ticket.title} [{ticket.status}]</li>" for ticket in tickets[:50]
+            f"<li>{ticket.title} [{ticket.status}]"
+            f"<form method='post' action='/tickets/{ticket.id}/delete' style='display:inline; margin-left:8px;'>"
+            "<button type='submit' class='danger'>Delete</button>"
+            "</form></li>"
+            for ticket in tickets[:50]
         )
         body = f"""
         <div class="panel">
+          {_growl(request.query_params.get("saved"))}
           <div class="grid">
             <div class="tile">
               <h3>Tickets</h3>
@@ -1195,6 +1651,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             <div class="tile">
               <h3>Create Ticket</h3>
               <form method="post" action="/tickets">
+                <input type="hidden" name="return_to" value="/ui/tickets" />
                 <label>Project</label>
                 <select name="project_id" required>
                   {project_options}
@@ -1216,5 +1673,4 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         </div>
         """
         return _render_page("Create Ticket", body)
-
     return app
