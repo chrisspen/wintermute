@@ -225,6 +225,21 @@ class Database:
             for row in rows
         ]
 
+    def get_task_source(self, source_id: str) -> Optional[TaskSourceRecord]:
+        with self.session() as session:
+            row = session.get(TaskSourceModel, source_id)
+        if not row:
+            return None
+        return TaskSourceRecord(
+            id=row.id,
+            enabled=bool(row.enabled),
+            base_priority=row.base_priority,
+            poll_interval_seconds=row.poll_interval_seconds,
+            config=json_loads(row.config_json),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
     def insert_work_item_if_absent(
         self,
         work_id: str,
@@ -403,6 +418,56 @@ class Database:
                     created_at=utc_now(),
                 )
             )
+
+    def upsert_credential(self, cred_id: str, name: str, provider: str, reference: str) -> None:
+        with self.session() as session:
+            existing = session.get(CredentialModel, cred_id)
+            if existing is None:
+                session.add(
+                    CredentialModel(
+                        id=cred_id,
+                        name=name,
+                        provider=provider,
+                        reference=reference,
+                        created_at=utc_now(),
+                    )
+                )
+                return
+            existing.name = name
+            existing.provider = provider
+            existing.reference = reference
+
+    def get_credential(self, cred_id: str) -> Optional[CredentialRecord]:
+        with self.session() as session:
+            row = session.get(CredentialModel, cred_id)
+        if not row:
+            return None
+        return CredentialRecord(
+            id=row.id,
+            name=row.name,
+            provider=row.provider,
+            reference=row.reference,
+            created_at=row.created_at,
+        )
+
+    def get_credential_by_name(self, provider: str, name: str) -> Optional[CredentialRecord]:
+        with self.session() as session:
+            row = (
+                session.execute(
+                    select(CredentialModel)
+                    .where(CredentialModel.provider == provider, CredentialModel.name == name)
+                )
+                .scalar_one_or_none()
+            )
+        if not row:
+            return None
+        return CredentialRecord(
+            id=row.id,
+            name=row.name,
+            provider=row.provider,
+            reference=row.reference,
+            created_at=row.created_at,
+        )
 
     def list_users(self) -> list[UserRecord]:
         with self.session() as session:

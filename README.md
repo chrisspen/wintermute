@@ -6,24 +6,28 @@ for next-action decisions.
 
 Quick start
 -----------
-Set env vars:
+Run setup:
 
 ```
-export WINTERMUTE_DB=./wintermute.db
-export WINTERMUTE_BASE_URL=http://localhost:11434/v1
-export WINTERMUTE_API_KEY=ollama
-export WINTERMUTE_WEB_SECRET=change-me
+./setup.sh
 ```
+
+On first run, edit `.env` created from `.env.template`, then rerun `./setup.sh`.
 
 Run:
 
 ```
-alembic upgrade head
-python -m wintermute.web
-python -m wintermute.supervisor
+./run_web.sh
+./run_supervisor.sh
 ```
 
 Open `http://127.0.0.1:8000` and complete the initial admin setup.
+
+Slack setup
+-----------
+- Open the admin UI and add the Slack bot/app tokens under "Slack Tokens".
+- Configure channels and enable the Slack source under "Slack Source".
+- Restart the supervisor after updating Slack tokens so tools load the new credentials.
 
 Migrations
 ----------
@@ -31,9 +35,6 @@ Migrations
 ```
 alembic upgrade head
 ```
-
-For local/dev, `WINTERMUTE_AUTO_MIGRATE=1` (default) will auto-create tables if the
-database is empty.
 
 Tests
 -----

@@ -5,3 +5,5 @@
 .claude
 .venv
 .env
+__pycache__
+wintermute.db

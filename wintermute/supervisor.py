@@ -14,9 +14,11 @@ from wintermute.db import Database, WorkItemRecord, utc_now
 from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext
 from wintermute.sources.demo import DemoSource
+from wintermute.sources.slack import SlackSource, SLACK_BOT_TOKEN_NAME, SLACK_PROVIDER
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
 from wintermute.tools.fs import ReadFileTool
+from wintermute.tools.slack import SlackPostMessageTool
 
 
 def _parse_allowlist(value: str) -> list[str]:
@@ -63,15 +65,19 @@ class Supervisor:
     async def run(self) -> None:
         self.db.initialize()
         self._ensure_task_sources()
-        while not self._stop_event.is_set():
-            await self._poll_sources()
-            self._update_state("polled sources")
-            await self._refresh_queue()
-            self._update_state("refreshed queue")
-            if not self._current_work_id:
-                await self._run_next()
-            self._update_state("idle")
-            await asyncio.sleep(1)
+        try:
+            while not self._stop_event.is_set():
+                await self._poll_sources()
+                self._update_state("polled sources")
+                await self._refresh_queue()
+                self._update_state("refreshed queue")
+                if not self._current_work_id:
+                    await self._run_next()
+                self._update_state("idle")
+                await asyncio.sleep(1)
+        finally:
+            self._stop_event.set()
+            self._update_state("stopped")
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -206,19 +212,24 @@ class Supervisor:
         )
 
 
-def build_default_tools() -> ToolRegistry:
+def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:
     registry = ToolRegistry()
     allowlist = _parse_allowlist(os.environ.get("WINTERMUTE_FS_ALLOWLIST", ""))
     if allowlist:
         registry.register(ReadFileTool(allowlist=allowlist))
+    if db:
+        slack_bot = db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+        if slack_bot:
+            registry.register(SlackPostMessageTool(token=slack_bot.reference))
     return registry
 
 
 async def main() -> None:
     register(DemoSource())
+    register(SlackSource())
     db = Database()
     executor = Executor()
-    tools = build_default_tools()
+    tools = build_default_tools(db)
     supervisor = Supervisor(db=db, sources=all_sources(), executor=executor, tools=tools)
     print(f"Foreman supervisor v{__version__} starting...")
     await supervisor.run()

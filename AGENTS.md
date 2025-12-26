@@ -46,16 +46,18 @@ It must return one of:
 
 ## State & storage
 - **SQLite** is the source of truth for: TaskSources config, WorkItems, checkpoints, run history, and credentials references.
+- **SQLAlchemy ORM** is used for persistence with **Alembic** migrations (see `alembic/` and `alembic.ini`).
 - Checkpoints must be small (<256KB) and JSON-only.
 - Secrets are stored via a pluggable secret backend (env vars by default; optional OS keychain later).
 
 ## Admin console (FastAPI)
-The web admin console must provide:
-- TaskSources CRUD: enable/disable, priority, polling interval, endpoint config
-- Credentials setup (never echo secrets), test-connection actions, and scoped permissions
-- Supervisor status: running/stopped/crashed, uptime, current WorkItem, last action, queue depth
-- WorkItems views: queued/running/failed/done, checkpoint viewer, retry controls, “requeue”, “cancel”
-- Logs: tail view (structured JSON logs preferred)
+The web admin console provides:
+- Session-based admin login (salted password hash stored in SQLite).
+- TaskSources CRUD: enable/disable, priority, polling interval, endpoint config.
+- Credentials setup (never echo secrets), test-connection actions, and scoped permissions.
+- Supervisor status: running/stopped/crashed, uptime, current WorkItem, last action, queue depth.
+- WorkItems views: queued/running/failed/done, checkpoint viewer, retry controls, “requeue”, “cancel”.
+- Logs: tail view (structured JSON logs preferred).
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.
@@ -70,12 +72,14 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 
 ## Repository layout (recommended)
 - `wintermute/supervisor.py` — scheduler, heap, polling, preemption, persistence
-- `wintermute/sources/` — TaskSources (chat, jira, github)
+- `wintermute/sources/` — TaskSources (chat, jira, github, slack)
 - `wintermute/executor.py` — LLM adapter + structured output parsing
 - `wintermute/tools/` — tool definitions + permission gating
 - `wintermute/web/` — FastAPI app + UI
 - `wintermute/db.py` — SQLite models/migrations
 - `tests/` — unit + integration tests with mocked endpoints
+- `alembic/` + `alembic.ini` — SQLAlchemy migrations
+- `setup.sh`, `run_web.sh`, `run_supervisor.sh` — local setup and runners
 
 ## Development norms
 - Keep the scheduler deterministic and testable: no hidden global state.
@@ -84,13 +88,11 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - Add metrics hooks (queue depth, task latency, error rates) early.
 
 ## Minimal local run (dev)
-Set env:
-- `WINTERMUTE_DB=./wintermute.db`
-- `WINTERMUTE_BASE_URL=http://localhost:11434/v1`
-- `WINTERMUTE_API_KEY=ollama`
+Run setup:
+- `./setup.sh` (creates `.venv`, installs deps, creates `.env`, tests API, runs migrations)
 Then run:
-- `python -m wintermute.web` (admin console)
-- `python -m wintermute.supervisor` (supervisor loop)
+- `./run_web.sh` (admin console)
+- `./run_supervisor.sh` (supervisor loop)
 
 ## Definition of done for a TaskSource
 A source is “done” when it can: authenticate, poll, emit deterministic WorkItems, checkpoint, recover after restart, and be controlled via the admin console.

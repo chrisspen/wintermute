@@ -10,7 +10,23 @@ import urllib.error
 import urllib.request
 
 
+def _load_dotenv(path: str = ".env") -> None:
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            raw = line.strip()
+            if not raw or raw.startswith("#") or "=" not in raw:
+                continue
+            key, value = raw.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
 def main() -> int:
+    _load_dotenv()
     base_url = os.environ.get("WINTERMUTE_BASE_URL")
     api_key = os.environ.get("WINTERMUTE_API_KEY")
     if not base_url or not api_key:
