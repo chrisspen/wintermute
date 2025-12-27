@@ -245,6 +245,7 @@ async def main() -> None:
     tools = build_default_tools(db)
     supervisor = Supervisor(db=db, sources=all_sources(), executor=executor, tools=tools)
     print(f"Foreman supervisor v{__version__} starting...")
+    print("Supervisor ready. Polling sources and processing tasks.")
     await supervisor.run()
 
 
