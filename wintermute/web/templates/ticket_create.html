@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Create Ticket</h3>
+      <form method="post" action="/tickets">
+        <input type="hidden" name="return_to" value="{{ return_to }}" />
+        <label>Project</label>
+        <select name="project_id" required>
+          {% for project in projects %}
+          <option value="{{ project.id }}">{{ project.name }}</option>
+          {% endfor %}
+        </select>
+        <label>Title</label>
+        <input type="text" name="title" required />
+        <label>Description</label>
+        <input type="text" name="description" />
+        <label>Assigned To</label>
+        <input type="text" name="assigned_to" />
+        <label>Estimate</label>
+        <input type="text" name="estimate" placeholder="hours or points" />
+        <label>Status</label>
+        <select name="status">
+          <option value="open">open</option>
+          <option value="in-progress">in-progress</option>
+          <option value="needs-feedback">needs-feedback</option>
+          <option value="done">done</option>
+        </select>
+        <button type="submit">Create Ticket</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

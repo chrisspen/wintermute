@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div>
+          <h1>Foreman Admin</h1>
+          <p class="subtitle">Supervisory control room</p>
+          <div class="nav">
+            <a href="/ui" class="{% if active_nav == 'home' %}active{% endif %}">Home</a>
+            <a href="/ui/projects" class="{% if active_nav == 'projects' %}active{% endif %}">Projects</a>
+            <a href="/ui/tickets" class="{% if active_nav == 'tickets' %}active{% endif %}">Tickets</a>
+            <a href="/ui/github-tokens" class="{% if active_nav == 'github_tokens' %}active{% endif %}">GitHub Tokens</a>
+            <a href="/ui/github-sources" class="{% if active_nav == 'github_sources' %}active{% endif %}">GitHub Sources</a>
+            <a href="/ui/vms" class="{% if active_nav == 'vms' %}active{% endif %}">VMs</a>
+            <a href="/ui/agents" class="{% if active_nav == 'agents' %}active{% endif %}">Agents</a>
+            <a href="/ui/project-vms" class="{% if active_nav == 'mappings' %}active{% endif %}">Mappings</a>
+          </div>
+        </div>
+        <span class="badge">Local</span>
+      </header>
+      <main>
+        {% if growl_message %}
+        <div class="growl"><div class="growl-pill">{{ growl_message }}</div></div>
+        <script>
+          setTimeout(function () {
+            var url = new URL(window.location.href);
+            url.searchParams.delete('saved');
+            window.history.replaceState({}, '', url.toString());
+          }, 3200);
+        </script>
+        {% endif %}
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </body>
+</html>

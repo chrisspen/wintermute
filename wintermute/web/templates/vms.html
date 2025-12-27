@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>VM Targets</h3>
+      <a href="/ui/vms/create?return_to=/ui/vms">Add VM</a>
+    </div>
+    <div class="tile">
+      <h3>VM List</h3>
+      <ul>
+        {% for vm in vm_targets %}
+        <li>
+          <a href="/ui/vms/{{ vm.id }}/edit">{{ vm.name }}</a> ({{ vm.host }})
+          <form method="post" action="/vms/{{ vm.id }}/delete" style="display:inline; margin-left:8px;">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="muted">No VM targets yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

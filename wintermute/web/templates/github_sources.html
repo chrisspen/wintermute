@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>GitHub Sources</h3>
+      <a href="/ui/github-sources/create?return_to=/ui/github-sources">Add GitHub Source</a>
+    </div>
+    <div class="tile">
+      <h3>GitHub Poller</h3>
+      <form method="post" action="/sources/github_issues/ui_update">
+        <div class="checkbox-row">
+          <input type="checkbox" name="enabled" {% if github_task_source and github_task_source.enabled %}checked{% endif %} />
+          <label>Enabled</label>
+        </div>
+        <label>Poll Interval (seconds)</label>
+        <input type="number" name="poll_interval_seconds" min="10" value="{{ github_task_source.poll_interval_seconds if github_task_source else 60 }}" />
+        <button type="submit">Update Poller</button>
+      </form>
+    </div>
+    <div class="tile">
+      <h3>Source List</h3>
+      <ul>
+        {% for source in sources %}
+        <li>
+          <a href="/ui/github-sources/{{ source.id }}/edit">
+            {{ project_lookup.get(source.project_id, 'unknown') }}: {{ source.owner }}/{{ source.repo }}
+          </a>
+          ({{ 'enabled' if source.enabled else 'disabled' }})
+          [{{ token_lookup.get(source.token_id, 'no token') }}]
+          <form method="post" action="/github-sources/{{ source.id }}/delete" style="display:inline; margin-left:8px;">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="muted">No GitHub sources yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% if legacy_config %}
+    <div class="tile">
+      <h3>Legacy GitHub Issues Config</h3>
+      <ul>
+        <li>Project: {{ legacy_project_name }}</li>
+        <li>Repo: {{ legacy_owner }}/{{ legacy_repo }}</li>
+        <li>State: {{ legacy_state or 'open' }}</li>
+        <li>Labels: {{ legacy_labels or 'none' }}</li>
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

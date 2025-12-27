@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Edit GitHub Token</h3>
+      <p class="muted">User: {{ token.user_login or 'unknown' }}{% if token.user_id %} ({{ token.user_id }}){% endif %}</p>
+      <form method="post" action="/github-tokens/{{ token.id }}/edit">
+        <label>Note</label>
+        <input type="text" name="note" value="{{ token.note or '' }}" />
+        <label>Personal Access Token</label>
+        <input type="password" name="token" placeholder="leave blank to keep existing" />
+        <button type="submit">Save GitHub Token</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

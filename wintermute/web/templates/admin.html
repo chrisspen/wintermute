@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <p class="muted">Signed in as <strong>{{ user }}</strong>. <a href="/logout">Logout</a></p>
+  <div class="grid">
+    <div class="tile">
+      <h3>Supervisor</h3>
+      <p>Status: {{ status.status if status else 'unknown' }}</p>
+      <p>Current: {{ status.current_work_id if status else 'n/a' }}</p>
+      <p>Queue: {{ status.queue_depth if status else 'n/a' }}</p>
+      <p>Last action: {{ status.last_action if status else 'n/a' }}</p>
+    </div>
+    <div class="tile">
+      <h3>Queue</h3>
+      <p>Ready work items: {{ work_items|length }}</p>
+      <ul>
+        {% for item in work_items[:5] %}
+        <li>{{ item.work_id }} ({{ item.priority }})</li>
+        {% else %}
+        <li class="muted">No work items</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="group">
+      <p class="group-title">Slack</p>
+      <div class="tile">
+        <h3>Slack Tokens</h3>
+        <p>Bot token: {{ 'configured' if slack_bot else 'missing' }}</p>
+        <p>App token: {{ 'configured' if slack_app else 'missing' }}</p>
+        <p>Admin user: {{ 'configured' if slack_admin else 'missing' }}</p>
+        <form method="post" action="/slack/credentials">
+          <label>Bot Token (xoxb-...)</label>
+          <input type="password" name="bot_token" placeholder="leave blank to keep existing" />
+          <label>App Token (xapp-...)</label>
+          <input type="password" name="app_token" placeholder="leave blank to keep existing" />
+          <label>Slack User ID to Auto-Invite (U...)</label>
+          <input type="text" name="admin_user_id" placeholder="U0123456789" />
+          <button type="submit">Save Slack Settings</button>
+        </form>
+      </div>
+      <div class="tile">
+        <h3>Slack Source</h3>
+        <form method="post" action="/sources/slack/ui_update">
+          <div class="checkbox-row">
+            <input type="checkbox" name="enabled" {% if slack_source and slack_source.enabled %}checked{% endif %} />
+            <label>Enabled</label>
+          </div>
+          <label>Poll Interval (seconds)</label>
+          <input type="number" name="poll_interval_seconds" min="1" value="{{ slack_source.poll_interval_seconds if slack_source else 2 }}" />
+          <label>Channels (auto-managed)</label>
+          <input type="text" name="channels" value="{{ slack_channels }}" readonly />
+          <button type="submit">Update Slack Source</button>
+        </form>
+      </div>
+    </div>
+    <div class="group">
+      <p class="group-title">GitHub</p>
+      <div class="tile">
+        <h3>GitHub Tokens</h3>
+        <a href="/ui/github-tokens/create?return_to=/ui">Add GitHub Token</a>
+        <ul>
+          {% for token in github_tokens[:10] %}
+          <li><a href="/ui/github-tokens/{{ token.id }}/edit">{{ token.note or token.user_login or 'token' }}</a></li>
+          {% else %}
+          <li class="muted">No GitHub tokens yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="tile">
+        <h3>GitHub Sources</h3>
+        <a href="/ui/github-sources/create?return_to=/ui">Add GitHub Source</a>
+        <ul>
+          {% for source in github_sources[:10] %}
+          <li>
+            <a href="/ui/github-sources/{{ source.id }}/edit">
+              {{ project_lookup.get(source.project_id, source.project_id) }}: {{ source.owner }}/{{ source.repo }}
+            </a>
+          </li>
+          {% else %}
+          <li class="muted">No GitHub sources yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
+      <p class="group-title">Projects</p>
+      <div class="tile">
+        <h3>Projects</h3>
+        <a href="/ui/projects/create?return_to=/ui">Add Project</a>
+        <ul>
+          {% for project in projects[:10] %}
+          <li><a href="/ui/projects/{{ project.id }}/edit">{{ project.name }}</a> ({{ project.slug }})</li>
+          {% else %}
+          <li class="muted">No projects yet</li>
+          {% endfor %}
+        </ul>
+        <p class="muted">Creates a public Slack channel (requires channels:manage) or use a channel ID.</p>
+      </div>
+    </div>
+    <div class="group">
+      <p class="group-title">Tickets</p>
+      <div class="tile">
+        <h3>Tickets</h3>
+        <a href="/ui/tickets/create?return_to=/ui">Add Ticket</a>
+        <ul>
+          {% for ticket in tickets[:10] %}
+          <li>{{ ticket.title }} [{{ ticket.status }}]</li>
+          {% else %}
+          <li class="muted">No tickets yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
+      <p class="group-title">VM Targets</p>
+      <div class="tile">
+        <h3>VM Targets</h3>
+        <a href="/ui/vms/create?return_to=/ui">Add VM</a>
+        <ul>
+          {% for vm in vm_targets[:10] %}
+          <li><a href="/ui/vms/{{ vm.id }}/edit">{{ vm.name }}</a> ({{ vm.host }})</li>
+          {% else %}
+          <li class="muted">No VM targets yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
+      <p class="group-title">Agents</p>
+      <div class="tile">
+        <h3>Agents</h3>
+        <a href="/ui/agents/create?return_to=/ui">Add Agent</a>
+        <ul>
+          {% for agent in agents[:10] %}
+          <li><a href="/ui/agents/{{ agent.id }}/edit">{{ agent.name }}</a> ({{ agent.slug }})</li>
+          {% else %}
+          <li class="muted">No agents yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
+      <p class="group-title">Project VM Mapping</p>
+      <div class="tile">
+        <h3>Mappings</h3>
+        <a href="/ui/project-vms/create?return_to=/ui">Attach VM</a>
+        <ul>
+          {% for mapping in project_vms[:10] %}
+          <li>
+            <a href="/ui/project-vms/{{ mapping.id }}/edit">
+              {{ project_lookup.get(mapping.project_id, mapping.project_id) }}
+              &rarr; {{ vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id) }}
+            </a>
+            ({{ mapping.repo_mode }})
+          </li>
+          {% else %}
+          <li class="muted">No mappings yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
+      <p class="group-title">Sessions</p>
+      <div class="tile">
+        <h3>Recent Sessions</h3>
+        <ul>
+          {% for session in sessions[:10] %}
+          <li>{{ session.id }} [{{ session.status }}]</li>
+          {% else %}
+          <li class="muted">No sessions yet</li>
+          {% endfor %}
+        </ul>
+        <p class="muted">Start from Slack: <code>start projectslug agentslug</code></p>
+      </div>
+      <div class="tile">
+        <h3>Active Agents</h3>
+        <p>Available: {{ agents|length }}</p>
+        <p>VM Targets: {{ vm_targets|length }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,254 @@
+:root {
+        --bg: #f5f2ea;
+        --ink: #1f1b16;
+        --muted: #6f6254;
+        --accent: #b3472f;
+        --accent-dark: #7b2c1c;
+        --panel: #fef9ef;
+        --edge: #e2d6c4;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "Trebuchet MS", "Gill Sans", "Helvetica Neue", Arial, sans-serif;
+        background: linear-gradient(180deg, #f7f0e5 0%, #eee2d0 100%);
+        color: var(--ink);
+        min-height: 100vh;
+      }
+      .shell {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px 24px 64px;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 24px 28px;
+        background: linear-gradient(120deg, #1f1b16, #3b2e24);
+        border-radius: 18px;
+        color: #fef9ef;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+        position: relative;
+        overflow: hidden;
+      }
+      h1 {
+        margin: 0;
+        font-size: 30px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+      }
+      h2 {
+        font-family: "Trebuchet MS", "Gill Sans", "Helvetica Neue", Arial, sans-serif;
+        font-size: 24px;
+        margin-top: 0;
+      }
+      main {
+        margin-top: 28px;
+      }
+      .panel {
+        background: var(--panel);
+        border-radius: 18px;
+        padding: 28px;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.12);
+        border: 1px solid var(--edge);
+      }
+      .tile {
+        padding: 16px;
+        background: #fffdf7;
+        border-radius: 14px;
+        border: 1px solid var(--edge);
+        box-shadow: inset 0 0 0 1px rgba(179, 71, 47, 0.08);
+      }
+      label {
+        display: block;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      input, button, select {
+        font-family: inherit;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--edge);
+        margin-bottom: 16px;
+        width: 100%;
+        box-sizing: border-box;
+        background: #fffdf8;
+      }
+      input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+      }
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .checkbox-row label {
+        margin: 0;
+      }
+      .inline-field {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      .inline-field select {
+        flex: 1;
+        margin-bottom: 0;
+      }
+      .inline-link {
+        align-self: center;
+        color: var(--accent-dark);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        display: flex;
+        align-items: center;
+        height: 44px;
+      }
+      button {
+        background: #1f8a3b;
+        color: #ecfff0;
+        font-weight: bold;
+        border: none;
+        cursor: pointer;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      button:hover {
+        filter: brightness(1.05);
+      }
+      .danger {
+        background: #b3261e;
+        color: #fff4f2;
+      }
+      .ghost {
+        background: transparent;
+        border: 1px solid var(--edge);
+        color: var(--ink);
+      }
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 12, 9, 0.55);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        z-index: 1000;
+      }
+      .modal.open {
+        display: flex;
+      }
+      .modal-card {
+        background: #fffdf7;
+        border-radius: 18px;
+        padding: 24px;
+        width: min(420px, 100%);
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+      }
+      .modal-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 18px;
+      }
+      .group {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 18px;
+        padding: 18px;
+        border-radius: 16px;
+        border: 1px dashed var(--edge);
+        background: rgba(255, 253, 248, 0.6);
+      }
+      .group-title {
+        grid-column: 1 / -1;
+        font-size: 14px;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0;
+      }
+      a {
+        color: var(--accent-dark);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .subtitle {
+        margin: 0;
+        color: #f8efe3;
+        font-size: 13px;
+        letter-spacing: 1px;
+      }
+      .badge {
+        display: inline-block;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(255, 245, 233, 0.18);
+        border: 1px solid rgba(255, 245, 233, 0.3);
+        font-size: 11px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      .nav {
+        display: flex;
+        gap: 16px;
+        align-items: center;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+      .nav a {
+        text-decoration: none;
+        font-size: 13px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: #f6efe6;
+        border-bottom: 2px solid transparent;
+        padding-bottom: 2px;
+      }
+      .nav a.active {
+        font-weight: bold;
+        border-bottom-color: #f6efe6;
+      }
+      .growl {
+        position: fixed;
+        top: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 999;
+        display: flex;
+        justify-content: center;
+        pointer-events: none;
+      }
+      .growl-pill {
+        background: #2f7d32;
+        color: #f4fff5;
+        padding: 10px 16px;
+        border-radius: 999px;
+        font-size: 13px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+        animation: fadeout 0.5s ease-in-out 2.5s forwards;
+      }
+      @keyframes fadeout {
+        to {
+          opacity: 0;
+          transform: translateY(-6px);
+        }
+      }

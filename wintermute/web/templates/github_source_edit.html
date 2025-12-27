@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Edit GitHub Source</h3>
+      <form method="post" action="/github-sources/{{ source.id }}/edit">
+        <div class="checkbox-row">
+          <input type="checkbox" name="enabled" {% if source.enabled %}checked{% endif %} />
+          <label>Enabled</label>
+        </div>
+        <label>Project</label>
+        <select name="project_id" required>
+          {% for project in projects %}
+          <option value="{{ project.id }}" {% if project.id == source.project_id %}selected{% endif %}>{{ project.name }}</option>
+          {% endfor %}
+        </select>
+        <label>Token</label>
+        <select name="token_id" required>
+          {% for token in tokens %}
+          <option value="{{ token.id }}" {% if token.id == source.token_id %}selected{% endif %}>{{ token.note or token.user_login or token.id }}</option>
+          {% endfor %}
+        </select>
+        <label>Repo Owner</label>
+        <input type="text" name="owner" value="{{ source.owner }}" required />
+        <label>Repo Name</label>
+        <input type="text" name="repo" value="{{ source.repo }}" required />
+        <label>Issue State</label>
+        <select name="state">
+          <option value="open" {% if source.state == 'open' %}selected{% endif %}>open</option>
+          <option value="closed" {% if source.state == 'closed' %}selected{% endif %}>closed</option>
+          <option value="all" {% if source.state == 'all' %}selected{% endif %}>all</option>
+        </select>
+        <label>Labels (comma-separated)</label>
+        <input type="text" name="labels" value="{{ labels }}" />
+        <button type="submit">Save GitHub Source</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

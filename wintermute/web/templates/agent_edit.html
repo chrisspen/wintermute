@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Edit Agent</h3>
+      <form method="post" action="/agents/{{ agent.id }}/edit">
+        <label>Name</label>
+        <input type="text" name="name" value="{{ agent.name }}" required />
+        <label>Slug</label>
+        <input type="text" name="slug" value="{{ agent.slug }}" required />
+        <label>Command</label>
+        <input type="text" name="command" value="{{ agent.command }}" required />
+        <label>Required SSH Options</label>
+        <input type="text" name="required_ssh_options" value="{{ agent.required_ssh_options or '' }}" />
+        <button type="submit">Save Agent</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

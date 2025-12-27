@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Add Agent</h3>
+      <form method="post" action="/agents">
+        <input type="hidden" name="return_to" value="{{ return_to }}" />
+        <label>Name</label>
+        <input type="text" name="name" required />
+        <label>Slug</label>
+        <input type="text" name="slug" required />
+        <label>Command</label>
+        <input type="text" name="command" required />
+        <label>Required SSH Options</label>
+        <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
+        <button type="submit">Add Agent</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

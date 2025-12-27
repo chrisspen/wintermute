@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Add GitHub Token</h3>
+      <form method="post" action="/github-tokens">
+        <input type="hidden" name="return_to" value="{{ return_to }}" />
+        <label>Note</label>
+        <input type="text" name="note" placeholder="e.g. gears repo token" />
+        <label>Personal Access Token</label>
+        <input type="password" name="token" required />
+        <button type="submit">Add GitHub Token</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

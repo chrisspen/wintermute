@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Tickets</h3>
+      <p class="muted">All current tickets.</p>
+      <a href="/ui/tickets/create?return_to=/ui/tickets">Create Ticket</a>
+    </div>
+    <div class="tile">
+      <h3>Ticket List</h3>
+      <ul>
+        {% for ticket in tickets %}
+        <li>
+          {{ ticket.title }} [{{ ticket.status }}]
+          <form method="post" action="/tickets/{{ ticket.id }}/delete" style="display:inline; margin-left:8px;">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="muted">No tickets yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Create Project</h3>
+      <form method="post" action="/projects">
+        <input type="hidden" name="return_to" value="{{ return_to }}" />
+        <label>Name</label>
+        <input type="text" name="name" required />
+        <label>Slug (optional)</label>
+        <input type="text" name="slug" placeholder="proj-name" />
+        <label>Slack Channel ID (optional)</label>
+        <input type="text" name="slack_channel_id" placeholder="C0123456789" />
+        <button type="submit">Create Project</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

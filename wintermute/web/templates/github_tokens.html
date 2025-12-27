@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>GitHub Tokens</h3>
+      <a href="/ui/github-tokens/create?return_to=/ui/github-tokens">Add GitHub Token</a>
+    </div>
+    <div class="tile">
+      <h3>Token List</h3>
+      <ul>
+        {% for token in tokens %}
+        <li>
+          <a href="/ui/github-tokens/{{ token.id }}/edit">{{ token.note or token.user_login or token.id }}</a>
+          <form method="post" action="/github-tokens/{{ token.id }}/delete" style="display:inline; margin-left:8px;">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="muted">No GitHub tokens yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% if legacy_token %}
+    <div class="tile">
+      <h3>Legacy GitHub Token</h3>
+      <ul>
+        <li>User: {{ legacy_user_login or 'unknown' }}{% if legacy_user_id %} ({{ legacy_user_id }}){% endif %}</li>
+        <li>Token: configured</li>
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

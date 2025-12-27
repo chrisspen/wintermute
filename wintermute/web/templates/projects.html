@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Projects</h3>
+      <a href="/ui/projects/create?return_to=/ui/projects">Create Project</a>
+    </div>
+    <div class="tile">
+      <h3>Project List</h3>
+      <ul>
+        {% for project in projects %}
+        <li>
+          <a href="/ui/projects/{{ project.id }}/edit">{{ project.name }}</a> ({{ project.slug }})
+          <form method="post" action="/projects/{{ project.id }}/delete" style="display:inline; margin-left:8px;">
+            <input type="hidden" name="confirm" value="delete me" />
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="muted">No projects yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
