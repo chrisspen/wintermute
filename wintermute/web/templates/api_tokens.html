@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>API Tokens</h3>
+      <a href="/ui/api-tokens/create?return_to=/ui/api-tokens">Add API Token</a>
+    </div>
+    <div class="tile">
+      <h3>Token List</h3>
+      <ul>
+        {% for token in api_tokens %}
+        <li>
+          <a href="/ui/api-tokens/{{ token.id }}/edit">{{ token.name }}</a>
+          <form method="post" action="/api-tokens/{{ token.id }}/delete" style="display:inline; margin-left:8px;">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="muted">No API tokens yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}
