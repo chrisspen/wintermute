@@ -99,12 +99,14 @@ class ProjectRecord:
 class GitHubSourceRecord:
     id: str
     token_id: Optional[str]
+    agent_id: Optional[str]
     project_id: str
     owner: str
     repo: str
     state: str
     labels: list[str]
     enabled: bool
+    auto_start: bool
     created_at: str
     updated_at: str
 
@@ -312,12 +314,14 @@ class GitHubSourceModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     token_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
     owner: Mapped[str] = mapped_column(String, nullable=False)
     repo: Mapped[str] = mapped_column(String, nullable=False)
     state: Mapped[str] = mapped_column(String, nullable=False)
     labels_json: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False)
+    auto_start: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -925,12 +929,14 @@ class Database:
             GitHubSourceRecord(
                 id=row.id,
                 token_id=row.token_id,
+                agent_id=row.agent_id,
                 project_id=row.project_id,
                 owner=row.owner,
                 repo=row.repo,
                 state=row.state,
                 labels=json_loads(row.labels_json) or [],
                 enabled=bool(row.enabled),
+                auto_start=bool(row.auto_start),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -945,12 +951,14 @@ class Database:
         return GitHubSourceRecord(
             id=row.id,
             token_id=row.token_id,
+            agent_id=row.agent_id,
             project_id=row.project_id,
             owner=row.owner,
             repo=row.repo,
             state=row.state,
             labels=json_loads(row.labels_json) or [],
             enabled=bool(row.enabled),
+            auto_start=bool(row.auto_start),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -959,12 +967,14 @@ class Database:
         self,
         source_id: str,
         token_id: Optional[str],
+        agent_id: Optional[str],
         project_id: str,
         owner: str,
         repo: str,
         state: str,
         labels: list[str],
         enabled: bool,
+        auto_start: bool,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -972,12 +982,14 @@ class Database:
                 GitHubSourceModel(
                     id=source_id,
                     token_id=token_id,
+                    agent_id=agent_id,
                     project_id=project_id,
                     owner=owner,
                     repo=repo,
                     state=state,
                     labels_json=json_dumps(labels),
                     enabled=1 if enabled else 0,
+                    auto_start=1 if auto_start else 0,
                     created_at=now,
                     updated_at=now,
                 )
@@ -988,12 +1000,14 @@ class Database:
         source_id: str,
         *,
         token_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         project_id: Optional[str] = None,
         owner: Optional[str] = None,
         repo: Optional[str] = None,
         state: Optional[str] = None,
         labels: Optional[list[str]] = None,
         enabled: Optional[bool] = None,
+        auto_start: Optional[bool] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(GitHubSourceModel, source_id)
@@ -1001,6 +1015,8 @@ class Database:
                 return
             if token_id is not None:
                 row.token_id = token_id
+            if agent_id is not None:
+                row.agent_id = agent_id
             if project_id is not None:
                 row.project_id = project_id
             if owner is not None:
@@ -1013,6 +1029,8 @@ class Database:
                 row.labels_json = json_dumps(labels)
             if enabled is not None:
                 row.enabled = 1 if enabled else 0
+            if auto_start is not None:
+                row.auto_start = 1 if auto_start else 0
             row.updated_at = utc_now()
 
     def delete_github_source(self, source_id: str) -> None:
@@ -1039,6 +1057,23 @@ class Database:
             )
             for row in rows
         ]
+
+    def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:
+        with self.session() as session:
+            row = session.get(TicketModel, ticket_id)
+        if not row:
+            return None
+        return TicketRecord(
+            id=row.id,
+            project_id=row.project_id,
+            title=row.title,
+            description=row.description,
+            assigned_to=row.assigned_to,
+            estimate=row.estimate,
+            status=row.status,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     def insert_ticket(
         self,
@@ -1401,6 +1436,28 @@ class Database:
             )
             for row in rows
         ]
+
+    def get_session_by_ticket(self, ticket_id: str) -> Optional[AgentSessionRecord]:
+        with self.session() as session:
+            row = session.execute(
+                select(AgentSessionModel).where(AgentSessionModel.ticket_id == ticket_id)
+            ).scalar_one_or_none()
+        if not row:
+            return None
+        return AgentSessionRecord(
+            id=row.id,
+            project_id=row.project_id,
+            project_vm_id=row.project_vm_id,
+            agent_id=row.agent_id,
+            ticket_id=row.ticket_id,
+            status=row.status,
+            repo_path=row.repo_path,
+            thread_ts=row.thread_ts,
+            last_output=row.last_output,
+            last_output_offset=row.last_output_offset,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     def insert_session(
         self,

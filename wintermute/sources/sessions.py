@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from wintermute.db import Database
-from wintermute.runner import build_ssh_spec, read_output
+from wintermute.runner import build_ssh_spec, is_session_running, read_output
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 
@@ -32,6 +32,18 @@ class SessionWorkItem(WorkItem):
         if not project.slack_channel_id or not session.thread_ts:
             return
         spec = build_ssh_spec(vm, agent.required_ssh_options)
+        if not is_session_running(spec, session.id):
+            ctx.db.update_session(session.id, status="done")
+            if ctx.tools.get("slack_post_message"):
+                await ctx.tools.call(
+                    "slack_post_message",
+                    {
+                        "channel": project.slack_channel_id,
+                        "thread_ts": session.thread_ts,
+                        "text": f"[{agent.slug}] session ended.",
+                    },
+                )
+            return
         output, new_offset = read_output(spec, session)
         if not output:
             return

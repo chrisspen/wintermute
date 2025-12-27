@@ -46,3 +46,12 @@ class TaskSource(abc.ABC):
     @abc.abstractmethod
     async def build_work_item(self, ctx: Any, record: Any) -> WorkItem:
         raise NotImplementedError
+
+
+class WorkItemBlocked(Exception):
+    """Signal that a work item should be re-queued without counting as a failure."""
+
+    def __init__(self, reason: str, delay_seconds: int = 30) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.delay_seconds = delay_seconds

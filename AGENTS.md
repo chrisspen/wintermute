@@ -68,7 +68,7 @@ The web admin console provides:
 - Projects, Tickets, VM targets, Agents, and Project VM mappings.
 - Slack channel per project; Slack command `start <projectslug> <agentslug>` to launch sessions.
 - Project VM mapping edit page with repo mode/path/url controls.
-- GitHub token storage and GitHub source configuration (multiple repos).
+- GitHub token storage and GitHub source configuration (multiple repos, optional auto-start).
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.

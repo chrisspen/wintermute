@@ -86,6 +86,19 @@ def send_input(spec: SSHSpec, session: AgentSessionRecord, text: str) -> None:
     _run_ssh(spec, ["bash", "-lc", cmd])
 
 
+def is_session_running(spec: SSHSpec, session_id: str) -> bool:
+    name = _screen_name(session_id)
+    cmd = f"screen -ls | grep -F {shlex.quote(name)}"
+    result = _run_ssh(spec, ["bash", "-lc", cmd])
+    return result.returncode == 0
+
+
+def command_exists(spec: SSHSpec, command: str) -> bool:
+    cmd = f"command -v {shlex.quote(command)}"
+    result = _run_ssh(spec, ["bash", "-lc", cmd])
+    return result.returncode == 0
+
+
 def read_output(
     spec: SSHSpec, session: AgentSessionRecord, max_bytes: int = 32768
 ) -> tuple[str, int]:

@@ -26,6 +26,13 @@
           <option value="{{ token.id }}">{{ token.note or token.user_login or token.id }}</option>
           {% endfor %}
         </select>
+        <label>Agent</label>
+        <select name="agent_id">
+          <option value="">None</option>
+          {% for agent in agents %}
+          <option value="{{ agent.id }}">{{ agent.name }}</option>
+          {% endfor %}
+        </select>
         <label>Repo Owner</label>
         <input type="text" name="owner" required />
         <label>Repo Name</label>
@@ -38,6 +45,10 @@
         </select>
         <label>Labels (comma-separated)</label>
         <input type="text" name="labels" />
+        <div class="checkbox-row">
+          <input type="checkbox" name="auto_start" />
+          <label>Auto-start agent sessions for issues</label>
+        </div>
         <button type="submit">Add GitHub Source</button>
       </form>
     </div>

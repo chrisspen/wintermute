@@ -1033,6 +1033,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             token.id: token.note or token.user_login or token.id
             for token in database.list_github_tokens()
         }
+        agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
         legacy_project_id = str(legacy_config.get("project_id", "")).strip()
         legacy_project_name = project_lookup.get(legacy_project_id, "unset") if legacy_project_id else "unset"
         legacy_owner = str(legacy_config.get("owner", "")).strip()
@@ -1052,6 +1053,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "github_task_source": github_task_source,
                 "project_lookup": project_lookup,
                 "token_lookup": token_lookup,
+                "agent_lookup": agent_lookup,
                 "legacy_config": legacy_has_config,
                 "legacy_project_name": legacy_project_name,
                 "legacy_owner": legacy_owner,
@@ -1118,6 +1120,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def github_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         tokens = database.list_github_tokens()
+        agents = database.list_agents()
         return_to = request.query_params.get("return_to", "/ui/github-sources")
         if not return_to.startswith("/ui"):
             return_to = "/ui/github-sources"
@@ -1131,6 +1134,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "projects": projects,
                 "tokens": tokens,
+                "agents": agents,
                 "return_to": return_to,
                 "token_notice": token_notice if token_notice and not tokens else "",
             },
@@ -1143,6 +1147,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="GitHub source not found")
         projects = database.list_projects()
         tokens = database.list_github_tokens()
+        agents = database.list_agents()
         labels = ", ".join(source.labels)
         return _render_template(
             request,
@@ -1154,6 +1159,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "source": source,
                 "projects": projects,
                 "tokens": tokens,
+                "agents": agents,
                 "labels": labels,
             },
         )
@@ -1163,27 +1169,33 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
         token_id = str(form.get("token_id", "")).strip()
+        agent_id = str(form.get("agent_id", "")).strip() or None
         owner = str(form.get("owner", "")).strip()
         repo = str(form.get("repo", "")).strip()
         state = str(form.get("state", "open")).strip() or "open"
         labels_raw = str(form.get("labels", "")).strip()
         labels = _parse_labels(labels_raw)
         enabled = form.get("enabled") == "on"
+        auto_start = form.get("auto_start") == "on"
         if not project_id or not token_id or not owner or not repo:
             raise HTTPException(status_code=400, detail="Missing GitHub source fields")
         if not database.get_github_token(token_id):
             raise HTTPException(status_code=400, detail="GitHub token not found")
-        if not database.get_github_token(token_id):
-            raise HTTPException(status_code=400, detail="GitHub token not found")
+        if agent_id and not database.get_agent(agent_id):
+            raise HTTPException(status_code=400, detail="Agent not found")
+        if auto_start and not agent_id:
+            raise HTTPException(status_code=400, detail="Agent is required for auto-start")
         database.insert_github_source(
             str(uuid.uuid4()),
             token_id=token_id,
+            agent_id=agent_id,
             project_id=project_id,
             owner=owner,
             repo=repo,
             state=state,
             labels=labels,
             enabled=enabled,
+            auto_start=auto_start,
         )
         return_to = str(form.get("return_to", "/ui/github-sources")).strip() or "/ui/github-sources"
         if not return_to.startswith("/ui"):
@@ -1197,23 +1209,31 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
         token_id = str(form.get("token_id", "")).strip()
+        agent_id = str(form.get("agent_id", "")).strip() or None
         owner = str(form.get("owner", "")).strip()
         repo = str(form.get("repo", "")).strip()
         state = str(form.get("state", "open")).strip() or "open"
         labels_raw = str(form.get("labels", "")).strip()
         labels = _parse_labels(labels_raw)
         enabled = form.get("enabled") == "on"
+        auto_start = form.get("auto_start") == "on"
         if not project_id or not token_id or not owner or not repo:
             raise HTTPException(status_code=400, detail="Missing GitHub source fields")
+        if agent_id and not database.get_agent(agent_id):
+            raise HTTPException(status_code=400, detail="Agent not found")
+        if auto_start and not agent_id:
+            raise HTTPException(status_code=400, detail="Agent is required for auto-start")
         database.update_github_source(
             source_id,
             token_id=token_id,
+            agent_id=agent_id,
             project_id=project_id,
             owner=owner,
             repo=repo,
             state=state,
             labels=labels,
             enabled=enabled,
+            auto_start=auto_start,
         )
         return RedirectResponse("/ui/github-sources?saved=github_source_updated", status_code=303)
 

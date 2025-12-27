@@ -12,7 +12,7 @@ from typing import Any, Iterable, Optional
 from wintermute import __version__
 from wintermute.db import Database, WorkItemRecord, utc_now
 from wintermute.executor import Executor
-from wintermute.sources.base import TaskSource, WorkItemContext
+from wintermute.sources.base import TaskSource, WorkItemContext, WorkItemBlocked
 from wintermute.sources.demo import DemoSource
 from wintermute.sources.github import GitHubIssuesSource
 from wintermute.sources.slack import SlackSource, SLACK_BOT_TOKEN_NAME, SLACK_PROVIDER
@@ -176,6 +176,19 @@ class Supervisor:
             self.db.update_work_item_status(record.work_id, "done")
             self.db.record_run_end(run_id, "done")
             self._update_state(f"completed {record.work_id}")
+        except WorkItemBlocked as exc:
+            run_after = (
+                datetime.now(timezone.utc).timestamp() + exc.delay_seconds
+            )
+            run_after_iso = datetime.fromtimestamp(run_after, tz=timezone.utc).isoformat()
+            self.db.update_work_item_status(
+                record.work_id,
+                "queued",
+                run_after=run_after_iso,
+                last_error=exc.reason,
+            )
+            self.db.record_run_end(run_id, "blocked", error=exc.reason)
+            self._update_state(f"blocked {record.work_id}")
         except Exception as exc:  # pragma: no cover - safeguard
             attempts = record.attempts + 1
             if attempts >= self.max_attempts:

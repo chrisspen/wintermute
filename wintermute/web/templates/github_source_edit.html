@@ -22,6 +22,13 @@
           <option value="{{ token.id }}" {% if token.id == source.token_id %}selected{% endif %}>{{ token.note or token.user_login or token.id }}</option>
           {% endfor %}
         </select>
+        <label>Agent</label>
+        <select name="agent_id">
+          <option value="">None</option>
+          {% for agent in agents %}
+          <option value="{{ agent.id }}" {% if agent.id == source.agent_id %}selected{% endif %}>{{ agent.name }}</option>
+          {% endfor %}
+        </select>
         <label>Repo Owner</label>
         <input type="text" name="owner" value="{{ source.owner }}" required />
         <label>Repo Name</label>
@@ -34,6 +41,10 @@
         </select>
         <label>Labels (comma-separated)</label>
         <input type="text" name="labels" value="{{ labels }}" />
+        <div class="checkbox-row">
+          <input type="checkbox" name="auto_start" {% if source.auto_start %}checked{% endif %} />
+          <label>Auto-start agent sessions for issues</label>
+        </div>
         <button type="submit">Save GitHub Source</button>
       </form>
     </div>

@@ -35,7 +35,9 @@ GitHub issues setup
 -------------------
 - Generate a GitHub Personal Access Token with `repo` scope.
 - Add it under "GitHub Tokens" in the admin UI.
-- Create one or more GitHub Sources (project, token, owner, repo, labels/state).
+- Create one or more GitHub Sources (project, token, agent, owner, repo, labels/state).
+- Optional: enable "auto-start agent sessions" on a GitHub Source to automatically start a
+  session per issue (requires an Agent + Project VM mapping).
 - Enable the GitHub poller under "GitHub Sources".
 
 Projects, mappings, and sessions
@@ -67,6 +69,13 @@ Migrations
 
 ```
 alembic upgrade head
+```
+
+Sanity check
+------------
+
+```
+scripts/sanity_check.py
 ```
 
 Tests
