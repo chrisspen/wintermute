@@ -86,6 +86,16 @@ class SupervisorStateRecord:
 
 
 @dataclass(frozen=True)
+class ApiTokenRecord:
+    id: str
+    name: str
+    token: str
+    permissions: dict[str, dict[str, bool]]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class ProjectRecord:
     id: str
     name: str
@@ -246,6 +256,17 @@ class UserModel(Base):
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     salt: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ApiTokenModel(Base):
+    __tablename__ = "api_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    token: Mapped[str] = mapped_column(String, nullable=False)
+    permissions_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class SupervisorStateModel(Base):
@@ -450,6 +471,10 @@ class Database:
             updated_at=row.updated_at,
         )
 
+    def delete_task_source(self, source_id: str) -> None:
+        with self.session() as session:
+            session.query(TaskSourceModel).filter(TaskSourceModel.id == source_id).delete()
+
     def insert_work_item_if_absent(
         self,
         work_id: str,
@@ -507,6 +532,10 @@ class Database:
         with self.session() as session:
             row = session.get(WorkItemModel, work_id)
         return self._model_to_work_item(row) if row else None
+
+    def delete_work_item(self, work_id: str) -> None:
+        with self.session() as session:
+            session.query(WorkItemModel).filter(WorkItemModel.work_id == work_id).delete()
 
     def update_work_item_status(
         self,
@@ -680,6 +709,32 @@ class Database:
             if note is not None:
                 existing.note = note
 
+    def update_credential(
+        self,
+        cred_id: str,
+        *,
+        name: Optional[str] = None,
+        provider: Optional[str] = None,
+        reference: Optional[str] = None,
+        note: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(CredentialModel, cred_id)
+            if not row:
+                return
+            if name is not None:
+                row.name = name
+            if provider is not None:
+                row.provider = provider
+            if reference is not None:
+                row.reference = reference
+            if note is not None:
+                row.note = note
+
+    def delete_credential(self, cred_id: str) -> None:
+        with self.session() as session:
+            session.query(CredentialModel).filter(CredentialModel.id == cred_id).delete()
+
     def get_credential(self, cred_id: str) -> Optional[CredentialRecord]:
         with self.session() as session:
             row = session.get(CredentialModel, cred_id)
@@ -741,6 +796,19 @@ class Database:
             created_at=row.created_at,
         )
 
+    def get_user_by_id(self, user_id: str) -> Optional[UserRecord]:
+        with self.session() as session:
+            row = session.get(UserModel, user_id)
+        if not row:
+            return None
+        return UserRecord(
+            id=row.id,
+            username=row.username,
+            password_hash=row.password_hash,
+            salt=row.salt,
+            created_at=row.created_at,
+        )
+
     def insert_user(self, user_id: str, username: str, password_hash: str, salt: str) -> None:
         with self.session() as session:
             session.add(
@@ -752,6 +820,118 @@ class Database:
                     created_at=utc_now(),
                 )
             )
+
+    def update_user(
+        self,
+        user_id: str,
+        *,
+        username: Optional[str] = None,
+        password_hash: Optional[str] = None,
+        salt: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(UserModel, user_id)
+            if not row:
+                return
+            if username is not None:
+                row.username = username
+            if password_hash is not None:
+                row.password_hash = password_hash
+            if salt is not None:
+                row.salt = salt
+
+    def delete_user(self, user_id: str) -> None:
+        with self.session() as session:
+            session.query(UserModel).filter(UserModel.id == user_id).delete()
+
+    def list_api_tokens(self) -> list[ApiTokenRecord]:
+        with self.session() as session:
+            rows = session.execute(select(ApiTokenModel).order_by(ApiTokenModel.created_at.desc())).scalars().all()
+        return [
+            ApiTokenRecord(
+                id=row.id,
+                name=row.name,
+                token=row.token,
+                permissions=json_loads(row.permissions_json) or {},
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_api_token(self, token_id: str) -> Optional[ApiTokenRecord]:
+        with self.session() as session:
+            row = session.get(ApiTokenModel, token_id)
+        if not row:
+            return None
+        return ApiTokenRecord(
+            id=row.id,
+            name=row.name,
+            token=row.token,
+            permissions=json_loads(row.permissions_json) or {},
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def get_api_token_by_value(self, token_value: str) -> Optional[ApiTokenRecord]:
+        with self.session() as session:
+            row = session.execute(
+                select(ApiTokenModel).where(ApiTokenModel.token == token_value)
+            ).scalar_one_or_none()
+        if not row:
+            return None
+        return ApiTokenRecord(
+            id=row.id,
+            name=row.name,
+            token=row.token,
+            permissions=json_loads(row.permissions_json) or {},
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_api_token(
+        self,
+        token_id: str,
+        name: str,
+        token: str,
+        permissions: dict[str, dict[str, bool]],
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                ApiTokenModel(
+                    id=token_id,
+                    name=name,
+                    token=token,
+                    permissions_json=json_dumps(permissions),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_api_token(
+        self,
+        token_id: str,
+        *,
+        name: Optional[str] = None,
+        token: Optional[str] = None,
+        permissions: Optional[dict[str, dict[str, bool]]] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(ApiTokenModel, token_id)
+            if not row:
+                return
+            if name is not None:
+                row.name = name
+            if token is not None:
+                row.token = token
+            if permissions is not None:
+                row.permissions_json = json_dumps(permissions)
+            row.updated_at = utc_now()
+
+    def delete_api_token(self, token_id: str) -> None:
+        with self.session() as session:
+            session.query(ApiTokenModel).filter(ApiTokenModel.id == token_id).delete()
 
     def list_projects(self) -> list[ProjectRecord]:
         with self.session() as session:
@@ -1530,6 +1710,10 @@ class Database:
             if last_output_offset is not None:
                 row.last_output_offset = last_output_offset
             row.updated_at = utc_now()
+
+    def delete_session(self, session_id: str) -> None:
+        with self.session() as session:
+            session.query(AgentSessionModel).filter(AgentSessionModel.id == session_id).delete()
 
     def get_session_by_thread(self, thread_ts: str) -> Optional[AgentSessionRecord]:
         with self.session() as session:

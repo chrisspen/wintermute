@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import uuid
+from dataclasses import asdict
 from typing import Any, Optional
 
 import aiohttp
@@ -49,6 +50,23 @@ class CredentialCreate(BaseModel):
 class WorkItemStatusUpdate(BaseModel):
     status: str
     run_after: Optional[str] = None
+
+
+API_PERMISSION_MODELS = [
+    {"key": "agents", "label": "Agents"},
+    {"key": "credentials", "label": "Credentials"},
+    {"key": "github_sources", "label": "GitHub Sources"},
+    {"key": "github_tokens", "label": "GitHub Tokens"},
+    {"key": "project_vms", "label": "Project VM Mappings"},
+    {"key": "projects", "label": "Projects"},
+    {"key": "sessions", "label": "Agent Sessions"},
+    {"key": "task_sources", "label": "Task Sources"},
+    {"key": "tickets", "label": "Tickets"},
+    {"key": "users", "label": "Users"},
+    {"key": "vms", "label": "VM Targets"},
+    {"key": "work_items", "label": "Work Items"},
+]
+API_PERMISSION_ACTIONS = ["create", "read", "update", "delete"]
 
 
 def _hash_password(password: str, salt: bytes) -> str:
@@ -186,10 +204,25 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "github_token_created": "GitHub token created",
         "github_token_updated": "GitHub token updated",
         "github_token_deleted": "GitHub token deleted",
+        "api_token_created": "API token created",
+        "api_token_updated": "API token updated",
+        "api_token_deleted": "API token deleted",
     }
     if not saved:
         return None
     return messages.get(saved)
+
+
+def _parse_permissions(form: Any) -> dict[str, dict[str, bool]]:
+    permissions: dict[str, dict[str, bool]] = {}
+    for model in API_PERMISSION_MODELS:
+        key = model["key"]
+        actions: dict[str, bool] = {}
+        for action in API_PERMISSION_ACTIONS:
+            field = f"perm-{key}-{action}"
+            actions[action] = form.get(field) == "on"
+        permissions[key] = actions
+    return permissions
 
 
 def create_app(db: Optional[Database] = None) -> FastAPI:
@@ -207,17 +240,36 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         _update_slack_channel_filter(database)
     app = FastAPI(title="Foreman Admin")
     base_dir = os.path.dirname(__file__)
+    repo_root = os.path.abspath(os.path.join(base_dir, os.pardir, os.pardir))
+    static_css_path = os.path.join(base_dir, "static", "style.css")
     templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
-    app.mount("/static", StaticFiles(directory=os.path.join(base_dir, "static")), name="static")
+
+    class NoCacheStaticFiles(StaticFiles):
+        async def get_response(self, path: str, scope: Any) -> Response:
+            response = await super().get_response(path, scope)
+            response.headers.update(
+                {
+                    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                }
+            )
+            return response
+
+    app.mount("/static", NoCacheStaticFiles(directory=os.path.join(base_dir, "static")), name="static")
     secret_key = (
         os.environ.get("WINTERMUTE_WEB_SECRET") or secrets.token_urlsafe(32)
     )
     app.add_middleware(SessionMiddleware, secret_key=secret_key)
 
     def _render_template(request: Request, template_name: str, context: dict[str, Any]) -> Response:
+        try:
+            static_version = int(os.path.getmtime(static_css_path))
+        except OSError:
+            static_version = 0
         response = templates.TemplateResponse(
             template_name,
-            {"request": request, **context},
+            {"request": request, "static_version": static_version, **context},
         )
         response.headers.update(
             {
@@ -227,6 +279,67 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             }
         )
         return response
+
+    def _write_env_token(env_path: str, token_value: str) -> None:
+        if not env_path:
+            return
+        path = env_path
+        if not os.path.isabs(path):
+            path = os.path.abspath(os.path.join(repo_root, env_path))
+        if not path.startswith(repo_root):
+            raise HTTPException(status_code=400, detail="env_path must be inside the repo")
+        key = "WINTERMUTE_ADMIN_API_TOKEN"
+        lines: list[str] = []
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+        updated = False
+        for idx, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[idx] = f"{key}={token_value}"
+                updated = True
+                break
+        if not updated:
+            lines.append(f"{key}={token_value}")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+    def _record_to_dict(record: Any) -> dict[str, Any]:
+        if hasattr(record, "__dataclass_fields__"):
+            return asdict(record)
+        return dict(record)
+
+    def _normalize_permissions(payload: Any) -> dict[str, dict[str, bool]]:
+        permissions: dict[str, dict[str, bool]] = {}
+        if not isinstance(payload, dict):
+            return _parse_permissions({})
+        for model in API_PERMISSION_MODELS:
+            key = model["key"]
+            actions: dict[str, bool] = {}
+            raw_actions = payload.get(key, {})
+            for action in API_PERMISSION_ACTIONS:
+                actions[action] = bool(raw_actions.get(action))
+            permissions[key] = actions
+        return permissions
+
+    def _get_bearer_token(request: Request) -> Optional[str]:
+        header = request.headers.get("Authorization", "")
+        if header.lower().startswith("bearer "):
+            return header.split(" ", 1)[1].strip()
+        return request.headers.get("X-API-Token")
+
+    def _require_api_permission(request: Request, model: str, action: str):
+        token_value = _get_bearer_token(request)
+        if not token_value:
+            raise HTTPException(status_code=401, detail="Missing API token")
+        token_record = database.get_api_token_by_value(token_value)
+        if not token_record:
+            raise HTTPException(status_code=401, detail="Invalid API token")
+        permissions = token_record.permissions.get(model, {})
+        if not permissions.get(action):
+            raise HTTPException(status_code=403, detail="Permission denied")
+        return token_record
 
     @app.get("/status")
     def status(user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -485,6 +598,441 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     ) -> RedirectResponse:
         database.delete_github_token(token_id)
         return RedirectResponse("/ui/github-tokens?saved=github_token_deleted", status_code=303)
+
+    @app.get("/ui/api-tokens")
+    def api_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        tokens = database.list_api_tokens()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "api_tokens.html",
+            {
+                "title": "API Tokens",
+                "active_nav": "api_tokens",
+                "growl_message": growl_message,
+                "api_tokens": tokens,
+            },
+        )
+
+    @app.get("/ui/api-tokens/create")
+    def api_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        return_to = request.query_params.get("return_to", "/ui/api-tokens")
+        if not return_to.startswith("/"):
+            return_to = "/ui/api-tokens"
+        return _render_template(
+            request,
+            "api_token_create.html",
+            {
+                "title": "Create API Token",
+                "active_nav": "api_tokens",
+                "growl_message": None,
+                "return_to": return_to,
+                "permission_models": API_PERMISSION_MODELS,
+                "permission_actions": API_PERMISSION_ACTIONS,
+            },
+        )
+
+    @app.get("/ui/api-tokens/{token_id}/edit")
+    def api_tokens_edit_ui(token_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        token = database.get_api_token(token_id)
+        if not token:
+            raise HTTPException(status_code=404, detail="API token not found")
+        token_display = f"{token.token[:4]}...{token.token[-4:]}" if len(token.token) > 8 else token.token
+        show_token = request.query_params.get("show_token") == "1"
+        return _render_template(
+            request,
+            "api_token_edit.html",
+            {
+                "title": "Edit API Token",
+                "active_nav": "api_tokens",
+                "growl_message": None,
+                "token": token,
+                "token_display": token_display,
+                "show_token": show_token,
+                "permissions": token.permissions,
+                "permission_models": API_PERMISSION_MODELS,
+                "permission_actions": API_PERMISSION_ACTIONS,
+            },
+        )
+
+    @app.post("/api-tokens")
+    async def create_api_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        token_value = str(form.get("token", "")).strip()
+        env_path = str(form.get("env_path", "")).strip()
+        permissions = _parse_permissions(form)
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        if not token_value:
+            token_value = secrets.token_urlsafe(32)
+        token_id = str(uuid.uuid4())
+        database.insert_api_token(
+            token_id=token_id,
+            name=name,
+            token=token_value,
+            permissions=permissions,
+        )
+        if env_path:
+            _write_env_token(env_path, token_value)
+        return_to = str(form.get("return_to", "/ui/api-tokens")).strip() or "/ui/api-tokens"
+        if not return_to.startswith("/"):
+            return_to = "/ui/api-tokens"
+        if not env_path:
+            return_to = f"/ui/api-tokens/{token_id}/edit?show_token=1"
+        separator = "&" if "?" in return_to else "?"
+        return RedirectResponse(f"{return_to}{separator}saved=api_token_created", status_code=303)
+
+    @app.post("/api-tokens/{token_id}/edit")
+    async def update_api_token(
+        token_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        token_value = str(form.get("token", "")).strip()
+        permissions = _parse_permissions(form)
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        database.update_api_token(
+            token_id,
+            name=name,
+            token=token_value or None,
+            permissions=permissions,
+        )
+        return RedirectResponse("/ui/api-tokens?saved=api_token_updated", status_code=303)
+
+    @app.post("/api-tokens/{token_id}/delete")
+    async def delete_api_token(
+        token_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_api_token(token_id)
+        return RedirectResponse("/ui/api-tokens?saved=api_token_deleted", status_code=303)
+
+    def _hash_plain_password(password: str) -> tuple[str, str]:
+        salt = secrets.token_bytes(16)
+        salt_b64 = base64.b64encode(salt).decode("ascii")
+        return _hash_password(password, salt), salt_b64
+
+    def _require_fields(payload: dict[str, Any], fields: list[str]) -> None:
+        missing = [field for field in fields if not payload.get(field)]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Missing fields: {', '.join(missing)}")
+
+    def _api_model_handlers() -> dict[str, dict[str, Any]]:
+        return {
+            "projects": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_projects()],
+                "get": database.get_project,
+                "required": ["name"],
+                "create": lambda payload: database.insert_project(
+                    str(uuid.uuid4()),
+                    payload["name"],
+                    payload.get("slug") or _slugify(payload["name"]),
+                    payload.get("slack_channel_id"),
+                ),
+                "update": lambda item_id, payload: database.update_project(
+                    item_id,
+                    name=payload.get("name"),
+                    slug=payload.get("slug"),
+                    slack_channel_id=payload.get("slack_channel_id"),
+                ),
+                "delete": database.delete_project,
+            },
+            "tickets": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_tickets()],
+                "get": database.get_ticket,
+                "required": ["project_id", "title"],
+                "create": lambda payload: database.insert_ticket(
+                    payload.get("id") or str(uuid.uuid4()),
+                    payload["project_id"],
+                    payload["title"],
+                    payload.get("description"),
+                    payload.get("assigned_to"),
+                    payload.get("estimate"),
+                    payload.get("status") or "open",
+                ),
+                "update": lambda item_id, payload: database.update_ticket(
+                    item_id,
+                    title=payload.get("title"),
+                    description=payload.get("description"),
+                    assigned_to=payload.get("assigned_to"),
+                    estimate=payload.get("estimate"),
+                    status=payload.get("status"),
+                ),
+                "delete": database.delete_ticket,
+            },
+            "vms": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_vm_targets()],
+                "get": database.get_vm_target,
+                "required": ["name", "host"],
+                "create": lambda payload: database.insert_vm_target(
+                    str(uuid.uuid4()),
+                    payload["name"],
+                    payload["host"],
+                    payload.get("user") or "root",
+                    int(payload.get("port") or 22),
+                ),
+                "update": lambda item_id, payload: database.update_vm_target(
+                    item_id,
+                    name=payload.get("name"),
+                    host=payload.get("host"),
+                    user=payload.get("user"),
+                    port=int(payload["port"]) if payload.get("port") is not None else None,
+                ),
+                "delete": database.delete_vm_target,
+            },
+            "agents": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_agents()],
+                "get": database.get_agent,
+                "required": ["name", "command"],
+                "create": lambda payload: database.insert_agent(
+                    str(uuid.uuid4()),
+                    payload["name"],
+                    payload.get("slug") or _slugify(payload["name"]),
+                    payload["command"],
+                    payload.get("required_ssh_options"),
+                ),
+                "update": lambda item_id, payload: database.update_agent(
+                    item_id,
+                    name=payload.get("name"),
+                    slug=payload.get("slug"),
+                    command=payload.get("command"),
+                    required_ssh_options=payload.get("required_ssh_options"),
+                ),
+                "delete": database.delete_agent,
+            },
+            "project_vms": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_project_vms()],
+                "get": database.get_project_vm,
+                "required": ["project_id", "vm_target_id"],
+                "create": lambda payload: database.insert_project_vm(
+                    str(uuid.uuid4()),
+                    payload["project_id"],
+                    payload["vm_target_id"],
+                    payload.get("repo_mode") or "mirror",
+                    payload.get("repo_path"),
+                    payload.get("repo_url"),
+                ),
+                "update": lambda item_id, payload: database.update_project_vm(
+                    item_id,
+                    project_id=payload.get("project_id"),
+                    vm_target_id=payload.get("vm_target_id"),
+                    repo_mode=payload.get("repo_mode"),
+                    repo_path=payload.get("repo_path"),
+                    repo_url=payload.get("repo_url"),
+                ),
+                "delete": database.delete_project_vm,
+            },
+            "sessions": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_sessions()],
+                "get": database.get_session,
+                "required": ["project_id", "project_vm_id", "agent_id", "repo_path"],
+                "create": lambda payload: database.insert_session(
+                    payload.get("id") or str(uuid.uuid4()),
+                    payload["project_id"],
+                    payload["project_vm_id"],
+                    payload["agent_id"],
+                    payload.get("ticket_id"),
+                    payload.get("status") or "running",
+                    payload["repo_path"],
+                    payload.get("thread_ts"),
+                ),
+                "update": lambda item_id, payload: database.update_session(
+                    item_id,
+                    status=payload.get("status"),
+                    thread_ts=payload.get("thread_ts"),
+                    last_output=payload.get("last_output"),
+                    last_output_offset=payload.get("last_output_offset"),
+                ),
+                "delete": database.delete_session,
+            },
+            "github_tokens": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_github_tokens()],
+                "get": database.get_github_token,
+                "required": ["token"],
+                "create": lambda payload: database.insert_github_token(
+                    str(uuid.uuid4()),
+                    payload.get("note"),
+                    payload["token"],
+                    payload.get("user_id"),
+                    payload.get("user_login"),
+                ),
+                "update": lambda item_id, payload: database.update_github_token(
+                    item_id,
+                    token=payload.get("token"),
+                    note=payload.get("note"),
+                    user_id=payload.get("user_id"),
+                    user_login=payload.get("user_login"),
+                ),
+                "delete": database.delete_github_token,
+            },
+            "github_sources": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_github_sources()],
+                "get": database.get_github_source,
+                "required": ["project_id", "owner", "repo"],
+                "create": lambda payload: database.insert_github_source(
+                    payload.get("id") or str(uuid.uuid4()),
+                    payload.get("token_id"),
+                    payload.get("agent_id"),
+                    payload["project_id"],
+                    payload["owner"],
+                    payload["repo"],
+                    payload.get("state") or "open",
+                    payload.get("labels") or [],
+                    bool(payload.get("enabled", True)),
+                    bool(payload.get("auto_start", False)),
+                ),
+                "update": lambda item_id, payload: database.update_github_source(
+                    item_id,
+                    token_id=payload.get("token_id"),
+                    agent_id=payload.get("agent_id"),
+                    project_id=payload.get("project_id"),
+                    owner=payload.get("owner"),
+                    repo=payload.get("repo"),
+                    state=payload.get("state"),
+                    labels=payload.get("labels"),
+                    enabled=payload.get("enabled"),
+                    auto_start=payload.get("auto_start"),
+                ),
+                "delete": database.delete_github_source,
+            },
+            "task_sources": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_task_sources()],
+                "get": database.get_task_source,
+                "required": ["id"],
+                "create": lambda payload: database.upsert_task_source(
+                    payload["id"],
+                    bool(payload.get("enabled", False)),
+                    int(payload.get("base_priority") or 50),
+                    int(payload.get("poll_interval_seconds") or 60),
+                    payload.get("config") or {},
+                ),
+                "update": lambda item_id, payload: database.upsert_task_source(
+                    item_id,
+                    bool(payload.get("enabled", False)),
+                    int(payload.get("base_priority") or 50),
+                    int(payload.get("poll_interval_seconds") or 60),
+                    payload.get("config") or {},
+                ),
+                "delete": database.delete_task_source,
+            },
+            "work_items": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_work_items()],
+                "get": database.get_work_item,
+                "required": ["work_id", "source_id"],
+                "create": lambda payload: database.insert_work_item_if_absent(
+                    payload["work_id"],
+                    payload["source_id"],
+                    int(payload.get("priority") or 50),
+                    payload.get("checkpoint") or {},
+                    payload.get("status") or "queued",
+                ),
+                "update": lambda item_id, payload: database.update_work_item_status(
+                    item_id,
+                    payload.get("status") or "queued",
+                    checkpoint=payload.get("checkpoint"),
+                    priority=payload.get("priority"),
+                    run_after=payload.get("run_after"),
+                    attempts=payload.get("attempts"),
+                    last_error=payload.get("last_error"),
+                ),
+                "delete": database.delete_work_item,
+            },
+            "credentials": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_credentials()],
+                "get": database.get_credential,
+                "required": ["name", "provider", "reference"],
+                "create": lambda payload: database.insert_credential(
+                    str(uuid.uuid4()),
+                    payload["name"],
+                    payload["provider"],
+                    payload["reference"],
+                    payload.get("note"),
+                ),
+                "update": lambda item_id, payload: database.update_credential(
+                    item_id,
+                    name=payload.get("name"),
+                    provider=payload.get("provider"),
+                    reference=payload.get("reference"),
+                    note=payload.get("note"),
+                ),
+                "delete": database.delete_credential,
+            },
+            "users": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_users()],
+                "get": database.get_user_by_id,
+                "required": ["username", "password"],
+                "create": lambda payload: _create_api_user(payload),
+                "update": lambda item_id, payload: _update_api_user(item_id, payload),
+                "delete": database.delete_user,
+            },
+        }
+
+    def _create_api_user(payload: dict[str, Any]) -> None:
+        _require_fields(payload, ["username", "password"])
+        password_hash, salt = _hash_plain_password(payload["password"])
+        database.insert_user(str(uuid.uuid4()), payload["username"], password_hash, salt)
+
+    def _update_api_user(user_id: str, payload: dict[str, Any]) -> None:
+        password_hash = None
+        salt = None
+        if payload.get("password"):
+            password_hash, salt = _hash_plain_password(payload["password"])
+        database.update_user(
+            user_id,
+            username=payload.get("username"),
+            password_hash=password_hash,
+            salt=salt,
+        )
+
+    @app.get("/api/{model}")
+    async def api_list(model: str, request: Request) -> dict[str, Any]:
+        handlers = _api_model_handlers().get(model)
+        if not handlers:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        _require_api_permission(request, model, "read")
+        return {"data": handlers["list"]()}
+
+    @app.post("/api/{model}")
+    async def api_create(model: str, request: Request) -> dict[str, Any]:
+        handlers = _api_model_handlers().get(model)
+        if not handlers:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        _require_api_permission(request, model, "create")
+        payload = await request.json()
+        _require_fields(payload, handlers.get("required", []))
+        handlers["create"](payload)
+        return {"ok": True}
+
+    @app.get("/api/{model}/{item_id}")
+    async def api_get(model: str, item_id: str, request: Request) -> dict[str, Any]:
+        handlers = _api_model_handlers().get(model)
+        if not handlers:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        _require_api_permission(request, model, "read")
+        record = handlers["get"](item_id)
+        if not record:
+            raise HTTPException(status_code=404, detail="Not found")
+        return {"data": _record_to_dict(record)}
+
+    @app.put("/api/{model}/{item_id}")
+    async def api_update(model: str, item_id: str, request: Request) -> dict[str, Any]:
+        handlers = _api_model_handlers().get(model)
+        if not handlers:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        _require_api_permission(request, model, "update")
+        payload = await request.json()
+        handlers["update"](item_id, payload)
+        return {"ok": True}
+
+    @app.delete("/api/{model}/{item_id}")
+    async def api_delete(model: str, item_id: str, request: Request) -> dict[str, Any]:
+        handlers = _api_model_handlers().get(model)
+        if not handlers:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        _require_api_permission(request, model, "delete")
+        handlers["delete"](item_id)
+        return {"ok": True}
 
     @app.post("/projects")
     async def create_project(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -864,6 +1412,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slack_admin = database.get_credential_by_name(SLACK_PROVIDER, "admin_user_id")
         github_tokens = database.list_github_tokens()
         github_sources = database.list_github_sources()
+        api_tokens = database.list_api_tokens()
         growl_message = _growl_message(request.query_params.get("saved"))
         return _render_template(
             request,
@@ -888,6 +1437,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "slack_admin": slack_admin,
                 "github_tokens": github_tokens,
                 "github_sources": github_sources,
+                "api_tokens": api_tokens,
                 "project_lookup": {project.id: project.name for project in projects},
                 "vm_lookup": {vm.id: vm.name for vm in vm_targets},
             },

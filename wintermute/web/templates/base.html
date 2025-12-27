@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title }}</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/style.css?v={{ static_version }}" />
   </head>
   <body>
     <div class="shell">
@@ -18,6 +18,7 @@
             <a href="/ui/tickets" class="{% if active_nav == 'tickets' %}active{% endif %}">Tickets</a>
             <a href="/ui/github-tokens" class="{% if active_nav == 'github_tokens' %}active{% endif %}">GitHub Tokens</a>
             <a href="/ui/github-sources" class="{% if active_nav == 'github_sources' %}active{% endif %}">GitHub Sources</a>
+            <a href="/ui/api-tokens" class="{% if active_nav == 'api_tokens' %}active{% endif %}">API Tokens</a>
             <a href="/ui/vms" class="{% if active_nav == 'vms' %}active{% endif %}">VMs</a>
             <a href="/ui/agents" class="{% if active_nav == 'agents' %}active{% endif %}">Agents</a>
             <a href="/ui/project-vms" class="{% if active_nav == 'mappings' %}active{% endif %}">Mappings</a>

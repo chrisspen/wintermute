@@ -48,6 +48,19 @@ GitHub issues setup
   session per issue (requires an Agent + Project VM mapping).
 - Enable the GitHub poller under "GitHub Sources".
 
+REST API
+--------
+- Create an API token under "API Tokens" in the admin UI.
+- Optional: set `WINTERMUTE_ADMIN_API_TOKEN` in a local env file (e.g. `.codex/.env`).
+- Requests use `Authorization: Bearer <token>`.
+
+Example:
+
+```
+curl -sS http://127.0.0.1:8000/api/projects \
+  -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
+```
+
 Projects, mappings, and sessions
 --------------------------------
 - Create a Project to auto-create a Slack channel (public) for that project.

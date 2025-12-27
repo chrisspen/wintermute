@@ -84,6 +84,20 @@
       </div>
     </div>
     <div class="group">
+      <p class="group-title">Access</p>
+      <div class="tile">
+        <h3>API Tokens</h3>
+        <a href="/ui/api-tokens/create?return_to=/ui">Add API Token</a>
+        <ul>
+          {% for token in api_tokens[:10] %}
+          <li><a href="/ui/api-tokens/{{ token.id }}/edit">{{ token.name }}</a></li>
+          {% else %}
+          <li class="muted">No API tokens yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
       <p class="group-title">Projects</p>
       <div class="tile">
         <h3>Projects</h3>
