@@ -14,6 +14,8 @@ Foreman is a local, persistent “work supervisor” that runs an async priority
 - **Agent**: CLI agent definition (command + required SSH options).
 - **AgentSession**: persistent SSH+screen session for an agent working on a project VM.
 - **Project VM Mapping**: link between a Project and a VM target with repo mode settings.
+- **GitHub Source**: per-repo config (with token) that polls issues and emits work items.
+- **GitHub Token**: per-user credential used by one or more GitHub sources.
 
 ## Interfaces (contract-first)
 ### TaskSource
@@ -66,6 +68,7 @@ The web admin console provides:
 - Projects, Tickets, VM targets, Agents, and Project VM mappings.
 - Slack channel per project; Slack command `start <projectslug> <agentslug>` to launch sessions.
 - Project VM mapping edit page with repo mode/path/url controls.
+- GitHub token storage and GitHub source configuration (multiple repos).
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.
@@ -78,6 +81,7 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - Default: `base_url=http://localhost:11434/v1` (Ollama), `api_key=ollama`
 - Models are configurable per TaskSource or globally (e.g., fast model for triage, stronger model for coding).
 - OpenWebUI-compatible API is supported via `WINTERMUTE_BASE_URL` + `WINTERMUTE_API_KEY`.
+- GitHub tools are available when a token is stored in the credentials table.
 
 ## Repository layout (recommended)
 - `wintermute/supervisor.py` — scheduler, heap, polling, preemption, persistence

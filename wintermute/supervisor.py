@@ -14,11 +14,17 @@ from wintermute.db import Database, WorkItemRecord, utc_now
 from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext
 from wintermute.sources.demo import DemoSource
+from wintermute.sources.github import GitHubIssuesSource
 from wintermute.sources.slack import SlackSource, SLACK_BOT_TOKEN_NAME, SLACK_PROVIDER
 from wintermute.sources.sessions import SessionSource
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
 from wintermute.tools.fs import ReadFileTool
+from wintermute.tools.github import (
+    GitHubCommentIssueTool,
+    GitHubGetIssueTool,
+    GitHubListIssuesTool,
+)
 from wintermute.tools.slack import SlackPostMessageTool
 
 
@@ -222,11 +228,16 @@ def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:
         slack_bot = db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
         if slack_bot:
             registry.register(SlackPostMessageTool(token=slack_bot.reference))
+        if db.list_github_tokens():
+            registry.register(GitHubListIssuesTool(db=db))
+            registry.register(GitHubGetIssueTool(db=db))
+            registry.register(GitHubCommentIssueTool(db=db))
     return registry
 
 
 async def main() -> None:
     register(DemoSource())
+    register(GitHubIssuesSource())
     register(SlackSource())
     register(SessionSource())
     db = Database()

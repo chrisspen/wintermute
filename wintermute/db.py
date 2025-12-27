@@ -62,6 +62,7 @@ class CredentialRecord:
     name: str
     provider: str
     reference: str
+    note: Optional[str]
     created_at: str
 
 
@@ -90,6 +91,31 @@ class ProjectRecord:
     name: str
     slug: str
     slack_channel_id: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class GitHubSourceRecord:
+    id: str
+    token_id: Optional[str]
+    project_id: str
+    owner: str
+    repo: str
+    state: str
+    labels: list[str]
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class GitHubTokenRecord:
+    id: str
+    note: Optional[str]
+    token: str
+    user_id: Optional[str]
+    user_login: Optional[str]
     created_at: str
     updated_at: str
 
@@ -206,6 +232,7 @@ class CredentialModel(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     reference: Mapped[str] = mapped_column(String, nullable=False)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -276,6 +303,33 @@ class ProjectVMModel(Base):
     repo_mode: Mapped[str] = mapped_column(String, nullable=False)
     repo_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class GitHubSourceModel(Base):
+    __tablename__ = "github_sources"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    token_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    project_id: Mapped[str] = mapped_column(String, nullable=False)
+    owner: Mapped[str] = mapped_column(String, nullable=False)
+    repo: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    labels_json: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class GitHubTokenModel(Base):
+    __tablename__ = "github_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    user_login: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -554,12 +608,20 @@ class Database:
                 name=row.name,
                 provider=row.provider,
                 reference=row.reference,
+                note=row.note,
                 created_at=row.created_at,
             )
             for row in rows
         ]
 
-    def insert_credential(self, cred_id: str, name: str, provider: str, reference: str) -> None:
+    def insert_credential(
+        self,
+        cred_id: str,
+        name: str,
+        provider: str,
+        reference: str,
+        note: Optional[str] = None,
+    ) -> None:
         with self.session() as session:
             session.add(
                 CredentialModel(
@@ -567,11 +629,19 @@ class Database:
                     name=name,
                     provider=provider,
                     reference=reference,
+                    note=note,
                     created_at=utc_now(),
                 )
             )
 
-    def upsert_credential(self, cred_id: str, name: str, provider: str, reference: str) -> None:
+    def upsert_credential(
+        self,
+        cred_id: str,
+        name: str,
+        provider: str,
+        reference: str,
+        note: Optional[str] = None,
+    ) -> None:
         with self.session() as session:
             existing = session.get(CredentialModel, cred_id)
             if existing is None:
@@ -581,6 +651,7 @@ class Database:
                         name=name,
                         provider=provider,
                         reference=reference,
+                        note=note,
                         created_at=utc_now(),
                     )
                 )
@@ -588,6 +659,8 @@ class Database:
             existing.name = name
             existing.provider = provider
             existing.reference = reference
+            if note is not None:
+                existing.note = note
 
     def get_credential(self, cred_id: str) -> Optional[CredentialRecord]:
         with self.session() as session:
@@ -599,6 +672,7 @@ class Database:
             name=row.name,
             provider=row.provider,
             reference=row.reference,
+            note=row.note,
             created_at=row.created_at,
         )
 
@@ -618,6 +692,7 @@ class Database:
             name=row.name,
             provider=row.provider,
             reference=row.reference,
+            note=row.note,
             created_at=row.created_at,
         )
 
@@ -751,8 +826,198 @@ class Database:
             session.query(ProjectVMModel).filter(
                 ProjectVMModel.project_id == project_id
             ).delete()
+            session.query(GitHubSourceModel).filter(
+                GitHubSourceModel.project_id == project_id
+            ).delete()
             session.query(TicketModel).filter(TicketModel.project_id == project_id).delete()
             session.query(ProjectModel).filter(ProjectModel.id == project_id).delete()
+
+    def list_github_tokens(self) -> list[GitHubTokenRecord]:
+        with self.session() as session:
+            rows = session.execute(select(GitHubTokenModel).order_by(GitHubTokenModel.created_at.desc())).scalars().all()
+        return [
+            GitHubTokenRecord(
+                id=row.id,
+                note=row.note,
+                token=row.token,
+                user_id=row.user_id,
+                user_login=row.user_login,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_github_token(self, token_id: str) -> Optional[GitHubTokenRecord]:
+        with self.session() as session:
+            row = session.get(GitHubTokenModel, token_id)
+        if not row:
+            return None
+        return GitHubTokenRecord(
+            id=row.id,
+            note=row.note,
+            token=row.token,
+            user_id=row.user_id,
+            user_login=row.user_login,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_github_token(
+        self,
+        token_id: str,
+        token: str,
+        note: Optional[str],
+        user_id: Optional[str],
+        user_login: Optional[str],
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                GitHubTokenModel(
+                    id=token_id,
+                    token=token,
+                    note=note,
+                    user_id=user_id,
+                    user_login=user_login,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_github_token(
+        self,
+        token_id: str,
+        *,
+        token: Optional[str] = None,
+        note: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_login: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(GitHubTokenModel, token_id)
+            if not row:
+                return
+            if token is not None:
+                row.token = token
+            if note is not None:
+                row.note = note
+            if user_id is not None:
+                row.user_id = user_id
+            if user_login is not None:
+                row.user_login = user_login
+            row.updated_at = utc_now()
+
+    def delete_github_token(self, token_id: str) -> None:
+        with self.session() as session:
+            session.query(GitHubSourceModel).filter(
+                GitHubSourceModel.token_id == token_id
+            ).delete()
+            session.query(GitHubTokenModel).filter(GitHubTokenModel.id == token_id).delete()
+
+    def list_github_sources(self, project_id: Optional[str] = None) -> list[GitHubSourceRecord]:
+        with self.session() as session:
+            stmt = select(GitHubSourceModel)
+            if project_id:
+                stmt = stmt.where(GitHubSourceModel.project_id == project_id)
+            rows = session.execute(stmt.order_by(GitHubSourceModel.created_at.desc())).scalars().all()
+        return [
+            GitHubSourceRecord(
+                id=row.id,
+                token_id=row.token_id,
+                project_id=row.project_id,
+                owner=row.owner,
+                repo=row.repo,
+                state=row.state,
+                labels=json_loads(row.labels_json) or [],
+                enabled=bool(row.enabled),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_github_source(self, source_id: str) -> Optional[GitHubSourceRecord]:
+        with self.session() as session:
+            row = session.get(GitHubSourceModel, source_id)
+        if not row:
+            return None
+        return GitHubSourceRecord(
+            id=row.id,
+            token_id=row.token_id,
+            project_id=row.project_id,
+            owner=row.owner,
+            repo=row.repo,
+            state=row.state,
+            labels=json_loads(row.labels_json) or [],
+            enabled=bool(row.enabled),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_github_source(
+        self,
+        source_id: str,
+        token_id: Optional[str],
+        project_id: str,
+        owner: str,
+        repo: str,
+        state: str,
+        labels: list[str],
+        enabled: bool,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                GitHubSourceModel(
+                    id=source_id,
+                    token_id=token_id,
+                    project_id=project_id,
+                    owner=owner,
+                    repo=repo,
+                    state=state,
+                    labels_json=json_dumps(labels),
+                    enabled=1 if enabled else 0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_github_source(
+        self,
+        source_id: str,
+        *,
+        token_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+        state: Optional[str] = None,
+        labels: Optional[list[str]] = None,
+        enabled: Optional[bool] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(GitHubSourceModel, source_id)
+            if not row:
+                return
+            if token_id is not None:
+                row.token_id = token_id
+            if project_id is not None:
+                row.project_id = project_id
+            if owner is not None:
+                row.owner = owner
+            if repo is not None:
+                row.repo = repo
+            if state is not None:
+                row.state = state
+            if labels is not None:
+                row.labels_json = json_dumps(labels)
+            if enabled is not None:
+                row.enabled = 1 if enabled else 0
+            row.updated_at = utc_now()
+
+    def delete_github_source(self, source_id: str) -> None:
+        with self.session() as session:
+            session.query(GitHubSourceModel).filter(GitHubSourceModel.id == source_id).delete()
 
     def list_tickets(self, project_id: Optional[str] = None) -> list[TicketRecord]:
         with self.session() as session:

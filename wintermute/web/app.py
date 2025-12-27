@@ -11,6 +11,7 @@ import secrets
 import uuid
 from typing import Any, Optional
 
+import aiohttp
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi import Query
@@ -19,12 +20,14 @@ from starlette.middleware.sessions import SessionMiddleware
 from slack_sdk.web.client import WebClient
 
 from wintermute.db import Database, utc_now
+from wintermute.sources.github import GitHubIssuesSource
 from wintermute.sources.slack import (
     SLACK_APP_TOKEN_NAME,
     SLACK_BOT_TOKEN_NAME,
     SLACK_PROVIDER,
     SlackSource,
 )
+from wintermute.tools.github import GITHUB_PROVIDER, GITHUB_TOKEN_NAME
 
 
 class TaskSourceUpdate(BaseModel):
@@ -38,6 +41,7 @@ class CredentialCreate(BaseModel):
     name: str
     provider: str
     reference: str
+    note: Optional[str] = None
 
 
 class WorkItemStatusUpdate(BaseModel):
@@ -76,6 +80,32 @@ def _parse_channels(raw: str) -> list[str]:
         if cleaned:
             channels.append(cleaned)
     return channels
+
+
+def _parse_labels(raw: str) -> list[str]:
+    labels = []
+    for item in raw.replace("\n", ",").split(","):
+        cleaned = item.strip()
+        if cleaned:
+            labels.append(cleaned)
+    return labels
+
+
+async def _fetch_github_user(token: str) -> tuple[str, str]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "wintermute",
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get("https://api.github.com/user", headers=headers) as response:
+            payload = await response.json()
+            if response.status >= 400:
+                message = payload.get("message", "GitHub API error")
+                raise HTTPException(status_code=400, detail=f"GitHub token validation failed: {message}")
+            user_id = str(payload.get("id", ""))
+            login = str(payload.get("login", ""))
+            return user_id, login
 
 
 def _slugify(value: str) -> str:
@@ -131,6 +161,7 @@ def _find_channel_id(client: WebClient, channel_name: str) -> Optional[str]:
 def _growl(saved: Optional[str]) -> str:
     messages = {
         "slack": "Saved Slack token data",
+        "github": "Saved GitHub token data",
         "project_created": "Project created",
         "project_updated": "Project updated",
         "project_deleted": "Deletion of project successful",
@@ -145,6 +176,14 @@ def _growl(saved: Optional[str]) -> str:
         "mapping_created": "Project mapping created",
         "mapping_updated": "Project mapping updated",
         "mapping_deleted": "Project mapping deleted",
+        "github_source": "Saved GitHub source settings",
+        "slack_source": "Saved Slack source settings",
+        "github_source_created": "GitHub source created",
+        "github_source_updated": "GitHub source updated",
+        "github_source_deleted": "GitHub source deleted",
+        "github_token_created": "GitHub token created",
+        "github_token_updated": "GitHub token updated",
+        "github_token_deleted": "GitHub token deleted",
     }
     if not saved or saved not in messages:
         return ""
@@ -436,6 +475,8 @@ def _render_page(title: str, body: str) -> HTMLResponse:
             <a href="/ui">Home</a>
             <a href="/ui/projects">Projects</a>
             <a href="/ui/tickets">Tickets</a>
+            <a href="/ui/github-tokens">GitHub Tokens</a>
+            <a href="/ui/github-sources">GitHub Sources</a>
             <a href="/ui/vms">VMs</a>
             <a href="/ui/agents">Agents</a>
             <a href="/ui/project-vms">Mappings</a>
@@ -533,13 +574,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         row = database.get_task_source(source_id)
         if not row:
-            raise HTTPException(status_code=404, detail="Source not found")
+            if source_id == GitHubIssuesSource.id:
+                database.upsert_task_source(
+                    GitHubIssuesSource.id,
+                    GitHubIssuesSource.enabled,
+                    GitHubIssuesSource.base_priority,
+                    GitHubIssuesSource.poll_interval_seconds,
+                    config={},
+                )
+                row = database.get_task_source(source_id)
+            if not row:
+                raise HTTPException(status_code=404, detail="Source not found")
         enabled = form.get("enabled") == "on"
         poll_interval = form.get("poll_interval_seconds")
-        config = dict(row.config)
+        config = dict(row.config or {})
         if source_id == SlackSource.id:
             _update_slack_channel_filter(database)
             config = database.get_task_source(SlackSource.id).config
+        elif source_id == GitHubIssuesSource.id:
+            config = row.config
         else:
             channels_raw = str(form.get("channels", ""))
             config["channels"] = _parse_channels(channels_raw)
@@ -553,7 +606,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             poll_interval_seconds,
             config,
         )
-        return RedirectResponse("/ui?saved=project_deleted", status_code=303)
+        saved = "github_source" if source_id == GitHubIssuesSource.id else "slack_source"
+        return RedirectResponse(f"/ui?saved={saved}", status_code=303)
 
     @app.get("/work-items")
     def list_work_items(
@@ -618,6 +672,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "name": row.name,
                 "provider": row.provider,
                 "reference": row.reference,
+                "note": row.note,
                 "created_at": row.created_at,
             }
             for row in database.list_credentials()
@@ -628,7 +683,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         payload: CredentialCreate, user: str = Depends(_require_login)
     ) -> dict[str, Any]:
         cred_id = str(uuid.uuid4())
-        database.insert_credential(cred_id, payload.name, payload.provider, payload.reference)
+        database.insert_credential(
+            cred_id,
+            payload.name,
+            payload.provider,
+            payload.reference,
+            payload.note,
+        )
         return {"id": cred_id}
 
     @app.post("/slack/credentials")
@@ -661,6 +722,58 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 reference=admin_user_id,
             )
         return RedirectResponse("/ui?saved=slack", status_code=303)
+
+    @app.post("/github-tokens")
+    async def create_github_token(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        token = str(form.get("token", "")).strip()
+        note = str(form.get("note", "")).strip() or None
+        if not token:
+            raise HTTPException(status_code=400, detail="GitHub token is required")
+        user_id, login = await _fetch_github_user(token)
+        database.insert_github_token(
+            token_id=str(uuid.uuid4()),
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=login,
+        )
+        return_to = str(form.get("return_to", "/ui/github-tokens")).strip() or "/ui/github-tokens"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/github-tokens"
+        return RedirectResponse(f"{return_to}?saved=github_token_created", status_code=303)
+
+    @app.post("/github-tokens/{token_id}/edit")
+    async def update_github_token(
+        token_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        token = str(form.get("token", "")).strip()
+        note = str(form.get("note", "")).strip() or None
+        existing = database.get_github_token(token_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="GitHub token not found")
+        user_id = existing.user_id
+        user_login = existing.user_login
+        if token:
+            user_id, user_login = await _fetch_github_user(token)
+        database.update_github_token(
+            token_id,
+            token=token or existing.token,
+            note=note if note is not None else existing.note,
+            user_id=user_id,
+            user_login=user_login,
+        )
+        return RedirectResponse("/ui/github-tokens?saved=github_token_updated", status_code=303)
+
+    @app.post("/github-tokens/{token_id}/delete")
+    async def delete_github_token(
+        token_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_github_token(token_id)
+        return RedirectResponse("/ui/github-tokens?saved=github_token_deleted", status_code=303)
 
     @app.post("/projects")
     async def create_project(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -1114,21 +1227,59 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slack_bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
         slack_app = database.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
         slack_admin = database.get_credential_by_name(SLACK_PROVIDER, "admin_user_id")
-        project_options = "".join(
-            f"<option value=\"{project.id}\">{project.name}</option>" for project in projects
-        )
-        vm_options = "".join(
-            f"<option value=\"{vm.id}\">{vm.name} ({vm.host})</option>" for vm in vm_targets
-        )
+        github_tokens = database.list_github_tokens()
+        github_sources = database.list_github_sources()
         project_lookup = {project.id: project.name for project in projects}
         vm_lookup = {vm.id: vm.name for vm in vm_targets}
+        github_sources_list = "".join(
+            f"<li><a href='/ui/github-sources/{source.id}/edit'>{project_lookup.get(source.project_id, 'unknown')}</a>: "
+            f"{source.owner}/{source.repo}</li>"
+            for source in github_sources[:10]
+        )
+        github_tokens_list = "".join(
+            f"<li><a href='/ui/github-tokens/{token.id}/edit'>{token.note or token.user_login or 'token'}</a></li>"
+            for token in github_tokens[:10]
+        )
+        if not github_sources_list:
+            github_sources_list = "<li class='muted'>No GitHub sources yet</li>"
+        if not github_tokens_list:
+            github_tokens_list = "<li class='muted'>No GitHub tokens yet</li>"
         project_list = "".join(
             f"<li><a href=\"/ui/projects/{project.id}/edit\">{project.name}</a> ({project.slug})</li>"
             for project in projects[:10]
         )
+        if not project_list:
+            project_list = "<li class='muted'>No projects yet</li>"
+        tickets = database.list_tickets()
+        ticket_list = "".join(
+            f"<li>{ticket.title} [{ticket.status}]</li>" for ticket in tickets[:10]
+        )
+        if not ticket_list:
+            ticket_list = "<li class='muted'>No tickets yet</li>"
+        vm_list = "".join(
+            f"<li><a href='/ui/vms/{vm.id}/edit'>{vm.name}</a> ({vm.host})</li>"
+            for vm in vm_targets[:10]
+        )
+        if not vm_list:
+            vm_list = "<li class='muted'>No VM targets yet</li>"
+        agent_list = "".join(
+            f"<li><a href='/ui/agents/{agent.id}/edit'>{agent.name}</a> ({agent.slug})</li>"
+            for agent in agents[:10]
+        )
+        if not agent_list:
+            agent_list = "<li class='muted'>No agents yet</li>"
+        mapping_list = "".join(
+            f"<li><a href='/ui/project-vms/{mapping.id}/edit'>{project_lookup.get(mapping.project_id, mapping.project_id)} "
+            f"→ {vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id)}</a> ({mapping.repo_mode})</li>"
+            for mapping in project_vms[:10]
+        )
+        if not mapping_list:
+            mapping_list = "<li class='muted'>No mappings yet</li>"
         session_list = "".join(
             f"<li>{session.id} [{session.status}]</li>" for session in sessions[:10]
         )
+        if not session_list:
+            session_list = "<li class='muted'>No sessions yet</li>"
         growl = _growl(request.query_params.get("saved"))
         body = f"""
         {growl}
@@ -1182,110 +1333,57 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
               </div>
             </div>
             <div class="group">
-              <p class="group-title">Projects</p>
+              <p class="group-title">GitHub</p>
               <div class="tile">
-                <h3>Create Project</h3>
-                <form method="post" action="/projects">
-                  <input type="hidden" name="return_to" value="/ui" />
-                  <label>Name</label>
-                  <input type="text" name="name" required />
-                  <label>Slug (optional)</label>
-                  <input type="text" name="slug" placeholder="proj-name" />
-                  <label>Slack Channel ID (optional)</label>
-                  <input type="text" name="slack_channel_id" placeholder="C0123456789" />
-                  <button type="submit">Create Project</button>
-                </form>
-                <p class="muted">Creates a public Slack channel (requires channels:manage) or use a channel ID.</p>
+                <h3>GitHub Tokens</h3>
+                <a href="/ui/github-tokens/create">Add GitHub Token</a>
+                <ul>{github_tokens_list}</ul>
               </div>
               <div class="tile">
+                <h3>GitHub Sources</h3>
+                <a href="/ui/github-sources/create">Add GitHub Source</a>
+                <ul>{github_sources_list}</ul>
+              </div>
+            </div>
+            <div class="group">
+              <p class="group-title">Projects</p>
+              <div class="tile">
                 <h3>Projects</h3>
-                <ul>
-                  {project_list}
-                </ul>
+                <a href="/ui/projects/create?return_to=/ui">Add Project</a>
+                <ul>{project_list}</ul>
+                <p class="muted">Creates a public Slack channel (requires channels:manage) or use a channel ID.</p>
+              </div>
+            </div>
+            <div class="group">
+              <p class="group-title">Tickets</p>
+              <div class="tile">
+                <h3>Tickets</h3>
+                <a href="/ui/tickets/create?return_to=/ui">Add Ticket</a>
+                <ul>{ticket_list}</ul>
               </div>
             </div>
             <div class="group">
               <p class="group-title">VM Targets</p>
               <div class="tile">
-                <h3>Add VM</h3>
-                <form method="post" action="/vms">
-                  <input type="hidden" name="return_to" value="/ui" />
-                  <label>Name</label>
-                  <input type="text" name="name" required />
-                  <label>Host</label>
-                  <input type="text" name="host" required />
-                  <label>User</label>
-                  <input type="text" name="user" required />
-                  <label>Port</label>
-                  <input type="number" name="port" value="22" />
-                  <button type="submit">Add VM</button>
-                </form>
-              </div>
-              <div class="tile">
                 <h3>VM Targets</h3>
-                <ul>
-                  {''.join(f"<li><a href='/ui/vms/{vm.id}/edit'>{vm.name}</a> ({vm.host})</li>" for vm in vm_targets[:10])}
-                </ul>
+                <a href="/ui/vms/create?return_to=/ui">Add VM</a>
+                <ul>{vm_list}</ul>
               </div>
             </div>
             <div class="group">
               <p class="group-title">Agents</p>
               <div class="tile">
-                <h3>Add Agent</h3>
-                <form method="post" action="/agents">
-                  <input type="hidden" name="return_to" value="/ui" />
-                  <label>Name</label>
-                  <input type="text" name="name" required />
-                  <label>Slug</label>
-                  <input type="text" name="slug" required />
-                  <label>Command</label>
-                  <input type="text" name="command" required />
-                  <label>Required SSH Options</label>
-                  <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
-                  <button type="submit">Add Agent</button>
-                </form>
-              </div>
-              <div class="tile">
                 <h3>Agents</h3>
-                <ul>
-                  {''.join(f"<li><a href='/ui/agents/{agent.id}/edit'>{agent.name}</a> ({agent.slug})</li>" for agent in agents[:10])}
-                </ul>
+                <a href="/ui/agents/create?return_to=/ui">Add Agent</a>
+                <ul>{agent_list}</ul>
               </div>
             </div>
             <div class="group">
               <p class="group-title">Project VM Mapping</p>
               <div class="tile">
-                <h3>Attach VM</h3>
-                <form method="post" action="/project_vms">
-                  <input type="hidden" name="return_to" value="/ui" />
-                  <label>Project</label>
-                  <select name="project_id" required>
-                    {project_options}
-                  </select>
-                  <label>VM Target</label>
-                  <select name="vm_target_id" required>
-                    {vm_options}
-                  </select>
-                  <label>Repo Mode</label>
-                  <select name="repo_mode">
-                    <option value="mirror">mirror</option>
-                    <option value="clone">clone</option>
-                  </select>
-                  <label>Repo Path</label>
-                  <input type="text" name="repo_path" />
-                  <label>Repo URL (clone mode)</label>
-                  <input type="text" name="repo_url" />
-                  <button type="submit">Attach VM</button>
-                </form>
-              </div>
-              <div class="tile">
                 <h3>Mappings</h3>
-                <ul>
-                  {''.join(
-                    f"<li><a href='/ui/project-vms/{mapping.id}/edit'>{project_lookup.get(mapping.project_id, mapping.project_id)} → {vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id)}</a> ({mapping.repo_mode})</li>"
-                    for mapping in project_vms[:10]
-                  )}
-                </ul>
+                <a href="/ui/project-vms/create?return_to=/ui">Attach VM</a>
+                <ul>{mapping_list}</ul>
               </div>
             </div>
             <div class="group">
@@ -1325,7 +1423,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
           <div class="grid">
             <div class="tile">
               <h3>Projects</h3>
-              <a href="/ui/projects/create">Create Project</a>
+              <a href="/ui/projects/create?return_to=/ui/projects">Create Project</a>
             </div>
             <div class="tile">
               <h3>Project List</h3>
@@ -1338,13 +1436,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.get("/ui/projects/create", response_class=HTMLResponse)
     def projects_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
-        body = """
+        return_to = request.query_params.get("return_to", "/ui/projects")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/projects"
+        body = f"""
         <div class="panel">
           <div class="grid">
             <div class="tile">
               <h3>Create Project</h3>
               <form method="post" action="/projects">
-                <input type="hidden" name="return_to" value="/ui/projects" />
+                <input type="hidden" name="return_to" value="{return_to}" />
                 <label>Name</label>
                 <input type="text" name="name" required />
                 <label>Slug (optional)</label>
@@ -1375,7 +1476,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
           <div class="grid">
             <div class="tile">
               <h3>VM Targets</h3>
-              <a href="/ui/vms/create">Add VM</a>
+              <a href="/ui/vms/create?return_to=/ui/vms">Add VM</a>
             </div>
             <div class="tile">
               <h3>VM List</h3>
@@ -1388,13 +1489,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.get("/ui/vms/create", response_class=HTMLResponse)
     def vms_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
-        body = """
+        return_to = request.query_params.get("return_to", "/ui/vms")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/vms"
+        body = f"""
         <div class="panel">
           <div class="grid">
             <div class="tile">
               <h3>Add VM</h3>
               <form method="post" action="/vms">
-                <input type="hidden" name="return_to" value="/ui/vms" />
+                <input type="hidden" name="return_to" value="{return_to}" />
                 <label>Name</label>
                 <input type="text" name="name" required />
                 <label>Host</label>
@@ -1427,7 +1531,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
           <div class="grid">
             <div class="tile">
               <h3>Agents</h3>
-              <a href="/ui/agents/create">Add Agent</a>
+              <a href="/ui/agents/create?return_to=/ui/agents">Add Agent</a>
             </div>
             <div class="tile">
               <h3>Agent List</h3>
@@ -1440,13 +1544,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.get("/ui/agents/create", response_class=HTMLResponse)
     def agents_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
-        body = """
+        return_to = request.query_params.get("return_to", "/ui/agents")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/agents"
+        body = f"""
         <div class="panel">
           <div class="grid">
             <div class="tile">
               <h3>Add Agent</h3>
               <form method="post" action="/agents">
-                <input type="hidden" name="return_to" value="/ui/agents" />
+                <input type="hidden" name="return_to" value="{return_to}" />
                 <label>Name</label>
                 <input type="text" name="name" required />
                 <label>Slug</label>
@@ -1483,7 +1590,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
           <div class="grid">
             <div class="tile">
               <h3>Project VM Mappings</h3>
-              <a href="/ui/project-vms/create">Attach VM</a>
+              <a href="/ui/project-vms/create?return_to=/ui/project-vms">Attach VM</a>
             </div>
             <div class="tile">
               <h3>Mappings</h3>
@@ -1498,6 +1605,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def project_vms_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
         projects = database.list_projects()
         vm_targets = database.list_vm_targets()
+        return_to = request.query_params.get("return_to", "/ui/project-vms")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/project-vms"
         project_options = "".join(
             f"<option value='{project.id}'>{project.name}</option>" for project in projects
         )
@@ -1510,7 +1620,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             <div class="tile">
               <h3>Attach VM</h3>
               <form method="post" action="/project_vms">
-                <input type="hidden" name="return_to" value="/ui/project-vms" />
+                <input type="hidden" name="return_to" value="{return_to}" />
                 <label>Project</label>
                 <select name="project_id" required>
                   {project_options}
@@ -1535,6 +1645,339 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         </div>
         """
         return _render_page("Attach VM", body)
+
+    @app.get("/ui/github-sources", response_class=HTMLResponse)
+    def github_sources_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        sources = database.list_github_sources()
+        github_task_source = database.get_task_source(GitHubIssuesSource.id)
+        legacy_config = github_task_source.config if github_task_source else {}
+        project_lookup = {project.id: project.name for project in database.list_projects()}
+        token_lookup = {token.id: token.note or token.user_login or token.id for token in database.list_github_tokens()}
+        source_list = "".join(
+            f"<li><a href='/ui/github-sources/{source.id}/edit'>{project_lookup.get(source.project_id, 'unknown')}</a>: "
+            f"{source.owner}/{source.repo} ({'enabled' if source.enabled else 'disabled'}) "
+            f"[{token_lookup.get(source.token_id, 'no token')}]"
+            f"<form method='post' action='/github-sources/{source.id}/delete' style='display:inline; margin-left:8px;'>"
+            "<button type='submit' class='danger'>Delete</button>"
+            "</form></li>"
+            for source in sources
+        )
+        if not source_list:
+            source_list = "<li class='muted'>No GitHub sources yet</li>"
+        legacy_project_name = project_lookup.get(str(legacy_config.get("project_id", "")).strip(), "unset")
+        legacy_owner = str(legacy_config.get("owner", "")).strip()
+        legacy_repo = str(legacy_config.get("repo", "")).strip()
+        legacy_state = str(legacy_config.get("state", "")).strip()
+        legacy_labels = ", ".join(legacy_config.get("labels", []) or [])
+        legacy_panel = ""
+        if legacy_owner or legacy_repo or legacy_state or legacy_labels or legacy_project_name != "unset":
+            legacy_panel = f"""
+            <div class="tile">
+              <h3>Legacy GitHub Issues Config</h3>
+              <ul>
+                <li>Project: {legacy_project_name}</li>
+                <li>Repo: {legacy_owner}/{legacy_repo}</li>
+                <li>State: {legacy_state or "open"}</li>
+                <li>Labels: {legacy_labels or "none"}</li>
+              </ul>
+            </div>
+            """
+        body = f"""
+        <div class="panel">
+          {_growl(request.query_params.get('saved'))}
+          <div class="grid">
+            <div class="tile">
+              <h3>GitHub Sources</h3>
+              <a href="/ui/github-sources/create?return_to=/ui/github-sources">Add GitHub Source</a>
+            </div>
+            <div class="tile">
+              <h3>GitHub Poller</h3>
+              <form method="post" action="/sources/github_issues/ui_update">
+                <div class="checkbox-row">
+                  <input type="checkbox" name="enabled" {"checked" if github_task_source and github_task_source.enabled else ""} />
+                  <label>Enabled</label>
+                </div>
+                <label>Poll Interval (seconds)</label>
+                <input type="number" name="poll_interval_seconds" min="10" value="{github_task_source.poll_interval_seconds if github_task_source else 60}" />
+                <button type="submit">Update Poller</button>
+              </form>
+            </div>
+            <div class="tile">
+              <h3>Source List</h3>
+              <ul>{source_list}</ul>
+            </div>
+            {legacy_panel}
+          </div>
+        </div>
+        """
+        return _render_page("GitHub Sources", body)
+
+    @app.get("/ui/github-tokens", response_class=HTMLResponse)
+    def github_tokens_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        tokens = database.list_github_tokens()
+        legacy_token = database.get_credential_by_name(GITHUB_PROVIDER, GITHUB_TOKEN_NAME)
+        legacy_user_id = database.get_credential_by_name(GITHUB_PROVIDER, "user_id")
+        legacy_user_login = database.get_credential_by_name(GITHUB_PROVIDER, "user_login")
+        token_list = "".join(
+            f"<li><a href='/ui/github-tokens/{token.id}/edit'>{token.note or token.user_login or token.id}</a>"
+            f"<form method='post' action='/github-tokens/{token.id}/delete' style='display:inline; margin-left:8px;'>"
+            "<button type='submit' class='danger'>Delete</button>"
+            "</form></li>"
+            for token in tokens
+        )
+        if not token_list:
+            token_list = "<li class='muted'>No GitHub tokens yet</li>"
+        legacy_panel = ""
+        if legacy_token:
+            legacy_panel = f"""
+            <div class="tile">
+              <h3>Legacy GitHub Token</h3>
+              <ul>
+                <li>User: {legacy_user_login.reference if legacy_user_login else "unknown"}{f" ({legacy_user_id.reference})" if legacy_user_id else ""}</li>
+                <li>Token: configured</li>
+              </ul>
+            </div>
+            """
+        body = f"""
+        <div class="panel">
+          {_growl(request.query_params.get('saved'))}
+          <div class="grid">
+            <div class="tile">
+              <h3>GitHub Tokens</h3>
+              <a href="/ui/github-tokens/create?return_to=/ui/github-tokens">Add GitHub Token</a>
+            </div>
+            <div class="tile">
+              <h3>Token List</h3>
+              <ul>{token_list}</ul>
+            </div>
+            {legacy_panel}
+          </div>
+        </div>
+        """
+        return _render_page("GitHub Tokens", body)
+
+    @app.get("/ui/github-tokens/create", response_class=HTMLResponse)
+    def github_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        return_to = request.query_params.get("return_to", "/ui/github-tokens")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/github-tokens"
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Add GitHub Token</h3>
+              <form method="post" action="/github-tokens">
+                <input type="hidden" name="return_to" value="{return_to}" />
+                <label>Note</label>
+                <input type="text" name="note" placeholder="e.g. gears repo token" />
+                <label>Personal Access Token</label>
+                <input type="password" name="token" required />
+                <button type="submit">Add GitHub Token</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Add GitHub Token", body)
+
+    @app.get("/ui/github-tokens/{token_id}/edit", response_class=HTMLResponse)
+    def github_tokens_edit_ui(token_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+        token = database.get_github_token(token_id)
+        if not token:
+            raise HTTPException(status_code=404, detail="GitHub token not found")
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Edit GitHub Token</h3>
+              <p class="muted">User: {token.user_login or "unknown"}{f" ({token.user_id})" if token.user_id else ""}</p>
+              <form method="post" action="/github-tokens/{token.id}/edit">
+                <label>Note</label>
+                <input type="text" name="note" value="{token.note or ''}" />
+                <label>Personal Access Token</label>
+                <input type="password" name="token" placeholder="leave blank to keep existing" />
+                <button type="submit">Save GitHub Token</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Edit GitHub Token", body)
+
+    @app.get("/ui/github-sources/create", response_class=HTMLResponse)
+    def github_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+        projects = database.list_projects()
+        tokens = database.list_github_tokens()
+        return_to = request.query_params.get("return_to", "/ui/github-sources")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/github-sources"
+        project_options = "".join(
+            f"<option value='{project.id}'>{project.name}</option>" for project in projects
+        )
+        token_options = "".join(
+            f"<option value='{token.id}'>{token.note or token.user_login or token.id}</option>"
+            for token in tokens
+        )
+        token_notice = "" if tokens else "<p class='muted'>Add a GitHub token before creating a source.</p>"
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Add GitHub Source</h3>
+              {token_notice}
+              <form method="post" action="/github-sources">
+                <input type="hidden" name="return_to" value="{return_to}" />
+                <div class="checkbox-row">
+                  <input type="checkbox" name="enabled" checked />
+                  <label>Enabled</label>
+                </div>
+                <label>Project</label>
+                <select name="project_id" required>
+                  {project_options}
+                </select>
+                <label>Token</label>
+                <select name="token_id" required>
+                  {token_options}
+                </select>
+                <label>Repo Owner</label>
+                <input type="text" name="owner" required />
+                <label>Repo Name</label>
+                <input type="text" name="repo" required />
+                <label>Issue State</label>
+                <select name="state">
+                  <option value="open">open</option>
+                  <option value="closed">closed</option>
+                  <option value="all">all</option>
+                </select>
+                <label>Labels (comma-separated)</label>
+                <input type="text" name="labels" />
+                <button type="submit">Add GitHub Source</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Add GitHub Source", body)
+
+    @app.get("/ui/github-sources/{source_id}/edit", response_class=HTMLResponse)
+    def github_sources_edit_ui(source_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+        source = database.get_github_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="GitHub source not found")
+        projects = database.list_projects()
+        tokens = database.list_github_tokens()
+        project_options = "".join(
+            f"<option value='{project.id}' {'selected' if project.id == source.project_id else ''}>{project.name}</option>"
+            for project in projects
+        )
+        token_options = "".join(
+            f"<option value='{token.id}' {'selected' if token.id == source.token_id else ''}>{token.note or token.user_login or token.id}</option>"
+            for token in tokens
+        )
+        labels = ", ".join(source.labels)
+        body = f"""
+        <div class="panel">
+          <div class="grid">
+            <div class="tile">
+              <h3>Edit GitHub Source</h3>
+              <form method="post" action="/github-sources/{source.id}/edit">
+                <div class="checkbox-row">
+                  <input type="checkbox" name="enabled" {"checked" if source.enabled else ""} />
+                  <label>Enabled</label>
+                </div>
+                <label>Project</label>
+                <select name="project_id" required>
+                  {project_options}
+                </select>
+                <label>Token</label>
+                <select name="token_id" required>
+                  {token_options}
+                </select>
+                <label>Repo Owner</label>
+                <input type="text" name="owner" value="{source.owner}" required />
+                <label>Repo Name</label>
+                <input type="text" name="repo" value="{source.repo}" required />
+                <label>Issue State</label>
+                <select name="state">
+                  <option value="open" {"selected" if source.state == "open" else ""}>open</option>
+                  <option value="closed" {"selected" if source.state == "closed" else ""}>closed</option>
+                  <option value="all" {"selected" if source.state == "all" else ""}>all</option>
+                </select>
+                <label>Labels (comma-separated)</label>
+                <input type="text" name="labels" value="{labels}" />
+                <button type="submit">Save GitHub Source</button>
+              </form>
+            </div>
+          </div>
+        </div>
+        """
+        return _render_page("Edit GitHub Source", body)
+
+    @app.post("/github-sources")
+    async def create_github_source(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        token_id = str(form.get("token_id", "")).strip()
+        owner = str(form.get("owner", "")).strip()
+        repo = str(form.get("repo", "")).strip()
+        state = str(form.get("state", "open")).strip() or "open"
+        labels_raw = str(form.get("labels", "")).strip()
+        labels = _parse_labels(labels_raw)
+        enabled = form.get("enabled") == "on"
+        if not project_id or not token_id or not owner or not repo:
+            raise HTTPException(status_code=400, detail="Missing GitHub source fields")
+        if not database.get_github_token(token_id):
+            raise HTTPException(status_code=400, detail="GitHub token not found")
+        if not database.get_github_token(token_id):
+            raise HTTPException(status_code=400, detail="GitHub token not found")
+        database.insert_github_source(
+            str(uuid.uuid4()),
+            token_id=token_id,
+            project_id=project_id,
+            owner=owner,
+            repo=repo,
+            state=state,
+            labels=labels,
+            enabled=enabled,
+        )
+        return_to = str(form.get("return_to", "/ui/github-sources")).strip() or "/ui/github-sources"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/github-sources"
+        return RedirectResponse(f"{return_to}?saved=github_source_created", status_code=303)
+
+    @app.post("/github-sources/{source_id}/edit")
+    async def update_github_source(
+        source_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        token_id = str(form.get("token_id", "")).strip()
+        owner = str(form.get("owner", "")).strip()
+        repo = str(form.get("repo", "")).strip()
+        state = str(form.get("state", "open")).strip() or "open"
+        labels_raw = str(form.get("labels", "")).strip()
+        labels = _parse_labels(labels_raw)
+        enabled = form.get("enabled") == "on"
+        if not project_id or not token_id or not owner or not repo:
+            raise HTTPException(status_code=400, detail="Missing GitHub source fields")
+        database.update_github_source(
+            source_id,
+            token_id=token_id,
+            project_id=project_id,
+            owner=owner,
+            repo=repo,
+            state=state,
+            labels=labels,
+            enabled=enabled,
+        )
+        return RedirectResponse("/ui/github-sources?saved=github_source_updated", status_code=303)
+
+    @app.post("/github-sources/{source_id}/delete")
+    async def delete_github_source(
+        source_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_github_source(source_id)
+        return RedirectResponse("/ui/github-sources?saved=github_source_deleted", status_code=303)
 
     @app.get("/ui/project-vms/{mapping_id}/edit", response_class=HTMLResponse)
     def project_vms_edit_ui(mapping_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
@@ -1626,7 +2069,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             <div class="tile">
               <h3>Tickets</h3>
               <p class="muted">All current tickets.</p>
-              <a href="/ui/tickets/create">Create Ticket</a>
+              <a href="/ui/tickets/create?return_to=/ui/tickets">Create Ticket</a>
             </div>
             <div class="tile">
               <h3>Ticket List</h3>
@@ -1642,6 +2085,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     @app.get("/ui/tickets/create", response_class=HTMLResponse)
     def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
         projects = database.list_projects()
+        return_to = request.query_params.get("return_to", "/ui/tickets")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/tickets"
         project_options = "".join(
             f"<option value=\"{project.id}\">{project.name}</option>" for project in projects
         )
@@ -1651,7 +2097,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             <div class="tile">
               <h3>Create Ticket</h3>
               <form method="post" action="/tickets">
-                <input type="hidden" name="return_to" value="/ui/tickets" />
+                <input type="hidden" name="return_to" value="{return_to}" />
                 <label>Project</label>
                 <select name="project_id" required>
                   {project_options}

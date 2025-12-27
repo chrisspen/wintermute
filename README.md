@@ -31,6 +31,13 @@ Slack setup
 - Enable the Slack source under "Slack Source".
 - Restart the supervisor after updating Slack tokens so tools load the new credentials.
 
+GitHub issues setup
+-------------------
+- Generate a GitHub Personal Access Token with `repo` scope.
+- Add it under "GitHub Tokens" in the admin UI.
+- Create one or more GitHub Sources (project, token, owner, repo, labels/state).
+- Enable the GitHub poller under "GitHub Sources".
+
 Projects, mappings, and sessions
 --------------------------------
 - Create a Project to auto-create a Slack channel (public) for that project.
