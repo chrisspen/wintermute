@@ -4,11 +4,21 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
 
-if [ ! -d ".venv" ]; then
-  python3 -m venv .venv
+VENV_DIR="${WINTERMUTE_VENV:-.venv}"
+if [ "${1:-}" = "--agent-name" ] && [ -n "${2:-}" ]; then
+  VENV_DIR=".${2}/.venv"
+  shift 2
+elif [ "${1:-}" = "--venv-dir" ] && [ -n "${2:-}" ]; then
+  VENV_DIR="$2"
+  shift 2
 fi
 
-source .venv/bin/activate
+if [ ! -d "$VENV_DIR" ]; then
+  mkdir -p "$(dirname "$VENV_DIR")"
+  python3 -m venv "$VENV_DIR"
+fi
+
+source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 

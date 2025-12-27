@@ -15,7 +15,12 @@ from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext, WorkItemBlocked
 from wintermute.sources.demo import DemoSource
 from wintermute.sources.github import GitHubIssuesSource
-from wintermute.sources.slack import SlackSource, SLACK_BOT_TOKEN_NAME, SLACK_PROVIDER
+from wintermute.sources.slack import (
+    SlackSource,
+    SLACK_APP_TOKEN_NAME,
+    SLACK_BOT_TOKEN_NAME,
+    SLACK_PROVIDER,
+)
 from wintermute.sources.sessions import SessionSource
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
@@ -60,6 +65,8 @@ class Supervisor:
         self._stop_event = asyncio.Event()
         self._started_at = utc_now()
         self._last_poll: dict[str, float] = {}
+        self._tools_version: tuple[str, str] = ("", "")
+        self._slack_signature: tuple[Optional[str], Optional[str]] = (None, None)
 
     def status(self) -> SupervisorStatus:
         return SupervisorStatus(
@@ -74,6 +81,7 @@ class Supervisor:
         self._ensure_task_sources()
         try:
             while not self._stop_event.is_set():
+                await self._refresh_runtime()
                 await self._poll_sources()
                 self._update_state("polled sources")
                 await self._refresh_queue()
@@ -230,6 +238,32 @@ class Supervisor:
             last_action=last_action,
             queue_depth=len(self._queue),
         )
+
+    async def _refresh_runtime(self) -> None:
+        version = (
+            self.db.get_latest_credential_update(),
+            self.db.get_latest_github_token_update(),
+        )
+        if version != self._tools_version:
+            self.tools = build_default_tools(self.db)
+            self._tools_version = version
+        slack_source = self._get_slack_source()
+        if slack_source:
+            bot = self.db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+            app = self.db.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
+            signature = (
+                bot.reference if bot else None,
+                app.reference if app else None,
+            )
+            if signature != self._slack_signature:
+                await slack_source.reset_socket()
+                self._slack_signature = signature
+
+    def _get_slack_source(self) -> Optional[SlackSource]:
+        for source in self.sources:
+            if isinstance(source, SlackSource):
+                return source
+        return None
 
 
 def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:

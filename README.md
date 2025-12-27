@@ -12,6 +12,14 @@ Run setup:
 ./setup.sh
 ```
 
+Per-agent venv (optional):
+
+```
+./setup.sh --agent-name codex
+WINTERMUTE_AGENT_NAME=codex ./run_web.sh
+WINTERMUTE_AGENT_NAME=codex ./run_supervisor.sh
+```
+
 On first run, `setup.sh` creates `.venv` and copies `.env.template` to `.env`, then exits.
 Fill in `.env`, then rerun `./setup.sh` to validate the OpenWebUI API, run migrations, and finish setup.
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Generator, Optional
 
-from sqlalchemy import Integer, String, Text, create_engine, inspect, select
+from sqlalchemy import Integer, String, Text, create_engine, func, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -618,6 +618,20 @@ class Database:
             for row in rows
         ]
 
+    def get_latest_credential_update(self) -> str:
+        with self.session() as session:
+            rows = session.execute(
+                select(
+                    CredentialModel.id,
+                    CredentialModel.name,
+                    CredentialModel.provider,
+                    CredentialModel.reference,
+                    CredentialModel.note,
+                    CredentialModel.created_at,
+                ).order_by(CredentialModel.id)
+            ).all()
+        return json_dumps([tuple(row) for row in rows])
+
     def insert_credential(
         self,
         cred_id: str,
@@ -851,6 +865,11 @@ class Database:
             )
             for row in rows
         ]
+
+    def get_latest_github_token_update(self) -> str:
+        with self.session() as session:
+            value = session.execute(select(func.max(GitHubTokenModel.updated_at))).scalar_one_or_none()
+        return value or ""
 
     def get_github_token(self, token_id: str) -> Optional[GitHubTokenRecord]:
         with self.session() as session:

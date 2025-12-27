@@ -182,6 +182,24 @@ class SlackSource(TaskSource):
         self._bot_user_id: Optional[str] = None
         self._channels_filter: Optional[set[str]] = None
 
+    async def reset_socket(self) -> None:
+        if self._socket_task:
+            self._socket_task.cancel()
+            try:
+                await self._socket_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            self._socket_task = None
+        if self._client:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+        self._bot_user_id = None
+
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
         db: Database = ctx["db"]
         source = db.get_task_source(self.id)
