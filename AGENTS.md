@@ -100,6 +100,7 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - Prefer typed, structured outputs from the model; reject non-conforming responses.
 - Every external call (Jira/GitHub/IM) must be mockable and have timeouts + retries.
 - Add metrics hooks (queue depth, task latency, error rates) early.
+- UI rule: no HTML or CSS embedded in Python files; use template files and static assets.
 
 ## Minimal local run (dev)
 Run setup:

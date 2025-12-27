@@ -12,9 +12,11 @@ import uuid
 from typing import Any, Optional
 
 import aiohttp
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from fastapi import Query
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 from slack_sdk.web.client import WebClient
@@ -158,7 +160,7 @@ def _find_channel_id(client: WebClient, channel_name: str) -> Optional[str]:
     return None
 
 
-def _growl(saved: Optional[str]) -> str:
+def _growl_message(saved: Optional[str]) -> Optional[str]:
     messages = {
         "slack": "Saved Slack token data",
         "github": "Saved GitHub token data",
@@ -185,317 +187,9 @@ def _growl(saved: Optional[str]) -> str:
         "github_token_updated": "GitHub token updated",
         "github_token_deleted": "GitHub token deleted",
     }
-    if not saved or saved not in messages:
-        return ""
-    return (
-        "<div class=\"growl\"><div class=\"growl-pill\">"
-        f"{messages[saved]}"
-        "</div></div>"
-        "<script>"
-        "setTimeout(function(){"
-        "var url=new URL(window.location.href);"
-        "url.searchParams.delete('saved');"
-        "window.history.replaceState({}, '', url.toString());"
-        "}, 3200);"
-        "</script>"
-    )
-
-
-def _render_page(title: str, body: str) -> HTMLResponse:
-    html = f"""<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1"/>
-    <title>{title}</title>
-    <style>
-      :root {{
-        --bg: #f5f2ea;
-        --ink: #1f1b16;
-        --muted: #6f6254;
-        --accent: #b3472f;
-        --accent-dark: #7b2c1c;
-        --panel: #fef9ef;
-        --edge: #e2d6c4;
-      }}
-      * {{
-        box-sizing: border-box;
-      }}
-      body {{
-        margin: 0;
-        font-family: "Trebuchet MS", "Gill Sans", "Helvetica Neue", Arial, sans-serif;
-        background: linear-gradient(180deg, #f7f0e5 0%, #eee2d0 100%);
-        color: var(--ink);
-        min-height: 100vh;
-      }}
-      .shell {{
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 32px 24px 64px;
-      }}
-      header {{
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        padding: 24px 28px;
-        background: linear-gradient(120deg, #1f1b16, #3b2e24);
-        border-radius: 18px;
-        color: #fef9ef;
-        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
-        position: relative;
-        overflow: hidden;
-      }}
-      h1 {{
-        margin: 0;
-        font-size: 30px;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-      }}
-      h2 {{
-        font-family: "Trebuchet MS", "Gill Sans", "Helvetica Neue", Arial, sans-serif;
-        font-size: 24px;
-        margin-top: 0;
-      }}
-      main {{
-        margin-top: 28px;
-      }}
-      .panel {{
-        background: var(--panel);
-        border-radius: 18px;
-        padding: 28px;
-        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.12);
-        border: 1px solid var(--edge);
-      }}
-      .tile {{
-        padding: 16px;
-        background: #fffdf7;
-        border-radius: 14px;
-        border: 1px solid var(--edge);
-        box-shadow: inset 0 0 0 1px rgba(179, 71, 47, 0.08);
-      }}
-      label {{
-        display: block;
-        margin-bottom: 8px;
-        color: var(--muted);
-        font-size: 13px;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-      }}
-      input, button, select {{
-        font-family: inherit;
-        padding: 12px 14px;
-        border-radius: 10px;
-        border: 1px solid var(--edge);
-        margin-bottom: 16px;
-        width: 100%;
-        box-sizing: border-box;
-        background: #fffdf8;
-      }}
-      input[type="checkbox"] {{
-        width: auto;
-        margin: 0;
-      }}
-      .checkbox-row {{
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 16px;
-      }}
-      .checkbox-row label {{
-        margin: 0;
-      }}
-      .inline-field {{
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 16px;
-      }}
-      .inline-field select {{
-        flex: 1;
-        margin-bottom: 0;
-      }}
-      .inline-link {{
-        align-self: center;
-        color: var(--accent-dark);
-        font-size: 12px;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        display: flex;
-        align-items: center;
-        height: 44px;
-      }}
-      button {{
-        background: #1f8a3b;
-        color: #ecfff0;
-        font-weight: bold;
-        border: none;
-        cursor: pointer;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-      }}
-      button:hover {{
-        filter: brightness(1.05);
-      }}
-      .danger {{
-        background: #b3261e;
-        color: #fff4f2;
-      }}
-      .ghost {{
-        background: transparent;
-        border: 1px solid var(--edge);
-        color: var(--ink);
-      }}
-      .modal {{
-        position: fixed;
-        inset: 0;
-        background: rgba(15, 12, 9, 0.55);
-        display: none;
-        align-items: center;
-        justify-content: center;
-        padding: 24px;
-        z-index: 1000;
-      }}
-      .modal.open {{
-        display: flex;
-      }}
-      .modal-card {{
-        background: #fffdf7;
-        border-radius: 18px;
-        padding: 24px;
-        width: min(420px, 100%);
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
-      }}
-      .modal-actions {{
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-      }}
-      .grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 18px;
-      }}
-      .group {{
-        grid-column: 1 / -1;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: 18px;
-        padding: 18px;
-        border-radius: 16px;
-        border: 1px dashed var(--edge);
-        background: rgba(255, 253, 248, 0.6);
-      }}
-      .group-title {{
-        grid-column: 1 / -1;
-        font-size: 14px;
-        letter-spacing: 2px;
-        text-transform: uppercase;
-        color: var(--muted);
-        margin: 0;
-      }}
-      a {{
-        color: var(--accent-dark);
-      }}
-      .muted {{
-        color: var(--muted);
-      }}
-      .subtitle {{
-        margin: 0;
-        color: #f8efe3;
-        font-size: 13px;
-        letter-spacing: 1px;
-      }}
-      .badge {{
-        display: inline-block;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: rgba(255, 245, 233, 0.18);
-        border: 1px solid rgba(255, 245, 233, 0.3);
-        font-size: 11px;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-      }}
-      .nav {{
-        display: flex;
-        gap: 16px;
-        align-items: center;
-        margin-top: 16px;
-        flex-wrap: wrap;
-      }}
-      .nav a {{
-        text-decoration: none;
-        font-size: 13px;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        color: #f6efe6;
-        border-bottom: 2px solid transparent;
-        padding-bottom: 2px;
-      }}
-      .nav a.active {{
-        font-weight: bold;
-        border-bottom-color: #f6efe6;
-      }}
-      .growl {{
-        position: fixed;
-        top: 18px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 999;
-        display: flex;
-        justify-content: center;
-        pointer-events: none;
-      }}
-      .growl-pill {{
-        background: #2f7d32;
-        color: #f4fff5;
-        padding: 10px 16px;
-        border-radius: 999px;
-        font-size: 13px;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
-        animation: fadeout 0.5s ease-in-out 2.5s forwards;
-      }}
-      @keyframes fadeout {{
-        to {{
-          opacity: 0;
-          transform: translateY(-6px);
-        }}
-      }}
-    </style>
-  </head>
-  <body>
-    <div class="shell">
-      <header>
-        <div>
-          <h1>Foreman Admin</h1>
-          <p class="subtitle">Supervisory control room</p>
-          <div class="nav">
-            <a href="/ui">Home</a>
-            <a href="/ui/projects">Projects</a>
-            <a href="/ui/tickets">Tickets</a>
-            <a href="/ui/github-tokens">GitHub Tokens</a>
-            <a href="/ui/github-sources">GitHub Sources</a>
-            <a href="/ui/vms">VMs</a>
-            <a href="/ui/agents">Agents</a>
-            <a href="/ui/project-vms">Mappings</a>
-          </div>
-        </div>
-        <span class="badge">Local</span>
-      </header>
-      <main>{body}</main>
-    </div>
-  </body>
-</html>"""
-    return HTMLResponse(
-        html,
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    if not saved:
+        return None
+    return messages.get(saved)
 
 
 def create_app(db: Optional[Database] = None) -> FastAPI:
@@ -512,10 +206,27 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     else:
         _update_slack_channel_filter(database)
     app = FastAPI(title="Foreman Admin")
+    base_dir = os.path.dirname(__file__)
+    templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
+    app.mount("/static", StaticFiles(directory=os.path.join(base_dir, "static")), name="static")
     secret_key = (
         os.environ.get("WINTERMUTE_WEB_SECRET") or secrets.token_urlsafe(32)
     )
     app.add_middleware(SessionMiddleware, secret_key=secret_key)
+
+    def _render_template(request: Request, template_name: str, context: dict[str, Any]) -> Response:
+        response = templates.TemplateResponse(
+            template_name,
+            {"request": request, **context},
+        )
+        response.headers.update(
+            {
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
+        )
+        return response
 
     @app.get("/status")
     def status(user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -843,64 +554,21 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         _update_slack_channel_filter(database)
         return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
 
-    @app.get("/ui/projects/{project_id}/edit", response_class=HTMLResponse)
-    def edit_project_ui(project_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/projects/{project_id}/edit")
+    def edit_project_ui(project_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         project = database.get_project(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Edit Project</h3>
-              <form method="post" action="/projects/{project.id}">
-                <label>Name</label>
-                <input type="text" name="name" value="{project.name}" required />
-                <label>Slug</label>
-                <input type="text" name="slug" value="{project.slug}" required />
-                <label>Slack Channel ID</label>
-                <input type="text" name="slack_channel_id" value="{project.slack_channel_id or ''}" />
-                <button type="submit">Save Project</button>
-              </form>
-              <button type="button" class="danger" onclick="openDeleteModal()">Delete Project</button>
-            </div>
-          </div>
-        </div>
-        <div class="modal" id="delete-modal" aria-hidden="true">
-          <div class="modal-card">
-            <h3>Are you sure?</h3>
-            <p class="muted">This cannot be undone. To delete type <strong>delete me</strong> below.</p>
-              <form method="post" action="/projects/{project.id}/delete" onsubmit="return validateDelete()">
-                <input type="text" name="confirm" id="delete-confirm" placeholder="delete me" required />
-                <div class="checkbox-row">
-                  <input type="checkbox" name="delete_slack" />
-                  <label>Delete Slack channel too</label>
-                </div>
-                <div class="modal-actions">
-                  <button type="button" class="ghost" onclick="closeDeleteModal()">Cancel</button>
-                  <button type="submit" class="danger">Permanently delete project</button>
-                </div>
-              </form>
-          </div>
-        </div>
-        <script>
-          function openDeleteModal() {{
-            document.getElementById('delete-modal').classList.add('open');
-          }}
-          function closeDeleteModal() {{
-            document.getElementById('delete-modal').classList.remove('open');
-          }}
-          function validateDelete() {{
-            var value = document.getElementById('delete-confirm').value.trim().toLowerCase();
-            if (value !== 'delete me') {{
-              alert('Type \"delete me\" to confirm.');
-              return false;
-            }}
-            return true;
-          }}
-        </script>
-        """
-        return _render_page("Edit Project", body)
+        return _render_template(
+            request,
+            "project_edit.html",
+            {
+                "title": "Edit Project",
+                "active_nav": "projects",
+                "growl_message": None,
+                "project": project,
+            },
+        )
 
     @app.post("/projects/{project_id}")
     async def update_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -984,32 +652,21 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.insert_vm_target(str(uuid.uuid4()), name, host, user_name, port)
         return RedirectResponse(f"{return_to}?saved=vm_created", status_code=303)
 
-    @app.get("/ui/vms/{vm_id}/edit", response_class=HTMLResponse)
-    def edit_vm_ui(vm_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/vms/{vm_id}/edit")
+    def edit_vm_ui(vm_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         vm = database.get_vm_target(vm_id)
         if not vm:
             raise HTTPException(status_code=404, detail="VM not found")
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Edit VM</h3>
-              <form method="post" action="/vms/{vm.id}/edit">
-                <label>Name</label>
-                <input type="text" name="name" value="{vm.name}" required />
-                <label>Host</label>
-                <input type="text" name="host" value="{vm.host}" required />
-                <label>User</label>
-                <input type="text" name="user" value="{vm.user}" required />
-                <label>Port</label>
-                <input type="number" name="port" value="{vm.port}" />
-                <button type="submit">Save VM</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Edit VM", body)
+        return _render_template(
+            request,
+            "vm_edit.html",
+            {
+                "title": "Edit VM",
+                "active_nav": "vms",
+                "growl_message": None,
+                "vm": vm,
+            },
+        )
 
     @app.post("/vms/{vm_id}/edit")
     async def update_vm(vm_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -1043,32 +700,21 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.insert_agent(str(uuid.uuid4()), name, slug, command, ssh_options)
         return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
 
-    @app.get("/ui/agents/{agent_id}/edit", response_class=HTMLResponse)
-    def edit_agent_ui(agent_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/agents/{agent_id}/edit")
+    def edit_agent_ui(agent_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Edit Agent</h3>
-              <form method="post" action="/agents/{agent.id}/edit">
-                <label>Name</label>
-                <input type="text" name="name" value="{agent.name}" required />
-                <label>Slug</label>
-                <input type="text" name="slug" value="{agent.slug}" required />
-                <label>Command</label>
-                <input type="text" name="command" value="{agent.command}" required />
-                <label>Required SSH Options</label>
-                <input type="text" name="required_ssh_options" value="{agent.required_ssh_options or ''}" />
-                <button type="submit">Save Agent</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Edit Agent", body)
+        return _render_template(
+            request,
+            "agent_edit.html",
+            {
+                "title": "Edit Agent",
+                "active_nav": "agents",
+                "growl_message": None,
+                "agent": agent,
+            },
+        )
 
     @app.post("/agents/{agent_id}/edit")
     async def update_agent(agent_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -1123,8 +769,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     ) -> dict[str, Any]:
         return {"entries": [], "limit": limit}
 
-    @app.get("/", response_class=HTMLResponse)
-    def home(request: Request) -> HTMLResponse:
+    @app.get("/")
+    def home(request: Request) -> Response:
         if not database.list_users():
             return RedirectResponse("/setup")
         if not request.session.get("user"):
@@ -1132,29 +778,22 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui")
 
     @app.get("/.well-known/appspecific/com.chrome.devtools.json")
-    def chrome_devtools_marker() -> HTMLResponse:
-        return HTMLResponse("", status_code=204)
+    def chrome_devtools_marker() -> Response:
+        return Response(status_code=204)
 
-    @app.get("/setup", response_class=HTMLResponse)
-    def setup_page() -> HTMLResponse:
-        if database.list_users():
-            return _render_page(
-                "Setup complete", "<div class='panel'>Users already configured.</div>"
-            )
-        body = """
-        <div class="panel">
-          <h2>Initial Admin Setup</h2>
-          <p class="muted">Create the first administrator account.</p>
-          <form method="post" action="/setup">
-            <label>Admin username</label>
-            <input type="text" name="username" required />
-            <label>Password</label>
-            <input type="password" name="password" required />
-            <button type="submit">Create Admin</button>
-          </form>
-        </div>
-        """
-        return _render_page("Setup", body)
+    @app.get("/setup")
+    def setup_page(request: Request) -> Response:
+        already_configured = bool(database.list_users())
+        return _render_template(
+            request,
+            "setup.html",
+            {
+                "title": "Setup",
+                "active_nav": "",
+                "growl_message": None,
+                "already_configured": already_configured,
+            },
+        )
 
     @app.post("/setup")
     async def setup(request: Request) -> RedirectResponse:
@@ -1177,22 +816,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
         return RedirectResponse("/login", status_code=303)
 
-    @app.get("/login", response_class=HTMLResponse)
-    def login_page() -> HTMLResponse:
-        body = """
-        <div class="panel">
-          <h2>Admin Login</h2>
-          <p class="muted">Enter your credentials to access the console.</p>
-          <form method="post" action="/login">
-            <label>Username</label>
-            <input type="text" name="username" required />
-            <label>Password</label>
-            <input type="password" name="password" required />
-            <button type="submit">Login</button>
-          </form>
-        </div>
-        """
-        return _render_page("Login", body)
+    @app.get("/login")
+    def login_page(request: Request) -> Response:
+        return _render_template(
+            request,
+            "login.html",
+            {
+                "title": "Login",
+                "active_nav": "",
+                "growl_message": None,
+            },
+        )
 
     @app.post("/login")
     async def login(request: Request) -> RedirectResponse:
@@ -1212,11 +846,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         request.session.clear()
         return RedirectResponse("/login", status_code=303)
 
-    @app.get("/ui", response_class=HTMLResponse)
-    def ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui")
+    def ui(request: Request, user: str = Depends(_require_login)) -> Response:
         status = database.get_supervisor_state()
         work_items = database.fetch_ready_work_items(utc_now())
         projects = database.list_projects()
+        tickets = database.list_tickets()
         vm_targets = database.list_vm_targets()
         agents = database.list_agents()
         project_vms = database.list_project_vms()
@@ -1229,689 +864,299 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slack_admin = database.get_credential_by_name(SLACK_PROVIDER, "admin_user_id")
         github_tokens = database.list_github_tokens()
         github_sources = database.list_github_sources()
-        project_lookup = {project.id: project.name for project in projects}
-        vm_lookup = {vm.id: vm.name for vm in vm_targets}
-        github_sources_list = "".join(
-            f"<li><a href='/ui/github-sources/{source.id}/edit'>{project_lookup.get(source.project_id, 'unknown')}</a>: "
-            f"{source.owner}/{source.repo}</li>"
-            for source in github_sources[:10]
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "admin.html",
+            {
+                "title": "Admin",
+                "active_nav": "home",
+                "growl_message": growl_message,
+                "user": user,
+                "status": status,
+                "work_items": work_items,
+                "projects": projects,
+                "tickets": tickets,
+                "vm_targets": vm_targets,
+                "agents": agents,
+                "project_vms": project_vms,
+                "sessions": sessions,
+                "slack_source": slack_source,
+                "slack_channels": slack_channels,
+                "slack_bot": slack_bot,
+                "slack_app": slack_app,
+                "slack_admin": slack_admin,
+                "github_tokens": github_tokens,
+                "github_sources": github_sources,
+                "project_lookup": {project.id: project.name for project in projects},
+                "vm_lookup": {vm.id: vm.name for vm in vm_targets},
+            },
         )
-        github_tokens_list = "".join(
-            f"<li><a href='/ui/github-tokens/{token.id}/edit'>{token.note or token.user_login or 'token'}</a></li>"
-            for token in github_tokens[:10]
-        )
-        if not github_sources_list:
-            github_sources_list = "<li class='muted'>No GitHub sources yet</li>"
-        if not github_tokens_list:
-            github_tokens_list = "<li class='muted'>No GitHub tokens yet</li>"
-        project_list = "".join(
-            f"<li><a href=\"/ui/projects/{project.id}/edit\">{project.name}</a> ({project.slug})</li>"
-            for project in projects[:10]
-        )
-        if not project_list:
-            project_list = "<li class='muted'>No projects yet</li>"
-        tickets = database.list_tickets()
-        ticket_list = "".join(
-            f"<li>{ticket.title} [{ticket.status}]</li>" for ticket in tickets[:10]
-        )
-        if not ticket_list:
-            ticket_list = "<li class='muted'>No tickets yet</li>"
-        vm_list = "".join(
-            f"<li><a href='/ui/vms/{vm.id}/edit'>{vm.name}</a> ({vm.host})</li>"
-            for vm in vm_targets[:10]
-        )
-        if not vm_list:
-            vm_list = "<li class='muted'>No VM targets yet</li>"
-        agent_list = "".join(
-            f"<li><a href='/ui/agents/{agent.id}/edit'>{agent.name}</a> ({agent.slug})</li>"
-            for agent in agents[:10]
-        )
-        if not agent_list:
-            agent_list = "<li class='muted'>No agents yet</li>"
-        mapping_list = "".join(
-            f"<li><a href='/ui/project-vms/{mapping.id}/edit'>{project_lookup.get(mapping.project_id, mapping.project_id)} "
-            f"→ {vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id)}</a> ({mapping.repo_mode})</li>"
-            for mapping in project_vms[:10]
-        )
-        if not mapping_list:
-            mapping_list = "<li class='muted'>No mappings yet</li>"
-        session_list = "".join(
-            f"<li>{session.id} [{session.status}]</li>" for session in sessions[:10]
-        )
-        if not session_list:
-            session_list = "<li class='muted'>No sessions yet</li>"
-        growl = _growl(request.query_params.get("saved"))
-        body = f"""
-        {growl}
-        <div class="panel">
-          <p class="muted">Signed in as <strong>{user}</strong>. <a href="/logout">Logout</a></p>
-          <div class="grid">
-            <div class="tile">
-              <h3>Supervisor</h3>
-              <p>Status: {status.status if status else 'unknown'}</p>
-              <p>Current: {status.current_work_id if status else 'n/a'}</p>
-              <p>Queue: {status.queue_depth if status else 'n/a'}</p>
-              <p>Last action: {status.last_action if status else 'n/a'}</p>
-            </div>
-            <div class="tile">
-              <h3>Queue</h3>
-              <p>Ready work items: {len(work_items)}</p>
-              <ul>
-                {''.join(f"<li>{item.work_id} ({item.priority})</li>" for item in work_items[:5])}
-              </ul>
-            </div>
-            <div class="group">
-              <p class="group-title">Slack</p>
-              <div class="tile">
-                <h3>Slack Tokens</h3>
-                <p>Bot token: {"configured" if slack_bot else "missing"}</p>
-                <p>App token: {"configured" if slack_app else "missing"}</p>
-                <p>Admin user: {"configured" if slack_admin else "missing"}</p>
-                <form method="post" action="/slack/credentials">
-                  <label>Bot Token (xoxb-...)</label>
-                  <input type="password" name="bot_token" placeholder="leave blank to keep existing" />
-                  <label>App Token (xapp-...)</label>
-                  <input type="password" name="app_token" placeholder="leave blank to keep existing" />
-                  <label>Slack User ID to Auto-Invite (U...)</label>
-                  <input type="text" name="admin_user_id" placeholder="U0123456789" />
-                  <button type="submit">Save Slack Settings</button>
-                </form>
-              </div>
-              <div class="tile">
-                <h3>Slack Source</h3>
-                <form method="post" action="/sources/slack/ui_update">
-                  <div class="checkbox-row">
-                    <input type="checkbox" name="enabled" {"checked" if slack_source and slack_source.enabled else ""} />
-                    <label>Enabled</label>
-                  </div>
-                  <label>Poll Interval (seconds)</label>
-                  <input type="number" name="poll_interval_seconds" min="1" value="{slack_source.poll_interval_seconds if slack_source else 2}" />
-                <label>Channels (auto-managed)</label>
-                <input type="text" name="channels" value="{slack_channels}" readonly />
-                  <button type="submit">Update Slack Source</button>
-                </form>
-              </div>
-            </div>
-            <div class="group">
-              <p class="group-title">GitHub</p>
-              <div class="tile">
-                <h3>GitHub Tokens</h3>
-                <a href="/ui/github-tokens/create">Add GitHub Token</a>
-                <ul>{github_tokens_list}</ul>
-              </div>
-              <div class="tile">
-                <h3>GitHub Sources</h3>
-                <a href="/ui/github-sources/create">Add GitHub Source</a>
-                <ul>{github_sources_list}</ul>
-              </div>
-            </div>
-            <div class="group">
-              <p class="group-title">Projects</p>
-              <div class="tile">
-                <h3>Projects</h3>
-                <a href="/ui/projects/create?return_to=/ui">Add Project</a>
-                <ul>{project_list}</ul>
-                <p class="muted">Creates a public Slack channel (requires channels:manage) or use a channel ID.</p>
-              </div>
-            </div>
-            <div class="group">
-              <p class="group-title">Tickets</p>
-              <div class="tile">
-                <h3>Tickets</h3>
-                <a href="/ui/tickets/create?return_to=/ui">Add Ticket</a>
-                <ul>{ticket_list}</ul>
-              </div>
-            </div>
-            <div class="group">
-              <p class="group-title">VM Targets</p>
-              <div class="tile">
-                <h3>VM Targets</h3>
-                <a href="/ui/vms/create?return_to=/ui">Add VM</a>
-                <ul>{vm_list}</ul>
-              </div>
-            </div>
-            <div class="group">
-              <p class="group-title">Agents</p>
-              <div class="tile">
-                <h3>Agents</h3>
-                <a href="/ui/agents/create?return_to=/ui">Add Agent</a>
-                <ul>{agent_list}</ul>
-              </div>
-            </div>
-            <div class="group">
-              <p class="group-title">Project VM Mapping</p>
-              <div class="tile">
-                <h3>Mappings</h3>
-                <a href="/ui/project-vms/create?return_to=/ui">Attach VM</a>
-                <ul>{mapping_list}</ul>
-              </div>
-            </div>
-            <div class="group">
-              <p class="group-title">Sessions</p>
-              <div class="tile">
-                <h3>Recent Sessions</h3>
-                <ul>
-                  {session_list}
-                </ul>
-                <p class="muted">Start from Slack: <code>start projectslug agentslug</code></p>
-              </div>
-              <div class="tile">
-                <h3>Active Agents</h3>
-                <p>Available: {len(agents)}</p>
-                <p>VM Targets: {len(vm_targets)}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Admin", body)
 
-    @app.get("/ui/projects", response_class=HTMLResponse)
-    def projects_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/projects")
+    def projects_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
-        project_list = "".join(
-            f"<li><a href='/ui/projects/{project.id}/edit'>{project.name}</a> ({project.slug})"
-            f"<form method='post' action='/projects/{project.id}/delete' style='display:inline; margin-left:8px;'>"
-            "<input type='hidden' name='confirm' value='delete me' />"
-            "<button type='submit' class='danger'>Delete</button>"
-            "</form></li>"
-            for project in projects
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "projects.html",
+            {
+                "title": "Projects",
+                "active_nav": "projects",
+                "growl_message": growl_message,
+                "projects": projects,
+            },
         )
-        body = f"""
-        <div class="panel">
-          {_growl(request.query_params.get('saved'))}
-          <div class="grid">
-            <div class="tile">
-              <h3>Projects</h3>
-              <a href="/ui/projects/create?return_to=/ui/projects">Create Project</a>
-            </div>
-            <div class="tile">
-              <h3>Project List</h3>
-              <ul>{project_list}</ul>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Projects", body)
 
-    @app.get("/ui/projects/create", response_class=HTMLResponse)
-    def projects_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/projects/create")
+    def projects_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         return_to = request.query_params.get("return_to", "/ui/projects")
         if not return_to.startswith("/ui"):
             return_to = "/ui/projects"
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Create Project</h3>
-              <form method="post" action="/projects">
-                <input type="hidden" name="return_to" value="{return_to}" />
-                <label>Name</label>
-                <input type="text" name="name" required />
-                <label>Slug (optional)</label>
-                <input type="text" name="slug" placeholder="proj-name" />
-                <label>Slack Channel ID (optional)</label>
-                <input type="text" name="slack_channel_id" placeholder="C0123456789" />
-                <button type="submit">Create Project</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Create Project", body)
-
-    @app.get("/ui/vms", response_class=HTMLResponse)
-    def vms_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
-        vm_targets = database.list_vm_targets()
-        vm_list = "".join(
-            f"<li><a href='/ui/vms/{vm.id}/edit'>{vm.name}</a> ({vm.host})"
-            f"<form method='post' action='/vms/{vm.id}/delete' style='display:inline; margin-left:8px;'>"
-            "<button type='submit' class='danger'>Delete</button>"
-            "</form></li>"
-            for vm in vm_targets
+        return _render_template(
+            request,
+            "project_create.html",
+            {
+                "title": "Create Project",
+                "active_nav": "projects",
+                "growl_message": None,
+                "return_to": return_to,
+            },
         )
-        body = f"""
-        <div class="panel">
-          {_growl(request.query_params.get('saved'))}
-          <div class="grid">
-            <div class="tile">
-              <h3>VM Targets</h3>
-              <a href="/ui/vms/create?return_to=/ui/vms">Add VM</a>
-            </div>
-            <div class="tile">
-              <h3>VM List</h3>
-              <ul>{vm_list}</ul>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("VM Targets", body)
 
-    @app.get("/ui/vms/create", response_class=HTMLResponse)
-    def vms_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/vms")
+    def vms_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        vm_targets = database.list_vm_targets()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "vms.html",
+            {
+                "title": "VM Targets",
+                "active_nav": "vms",
+                "growl_message": growl_message,
+                "vm_targets": vm_targets,
+            },
+        )
+
+    @app.get("/ui/vms/create")
+    def vms_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         return_to = request.query_params.get("return_to", "/ui/vms")
         if not return_to.startswith("/ui"):
             return_to = "/ui/vms"
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Add VM</h3>
-              <form method="post" action="/vms">
-                <input type="hidden" name="return_to" value="{return_to}" />
-                <label>Name</label>
-                <input type="text" name="name" required />
-                <label>Host</label>
-                <input type="text" name="host" required />
-                <label>User</label>
-                <input type="text" name="user" required />
-                <label>Port</label>
-                <input type="number" name="port" value="22" />
-                <button type="submit">Add VM</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Add VM", body)
-
-    @app.get("/ui/agents", response_class=HTMLResponse)
-    def agents_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
-        agents = database.list_agents()
-        agent_list = "".join(
-            f"<li><a href='/ui/agents/{agent.id}/edit'>{agent.name}</a> ({agent.slug})"
-            f"<form method='post' action='/agents/{agent.id}/delete' style='display:inline; margin-left:8px;'>"
-            "<button type='submit' class='danger'>Delete</button>"
-            "</form></li>"
-            for agent in agents
+        return _render_template(
+            request,
+            "vm_create.html",
+            {
+                "title": "Add VM",
+                "active_nav": "vms",
+                "growl_message": None,
+                "return_to": return_to,
+            },
         )
-        body = f"""
-        <div class="panel">
-          {_growl(request.query_params.get('saved'))}
-          <div class="grid">
-            <div class="tile">
-              <h3>Agents</h3>
-              <a href="/ui/agents/create?return_to=/ui/agents">Add Agent</a>
-            </div>
-            <div class="tile">
-              <h3>Agent List</h3>
-              <ul>{agent_list}</ul>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Agents", body)
 
-    @app.get("/ui/agents/create", response_class=HTMLResponse)
-    def agents_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/agents")
+    def agents_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        agents = database.list_agents()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "agents.html",
+            {
+                "title": "Agents",
+                "active_nav": "agents",
+                "growl_message": growl_message,
+                "agents": agents,
+            },
+        )
+
+    @app.get("/ui/agents/create")
+    def agents_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         return_to = request.query_params.get("return_to", "/ui/agents")
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Add Agent</h3>
-              <form method="post" action="/agents">
-                <input type="hidden" name="return_to" value="{return_to}" />
-                <label>Name</label>
-                <input type="text" name="name" required />
-                <label>Slug</label>
-                <input type="text" name="slug" required />
-                <label>Command</label>
-                <input type="text" name="command" required />
-                <label>Required SSH Options</label>
-                <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
-                <button type="submit">Add Agent</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Add Agent", body)
-
-    @app.get("/ui/project-vms", response_class=HTMLResponse)
-    def project_vms_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
-        project_vms = database.list_project_vms()
-        project_lookup = {project.id: project.name for project in database.list_projects()}
-        vm_lookup = {vm.id: vm.name for vm in database.list_vm_targets()}
-        mapping_list = "".join(
-            f"<li><a href='/ui/project-vms/{mapping.id}/edit'>{project_lookup.get(mapping.project_id, mapping.project_id)} "
-            f"→ {vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id)}</a> "
-            f"({mapping.repo_mode})"
-            f"<form method='post' action='/project_vms/{mapping.id}/delete' style='display:inline; margin-left:8px;'>"
-            "<button type='submit' class='danger'>Delete</button>"
-            "</form></li>"
-            for mapping in project_vms
+        return _render_template(
+            request,
+            "agent_create.html",
+            {
+                "title": "Add Agent",
+                "active_nav": "agents",
+                "growl_message": None,
+                "return_to": return_to,
+            },
         )
-        body = f"""
-        <div class="panel">
-          {_growl(request.query_params.get('saved'))}
-          <div class="grid">
-            <div class="tile">
-              <h3>Project VM Mappings</h3>
-              <a href="/ui/project-vms/create?return_to=/ui/project-vms">Attach VM</a>
-            </div>
-            <div class="tile">
-              <h3>Mappings</h3>
-              <ul>{mapping_list}</ul>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Mappings", body)
 
-    @app.get("/ui/project-vms/create", response_class=HTMLResponse)
-    def project_vms_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/project-vms")
+    def project_vms_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        project_vms = database.list_project_vms()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "project_vms.html",
+            {
+                "title": "Mappings",
+                "active_nav": "mappings",
+                "growl_message": growl_message,
+                "project_vms": project_vms,
+                "project_lookup": {project.id: project.name for project in database.list_projects()},
+                "vm_lookup": {vm.id: vm.name for vm in database.list_vm_targets()},
+            },
+        )
+
+    @app.get("/ui/project-vms/create")
+    def project_vms_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         vm_targets = database.list_vm_targets()
         return_to = request.query_params.get("return_to", "/ui/project-vms")
         if not return_to.startswith("/ui"):
             return_to = "/ui/project-vms"
-        project_options = "".join(
-            f"<option value='{project.id}'>{project.name}</option>" for project in projects
+        return _render_template(
+            request,
+            "project_vm_create.html",
+            {
+                "title": "Attach VM",
+                "active_nav": "mappings",
+                "growl_message": None,
+                "projects": projects,
+                "vm_targets": vm_targets,
+                "return_to": return_to,
+            },
         )
-        vm_options = "".join(
-            f"<option value='{vm.id}'>{vm.name} ({vm.host})</option>" for vm in vm_targets
-        )
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Attach VM</h3>
-              <form method="post" action="/project_vms">
-                <input type="hidden" name="return_to" value="{return_to}" />
-                <label>Project</label>
-                <select name="project_id" required>
-                  {project_options}
-                </select>
-                <label>VM Target</label>
-                <select name="vm_target_id" required>
-                  {vm_options}
-                </select>
-                <label>Repo Mode</label>
-                <select name="repo_mode">
-                  <option value="mirror">mirror</option>
-                  <option value="clone">clone</option>
-                </select>
-                <label>Repo Path</label>
-                <input type="text" name="repo_path" />
-                <label>Repo URL (clone mode)</label>
-                <input type="text" name="repo_url" />
-                <button type="submit">Attach VM</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Attach VM", body)
 
-    @app.get("/ui/github-sources", response_class=HTMLResponse)
-    def github_sources_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/github-sources")
+    def github_sources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         sources = database.list_github_sources()
         github_task_source = database.get_task_source(GitHubIssuesSource.id)
         legacy_config = github_task_source.config if github_task_source else {}
         project_lookup = {project.id: project.name for project in database.list_projects()}
-        token_lookup = {token.id: token.note or token.user_login or token.id for token in database.list_github_tokens()}
-        source_list = "".join(
-            f"<li><a href='/ui/github-sources/{source.id}/edit'>{project_lookup.get(source.project_id, 'unknown')}</a>: "
-            f"{source.owner}/{source.repo} ({'enabled' if source.enabled else 'disabled'}) "
-            f"[{token_lookup.get(source.token_id, 'no token')}]"
-            f"<form method='post' action='/github-sources/{source.id}/delete' style='display:inline; margin-left:8px;'>"
-            "<button type='submit' class='danger'>Delete</button>"
-            "</form></li>"
-            for source in sources
-        )
-        if not source_list:
-            source_list = "<li class='muted'>No GitHub sources yet</li>"
-        legacy_project_name = project_lookup.get(str(legacy_config.get("project_id", "")).strip(), "unset")
+        token_lookup = {
+            token.id: token.note or token.user_login or token.id
+            for token in database.list_github_tokens()
+        }
+        legacy_project_id = str(legacy_config.get("project_id", "")).strip()
+        legacy_project_name = project_lookup.get(legacy_project_id, "unset") if legacy_project_id else "unset"
         legacy_owner = str(legacy_config.get("owner", "")).strip()
         legacy_repo = str(legacy_config.get("repo", "")).strip()
         legacy_state = str(legacy_config.get("state", "")).strip()
         legacy_labels = ", ".join(legacy_config.get("labels", []) or [])
-        legacy_panel = ""
-        if legacy_owner or legacy_repo or legacy_state or legacy_labels or legacy_project_name != "unset":
-            legacy_panel = f"""
-            <div class="tile">
-              <h3>Legacy GitHub Issues Config</h3>
-              <ul>
-                <li>Project: {legacy_project_name}</li>
-                <li>Repo: {legacy_owner}/{legacy_repo}</li>
-                <li>State: {legacy_state or "open"}</li>
-                <li>Labels: {legacy_labels or "none"}</li>
-              </ul>
-            </div>
-            """
-        body = f"""
-        <div class="panel">
-          {_growl(request.query_params.get('saved'))}
-          <div class="grid">
-            <div class="tile">
-              <h3>GitHub Sources</h3>
-              <a href="/ui/github-sources/create?return_to=/ui/github-sources">Add GitHub Source</a>
-            </div>
-            <div class="tile">
-              <h3>GitHub Poller</h3>
-              <form method="post" action="/sources/github_issues/ui_update">
-                <div class="checkbox-row">
-                  <input type="checkbox" name="enabled" {"checked" if github_task_source and github_task_source.enabled else ""} />
-                  <label>Enabled</label>
-                </div>
-                <label>Poll Interval (seconds)</label>
-                <input type="number" name="poll_interval_seconds" min="10" value="{github_task_source.poll_interval_seconds if github_task_source else 60}" />
-                <button type="submit">Update Poller</button>
-              </form>
-            </div>
-            <div class="tile">
-              <h3>Source List</h3>
-              <ul>{source_list}</ul>
-            </div>
-            {legacy_panel}
-          </div>
-        </div>
-        """
-        return _render_page("GitHub Sources", body)
+        legacy_has_config = bool(legacy_owner or legacy_repo or legacy_state or legacy_labels or legacy_project_id)
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "github_sources.html",
+            {
+                "title": "GitHub Sources",
+                "active_nav": "github_sources",
+                "growl_message": growl_message,
+                "sources": sources,
+                "github_task_source": github_task_source,
+                "project_lookup": project_lookup,
+                "token_lookup": token_lookup,
+                "legacy_config": legacy_has_config,
+                "legacy_project_name": legacy_project_name,
+                "legacy_owner": legacy_owner,
+                "legacy_repo": legacy_repo,
+                "legacy_state": legacy_state,
+                "legacy_labels": legacy_labels,
+            },
+        )
 
-    @app.get("/ui/github-tokens", response_class=HTMLResponse)
-    def github_tokens_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/github-tokens")
+    def github_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         tokens = database.list_github_tokens()
         legacy_token = database.get_credential_by_name(GITHUB_PROVIDER, GITHUB_TOKEN_NAME)
         legacy_user_id = database.get_credential_by_name(GITHUB_PROVIDER, "user_id")
         legacy_user_login = database.get_credential_by_name(GITHUB_PROVIDER, "user_login")
-        token_list = "".join(
-            f"<li><a href='/ui/github-tokens/{token.id}/edit'>{token.note or token.user_login or token.id}</a>"
-            f"<form method='post' action='/github-tokens/{token.id}/delete' style='display:inline; margin-left:8px;'>"
-            "<button type='submit' class='danger'>Delete</button>"
-            "</form></li>"
-            for token in tokens
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "github_tokens.html",
+            {
+                "title": "GitHub Tokens",
+                "active_nav": "github_tokens",
+                "growl_message": growl_message,
+                "tokens": tokens,
+                "legacy_token": bool(legacy_token),
+                "legacy_user_id": legacy_user_id.reference if legacy_user_id else "",
+                "legacy_user_login": legacy_user_login.reference if legacy_user_login else "",
+            },
         )
-        if not token_list:
-            token_list = "<li class='muted'>No GitHub tokens yet</li>"
-        legacy_panel = ""
-        if legacy_token:
-            legacy_panel = f"""
-            <div class="tile">
-              <h3>Legacy GitHub Token</h3>
-              <ul>
-                <li>User: {legacy_user_login.reference if legacy_user_login else "unknown"}{f" ({legacy_user_id.reference})" if legacy_user_id else ""}</li>
-                <li>Token: configured</li>
-              </ul>
-            </div>
-            """
-        body = f"""
-        <div class="panel">
-          {_growl(request.query_params.get('saved'))}
-          <div class="grid">
-            <div class="tile">
-              <h3>GitHub Tokens</h3>
-              <a href="/ui/github-tokens/create?return_to=/ui/github-tokens">Add GitHub Token</a>
-            </div>
-            <div class="tile">
-              <h3>Token List</h3>
-              <ul>{token_list}</ul>
-            </div>
-            {legacy_panel}
-          </div>
-        </div>
-        """
-        return _render_page("GitHub Tokens", body)
 
-    @app.get("/ui/github-tokens/create", response_class=HTMLResponse)
-    def github_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/github-tokens/create")
+    def github_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         return_to = request.query_params.get("return_to", "/ui/github-tokens")
         if not return_to.startswith("/ui"):
             return_to = "/ui/github-tokens"
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Add GitHub Token</h3>
-              <form method="post" action="/github-tokens">
-                <input type="hidden" name="return_to" value="{return_to}" />
-                <label>Note</label>
-                <input type="text" name="note" placeholder="e.g. gears repo token" />
-                <label>Personal Access Token</label>
-                <input type="password" name="token" required />
-                <button type="submit">Add GitHub Token</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Add GitHub Token", body)
+        return _render_template(
+            request,
+            "github_token_create.html",
+            {
+                "title": "Add GitHub Token",
+                "active_nav": "github_tokens",
+                "growl_message": None,
+                "return_to": return_to,
+            },
+        )
 
-    @app.get("/ui/github-tokens/{token_id}/edit", response_class=HTMLResponse)
-    def github_tokens_edit_ui(token_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/github-tokens/{token_id}/edit")
+    def github_tokens_edit_ui(token_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         token = database.get_github_token(token_id)
         if not token:
             raise HTTPException(status_code=404, detail="GitHub token not found")
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Edit GitHub Token</h3>
-              <p class="muted">User: {token.user_login or "unknown"}{f" ({token.user_id})" if token.user_id else ""}</p>
-              <form method="post" action="/github-tokens/{token.id}/edit">
-                <label>Note</label>
-                <input type="text" name="note" value="{token.note or ''}" />
-                <label>Personal Access Token</label>
-                <input type="password" name="token" placeholder="leave blank to keep existing" />
-                <button type="submit">Save GitHub Token</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Edit GitHub Token", body)
+        return _render_template(
+            request,
+            "github_token_edit.html",
+            {
+                "title": "Edit GitHub Token",
+                "active_nav": "github_tokens",
+                "growl_message": None,
+                "token": token,
+            },
+        )
 
-    @app.get("/ui/github-sources/create", response_class=HTMLResponse)
-    def github_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/github-sources/create")
+    def github_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         tokens = database.list_github_tokens()
         return_to = request.query_params.get("return_to", "/ui/github-sources")
         if not return_to.startswith("/ui"):
             return_to = "/ui/github-sources"
-        project_options = "".join(
-            f"<option value='{project.id}'>{project.name}</option>" for project in projects
+        token_notice = "" if tokens else "Add a GitHub token before creating a source."
+        return _render_template(
+            request,
+            "github_source_create.html",
+            {
+                "title": "Add GitHub Source",
+                "active_nav": "github_sources",
+                "growl_message": None,
+                "projects": projects,
+                "tokens": tokens,
+                "return_to": return_to,
+                "token_notice": token_notice if token_notice and not tokens else "",
+            },
         )
-        token_options = "".join(
-            f"<option value='{token.id}'>{token.note or token.user_login or token.id}</option>"
-            for token in tokens
-        )
-        token_notice = "" if tokens else "<p class='muted'>Add a GitHub token before creating a source.</p>"
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Add GitHub Source</h3>
-              {token_notice}
-              <form method="post" action="/github-sources">
-                <input type="hidden" name="return_to" value="{return_to}" />
-                <div class="checkbox-row">
-                  <input type="checkbox" name="enabled" checked />
-                  <label>Enabled</label>
-                </div>
-                <label>Project</label>
-                <select name="project_id" required>
-                  {project_options}
-                </select>
-                <label>Token</label>
-                <select name="token_id" required>
-                  {token_options}
-                </select>
-                <label>Repo Owner</label>
-                <input type="text" name="owner" required />
-                <label>Repo Name</label>
-                <input type="text" name="repo" required />
-                <label>Issue State</label>
-                <select name="state">
-                  <option value="open">open</option>
-                  <option value="closed">closed</option>
-                  <option value="all">all</option>
-                </select>
-                <label>Labels (comma-separated)</label>
-                <input type="text" name="labels" />
-                <button type="submit">Add GitHub Source</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Add GitHub Source", body)
 
-    @app.get("/ui/github-sources/{source_id}/edit", response_class=HTMLResponse)
-    def github_sources_edit_ui(source_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/github-sources/{source_id}/edit")
+    def github_sources_edit_ui(source_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         source = database.get_github_source(source_id)
         if not source:
             raise HTTPException(status_code=404, detail="GitHub source not found")
         projects = database.list_projects()
         tokens = database.list_github_tokens()
-        project_options = "".join(
-            f"<option value='{project.id}' {'selected' if project.id == source.project_id else ''}>{project.name}</option>"
-            for project in projects
-        )
-        token_options = "".join(
-            f"<option value='{token.id}' {'selected' if token.id == source.token_id else ''}>{token.note or token.user_login or token.id}</option>"
-            for token in tokens
-        )
         labels = ", ".join(source.labels)
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Edit GitHub Source</h3>
-              <form method="post" action="/github-sources/{source.id}/edit">
-                <div class="checkbox-row">
-                  <input type="checkbox" name="enabled" {"checked" if source.enabled else ""} />
-                  <label>Enabled</label>
-                </div>
-                <label>Project</label>
-                <select name="project_id" required>
-                  {project_options}
-                </select>
-                <label>Token</label>
-                <select name="token_id" required>
-                  {token_options}
-                </select>
-                <label>Repo Owner</label>
-                <input type="text" name="owner" value="{source.owner}" required />
-                <label>Repo Name</label>
-                <input type="text" name="repo" value="{source.repo}" required />
-                <label>Issue State</label>
-                <select name="state">
-                  <option value="open" {"selected" if source.state == "open" else ""}>open</option>
-                  <option value="closed" {"selected" if source.state == "closed" else ""}>closed</option>
-                  <option value="all" {"selected" if source.state == "all" else ""}>all</option>
-                </select>
-                <label>Labels (comma-separated)</label>
-                <input type="text" name="labels" value="{labels}" />
-                <button type="submit">Save GitHub Source</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Edit GitHub Source", body)
+        return _render_template(
+            request,
+            "github_source_edit.html",
+            {
+                "title": "Edit GitHub Source",
+                "active_nav": "github_sources",
+                "growl_message": None,
+                "source": source,
+                "projects": projects,
+                "tokens": tokens,
+                "labels": labels,
+            },
+        )
 
     @app.post("/github-sources")
     async def create_github_source(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -1979,57 +1224,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.delete_github_source(source_id)
         return RedirectResponse("/ui/github-sources?saved=github_source_deleted", status_code=303)
 
-    @app.get("/ui/project-vms/{mapping_id}/edit", response_class=HTMLResponse)
-    def project_vms_edit_ui(mapping_id: str, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/project-vms/{mapping_id}/edit")
+    def project_vms_edit_ui(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         mapping = database.get_project_vm(mapping_id)
         if not mapping:
             raise HTTPException(status_code=404, detail="Mapping not found")
         projects = database.list_projects()
         vm_targets = database.list_vm_targets()
-        project_options = "".join(
-            f"<option value='{project.id}' {'selected' if project.id == mapping.project_id else ''}>{project.name}</option>"
-            for project in projects
+        return _render_template(
+            request,
+            "project_vm_edit.html",
+            {
+                "title": "Edit Mapping",
+                "active_nav": "mappings",
+                "growl_message": None,
+                "mapping": mapping,
+                "projects": projects,
+                "vm_targets": vm_targets,
+            },
         )
-        vm_options = "".join(
-            f"<option value='{vm.id}' {'selected' if vm.id == mapping.vm_target_id else ''}>{vm.name} ({vm.host})</option>"
-            for vm in vm_targets
-        )
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Edit Mapping</h3>
-              <form method="post" action="/project_vms/{mapping.id}/edit">
-                <label>Project</label>
-                <div class="inline-field">
-                  <select name="project_id" required>
-                    {project_options}
-                  </select>
-                  <a class="inline-link" href="/ui/projects/{mapping.project_id}/edit">Edit project</a>
-                </div>
-                <label>VM Target</label>
-                <div class="inline-field">
-                  <select name="vm_target_id" required>
-                    {vm_options}
-                  </select>
-                  <a class="inline-link" href="/ui/vms/{mapping.vm_target_id}/edit">Edit VM target</a>
-                </div>
-                <label>Repo Mode</label>
-                <select name="repo_mode">
-                  <option value="mirror" {"selected" if mapping.repo_mode == "mirror" else ""}>mirror</option>
-                  <option value="clone" {"selected" if mapping.repo_mode == "clone" else ""}>clone</option>
-                </select>
-                <label>Repo Path</label>
-                <input type="text" name="repo_path" value="{mapping.repo_path or ''}" />
-                <label>Repo URL (clone mode)</label>
-                <input type="text" name="repo_url" value="{mapping.repo_url or ''}" />
-                <button type="submit">Save Mapping</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Edit Mapping", body)
 
     @app.post("/project_vms/{mapping_id}/edit")
     async def project_vms_update(
@@ -2052,71 +1265,36 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             repo_url=repo_url,
         )
         return RedirectResponse("/ui/project-vms?saved=mapping_updated", status_code=303)
-    @app.get("/ui/tickets", response_class=HTMLResponse)
-    def tickets_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/tickets")
+    def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         tickets = database.list_tickets()
-        ticket_list = "".join(
-            f"<li>{ticket.title} [{ticket.status}]"
-            f"<form method='post' action='/tickets/{ticket.id}/delete' style='display:inline; margin-left:8px;'>"
-            "<button type='submit' class='danger'>Delete</button>"
-            "</form></li>"
-            for ticket in tickets[:50]
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "tickets.html",
+            {
+                "title": "Tickets",
+                "active_nav": "tickets",
+                "growl_message": growl_message,
+                "tickets": tickets,
+            },
         )
-        body = f"""
-        <div class="panel">
-          {_growl(request.query_params.get("saved"))}
-          <div class="grid">
-            <div class="tile">
-              <h3>Tickets</h3>
-              <p class="muted">All current tickets.</p>
-              <a href="/ui/tickets/create?return_to=/ui/tickets">Create Ticket</a>
-            </div>
-            <div class="tile">
-              <h3>Ticket List</h3>
-              <ul>
-                {ticket_list}
-              </ul>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Tickets", body)
 
-    @app.get("/ui/tickets/create", response_class=HTMLResponse)
-    def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> HTMLResponse:
+    @app.get("/ui/tickets/create")
+    def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         return_to = request.query_params.get("return_to", "/ui/tickets")
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
-        project_options = "".join(
-            f"<option value=\"{project.id}\">{project.name}</option>" for project in projects
+        return _render_template(
+            request,
+            "ticket_create.html",
+            {
+                "title": "Create Ticket",
+                "active_nav": "tickets",
+                "growl_message": None,
+                "projects": projects,
+                "return_to": return_to,
+            },
         )
-        body = f"""
-        <div class="panel">
-          <div class="grid">
-            <div class="tile">
-              <h3>Create Ticket</h3>
-              <form method="post" action="/tickets">
-                <input type="hidden" name="return_to" value="{return_to}" />
-                <label>Project</label>
-                <select name="project_id" required>
-                  {project_options}
-                </select>
-                <label>Title</label>
-                <input type="text" name="title" required />
-                <label>Description</label>
-                <input type="text" name="description" />
-                <label>Assigned To</label>
-                <input type="text" name="assigned_to" />
-                <label>Estimate</label>
-                <input type="text" name="estimate" />
-                <label>Status</label>
-                <input type="text" name="status" value="open" />
-                <button type="submit">Create Ticket</button>
-              </form>
-            </div>
-          </div>
-        </div>
-        """
-        return _render_page("Create Ticket", body)
     return app
