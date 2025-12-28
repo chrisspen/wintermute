@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import urllib.request
 from dataclasses import dataclass
@@ -104,6 +105,8 @@ class Executor:
         observation: dict[str, Any],
         tool_schema: Iterable[dict[str, Any]],
     ) -> Decision:
+        logger = logging.getLogger(__name__)
+        logger.info("Executor call model=%s base_url=%s", self.model, self.base_url)
         messages = _build_messages(state, observation, list(tool_schema))
         payload = {
             "model": self.model,
@@ -117,12 +120,18 @@ class Executor:
             headers=_default_headers(self.api_key),
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-            body = response.read().decode("utf-8")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                body = response.read().decode("utf-8")
+        except Exception:
+            logger.exception("Executor request failed")
+            raise
         data = json.loads(body)
         content = data["choices"][0]["message"]["content"]
         try:
             raw = json.loads(content)
         except json.JSONDecodeError as exc:
             raise DecisionError("Model returned non-JSON content") from exc
-        return _validate_decision(raw)
+        decision = _validate_decision(raw)
+        logger.info("Executor decision type=%s", decision.type)
+        return decision

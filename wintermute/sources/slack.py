@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import Any, Optional
+import logging
 
 from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -38,6 +39,7 @@ class SlackCommandWorkItem(WorkItem):
     message: SlackMessage
 
     async def resume(self, ctx: WorkItemContext) -> None:
+        logger = logging.getLogger(__name__)
         if self.message.thread_ts and self.message.thread_ts != self.message.ts:
             session = ctx.db.get_session_by_thread(self.message.thread_ts)
             if session:
@@ -69,6 +71,7 @@ class SlackCommandWorkItem(WorkItem):
         agent_slug = parts[2].lower()
         project = ctx.db.get_project_by_slug(project_slug)
         if not project:
+            logger.info("Slack start failed: project %s not found", project_slug)
             await ctx.tools.call(
                 "slack_post_message",
                 {
@@ -79,6 +82,7 @@ class SlackCommandWorkItem(WorkItem):
             )
             return
         if project.slack_channel_id != self.message.channel:
+            logger.info("Slack start blocked: channel mismatch for %s", project_slug)
             await ctx.tools.call(
                 "slack_post_message",
                 {
@@ -90,6 +94,7 @@ class SlackCommandWorkItem(WorkItem):
             return
         agent = ctx.db.get_agent_by_slug(agent_slug)
         if not agent:
+            logger.info("Slack start failed: agent %s not found", agent_slug)
             await ctx.tools.call(
                 "slack_post_message",
                 {
@@ -101,6 +106,7 @@ class SlackCommandWorkItem(WorkItem):
             return
         project_vm = ctx.db.get_project_vm_for_project(project.id)
         if not project_vm:
+            logger.info("Slack start failed: no VM mapping for project %s", project_slug)
             await ctx.tools.call(
                 "slack_post_message",
                 {
@@ -113,6 +119,7 @@ class SlackCommandWorkItem(WorkItem):
         existing = ctx.db.list_sessions(project_id=project.id, status="running")
         for session in existing:
             if session.project_vm_id == project_vm.id:
+                logger.info("Slack start blocked: session already running for project %s", project_slug)
                 await ctx.tools.call(
                     "slack_post_message",
                     {
@@ -124,6 +131,7 @@ class SlackCommandWorkItem(WorkItem):
                 return
         vm = ctx.db.get_vm_target(project_vm.vm_target_id)
         if not vm:
+            logger.info("Slack start failed: VM target missing for project %s", project_slug)
             await ctx.tools.call(
                 "slack_post_message",
                 {
@@ -137,6 +145,7 @@ class SlackCommandWorkItem(WorkItem):
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         repo_path = ensure_repo(spec, project_vm)
         if not repo_path:
+            logger.info("Slack start failed: repo not configured for project %s", project_slug)
             await ctx.tools.call(
                 "slack_post_message",
                 {
@@ -158,6 +167,7 @@ class SlackCommandWorkItem(WorkItem):
             repo_path=repo_path,
             thread_ts=self.message.ts,
         )
+        logger.info("Slack start session %s for project %s", session_id, project_slug)
         start_session(spec, session_id, agent, repo_path)
         await ctx.tools.call(
             "slack_post_message",
@@ -205,10 +215,12 @@ class SlackSource(TaskSource):
         source = db.get_task_source(self.id)
         if not source or not source.enabled:
             return []
+        logger = logging.getLogger(__name__)
         self._channels_filter = self._normalize_channels(source.config.get("channels"))
         try:
             await self._ensure_socket(db, source.config)
         except Exception:
+            logger.exception("Slack socket initialization failed")
             return []
         drafts: list[WorkItemDraft] = []
         while True:
@@ -232,6 +244,8 @@ class SlackSource(TaskSource):
                     },
                 )
             )
+        if drafts:
+            logger.info("Slack poll yielded %d messages", len(drafts))
         return drafts
 
     async def build_work_item(self, ctx: dict[str, Any], record: Any) -> WorkItem:

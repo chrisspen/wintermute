@@ -22,6 +22,8 @@
             <a href="/ui/vms" class="{% if active_nav == 'vms' %}active{% endif %}">VMs</a>
             <a href="/ui/agents" class="{% if active_nav == 'agents' %}active{% endif %}">Agents</a>
             <a href="/ui/project-vms" class="{% if active_nav == 'mappings' %}active{% endif %}">Mappings</a>
+            <a href="/ui/work-items" class="{% if active_nav == 'work_items' %}active{% endif %}">Work Items</a>
+            <a href="/ui/sessions" class="{% if active_nav == 'sessions' %}active{% endif %}">Sessions</a>
           </div>
         </div>
         <span class="badge">Local</span>
@@ -40,5 +42,93 @@
         {% block content %}{% endblock %}
       </main>
     </div>
+    <div class="modal" id="confirm-modal">
+      <div class="modal-card">
+        <h3 id="confirm-message">Are you sure? This cannot be undone.</h3>
+        <div id="confirm-phrase-wrapper" style="display:none;">
+          <p class="muted" id="confirm-error"></p>
+          <label>Confirmation</label>
+          <input type="text" id="confirm-phrase-input" />
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="ghost" id="confirm-cancel">Cancel</button>
+          <button type="button" class="danger" id="confirm-submit">Delete</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var modal = document.getElementById('confirm-modal');
+        var messageEl = document.getElementById('confirm-message');
+        var phraseWrapper = document.getElementById('confirm-phrase-wrapper');
+        var phraseInput = document.getElementById('confirm-phrase-input');
+        var errorEl = document.getElementById('confirm-error');
+        var cancelBtn = document.getElementById('confirm-cancel');
+        var confirmBtn = document.getElementById('confirm-submit');
+        var pendingForm = null;
+        var requiredPhrase = '';
+
+        function openModal(button) {
+          pendingForm = button.closest('form');
+          if (!pendingForm) {
+            return;
+          }
+          messageEl.textContent = button.getAttribute('data-confirm-message') || 'Are you sure? This cannot be undone.';
+          requiredPhrase = (button.getAttribute('data-confirm-phrase') || '').trim();
+          if (requiredPhrase) {
+            phraseWrapper.style.display = 'block';
+            phraseInput.value = '';
+            errorEl.textContent = "Type '" + requiredPhrase + "' to confirm.";
+          } else {
+            phraseWrapper.style.display = 'none';
+            phraseInput.value = '';
+            errorEl.textContent = '';
+          }
+          modal.classList.add('open');
+        }
+
+        function closeModal() {
+          modal.classList.remove('open');
+          pendingForm = null;
+          requiredPhrase = '';
+        }
+
+        document.addEventListener('click', function (event) {
+          var button = event.target.closest('[data-confirm]');
+          if (!button) {
+            return;
+          }
+          event.preventDefault();
+          openModal(button);
+        });
+
+        confirmBtn.addEventListener('click', function () {
+          if (!pendingForm) {
+            return;
+          }
+          if (requiredPhrase) {
+            if (phraseInput.value.trim().toLowerCase() !== requiredPhrase.toLowerCase()) {
+              errorEl.textContent = 'Confirmation phrase does not match.';
+              return;
+            }
+            var confirmInput = pendingForm.querySelector('input[name="confirm"]');
+            if (confirmInput) {
+              confirmInput.value = requiredPhrase;
+            }
+          }
+          pendingForm.submit();
+        });
+
+        cancelBtn.addEventListener('click', function () {
+          closeModal();
+        });
+
+        modal.addEventListener('click', function (event) {
+          if (event.target === modal) {
+            closeModal();
+          }
+        });
+      })();
+    </script>
   </body>
 </html>

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import heapq
 import os
+import traceback
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
@@ -35,6 +37,9 @@ from wintermute.tools.slack import SlackPostMessageTool
 
 def _parse_allowlist(value: str) -> list[str]:
     return [entry.strip() for entry in value.split(",") if entry.strip()]
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -81,6 +86,7 @@ class Supervisor:
         self._ensure_task_sources()
         try:
             while not self._stop_event.is_set():
+                logger.info("Supervisor loop tick.")
                 await self._refresh_runtime()
                 await self._poll_sources()
                 self._update_state("polled sources")
@@ -117,11 +123,13 @@ class Supervisor:
             row = rows.get(source.id)
             if not row or not row.enabled:
                 continue
+            logger.info("Polling source %s", source.id)
             last_poll = self._last_poll.get(source.id, 0.0)
             if now - last_poll < row.poll_interval_seconds:
                 continue
             self._last_poll[source.id] = now
             drafts = await source.poll({"db": self.db})
+            logger.info("Source %s emitted %d drafts", source.id, len(drafts))
             for draft in drafts:
                 inserted = self.db.insert_work_item_if_absent(
                     draft.work_id,
@@ -130,6 +138,7 @@ class Supervisor:
                     draft.checkpoint,
                 )
                 if inserted:
+                    logger.info("Queued work item %s", draft.work_id)
                     if self._current_work_id:
                         current = self.db.get_work_item(self._current_work_id)
                         if current and draft.priority < current.priority:
@@ -149,6 +158,7 @@ class Supervisor:
         record = self.db.get_work_item(work_id)
         if not record:
             return
+        logger.info("Running work item %s", work_id)
         self._current_work_id = work_id
         self._preempt_event.clear()
         await self._run_work_item(record)
@@ -162,6 +172,7 @@ class Supervisor:
         try:
             source = self._get_source(record.source_id)
             work_item = await source.build_work_item({"db": self.db}, record)
+            logger.info("Work item %s resume start", record.work_id)
 
             async def checkpoint(patch: dict[str, Any]) -> None:
                 new_checkpoint = dict(record.checkpoint)
@@ -176,6 +187,7 @@ class Supervisor:
                 checkpoint=checkpoint,
             )
             await work_item.resume(ctx)
+            logger.info("Work item %s resume completed", record.work_id)
             if self._preempt_event.is_set():
                 self.db.update_work_item_status(record.work_id, "queued")
                 self.db.record_run_end(run_id, "preempted")
@@ -185,6 +197,7 @@ class Supervisor:
             self.db.record_run_end(run_id, "done")
             self._update_state(f"completed {record.work_id}")
         except WorkItemBlocked as exc:
+            logger.info("Work item %s blocked: %s", record.work_id, exc.reason)
             run_after = (
                 datetime.now(timezone.utc).timestamp() + exc.delay_seconds
             )
@@ -198,6 +211,8 @@ class Supervisor:
             self.db.record_run_end(run_id, "blocked", error=exc.reason)
             self._update_state(f"blocked {record.work_id}")
         except Exception as exc:  # pragma: no cover - safeguard
+            tb = traceback.format_exc()
+            logger.error("Work item %s failed: %s", record.work_id, exc)
             attempts = record.attempts + 1
             if attempts >= self.max_attempts:
                 self.db.update_work_item_status(
@@ -205,6 +220,7 @@ class Supervisor:
                     "failed",
                     attempts=attempts,
                     last_error=str(exc),
+                    last_traceback=tb,
                 )
                 self.db.record_run_end(run_id, "failed", error=str(exc))
                 self._update_state(f"failed {record.work_id}")
@@ -220,6 +236,7 @@ class Supervisor:
                 attempts=attempts,
                 run_after=run_after_iso,
                 last_error=str(exc),
+                last_traceback=tb,
             )
             self.db.record_run_end(run_id, "retrying", error=str(exc))
             self._update_state(f"retrying {record.work_id}")
@@ -283,6 +300,10 @@ def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:
 
 
 async def main() -> None:
+    logging.basicConfig(
+        level=os.environ.get("WINTERMUTE_LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     register(DemoSource())
     register(GitHubIssuesSource())
     register(SlackSource())

@@ -16,6 +16,9 @@
         <input type="text" name="required_ssh_options" value="{{ agent.required_ssh_options or '' }}" />
         <button type="submit">Save Agent</button>
       </form>
+      <form method="post" action="/agents/{{ agent.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this agent? This cannot be undone.">Delete Agent</button>
+      </form>
     </div>
   </div>
 </div>

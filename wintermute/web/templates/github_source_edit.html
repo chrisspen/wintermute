@@ -47,6 +47,9 @@
         </div>
         <button type="submit">Save GitHub Source</button>
       </form>
+      <form method="post" action="/github-sources/{{ source.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this GitHub source? This cannot be undone.">Delete GitHub Source</button>
+      </form>
     </div>
   </div>
 </div>

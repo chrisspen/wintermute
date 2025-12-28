@@ -13,9 +13,6 @@
         {% for token in tokens %}
         <li>
           <a href="/ui/github-tokens/{{ token.id }}/edit">{{ token.note or token.user_login or token.id }}</a>
-          <form method="post" action="/github-tokens/{{ token.id }}/delete" style="display:inline; margin-left:8px;">
-            <button type="submit" class="danger">Delete</button>
-          </form>
         </li>
         {% else %}
         <li class="muted">No GitHub tokens yet</li>

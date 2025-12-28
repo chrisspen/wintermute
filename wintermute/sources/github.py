@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import logging
 from typing import Any, Optional
 
 import aiohttp
@@ -27,11 +28,14 @@ class GitHubIssueWorkItem(WorkItem):
     checkpoint: dict[str, Any]
 
     async def resume(self, ctx: WorkItemContext) -> None:
+        logger = logging.getLogger(__name__)
         source_id = self.checkpoint.get("github_source_id")
         source = ctx.db.get_github_source(source_id) if source_id else None
         if source and source.auto_start:
+            logger.info("GitHub work item %s auto-start enabled", self.work_id)
             await self._auto_start(ctx, source)
             return
+        logger.info("GitHub work item %s using LLM decision path", self.work_id)
         await self._llm_decide(ctx)
 
     async def _llm_decide(self, ctx: WorkItemContext) -> None:
@@ -71,6 +75,7 @@ class GitHubIssueWorkItem(WorkItem):
             return
 
     async def _auto_start(self, ctx: WorkItemContext, source: Any) -> None:
+        logger = logging.getLogger(__name__)
         project = ctx.db.get_project(source.project_id)
         if not project:
             return
@@ -113,10 +118,12 @@ class GitHubIssueWorkItem(WorkItem):
                 description=issue_body or existing_ticket.description,
             )
         if ctx.db.get_session_by_ticket(ticket_id):
+            logger.info("Session already exists for ticket %s", ticket_id)
             return
         running = ctx.db.list_sessions(project_id=project.id, status="running")
         for session in running:
             if session.project_vm_id == project_vm.id:
+                logger.info("Project session already running for %s", project.id)
                 raise WorkItemBlocked("Project session already running", delay_seconds=60)
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         repo_path = ensure_repo(spec, project_vm)
@@ -141,6 +148,7 @@ class GitHubIssueWorkItem(WorkItem):
             repo_path=repo_path,
             thread_ts=thread_ts,
         )
+        logger.info("Started session %s for issue %s", session_id, issue_number)
         start_session(spec, session_id, agent, repo_path)
         session = ctx.db.get_session(session_id)
         if session:
@@ -203,8 +211,10 @@ class GitHubIssuesSource(TaskSource):
         source = db.get_task_source(self.id)
         if not source or not source.enabled:
             return []
+        logger = logging.getLogger(__name__)
         drafts: list[WorkItemDraft] = []
         sources = [row for row in db.list_github_sources() if row.enabled]
+        logger.info("GitHub poller checking %d sources", len(sources))
         for repo_source in sources:
             if not repo_source.token_id:
                 continue
@@ -218,6 +228,7 @@ class GitHubIssuesSource(TaskSource):
                 repo_source.state,
                 repo_source.labels,
             )
+            logger.info("Fetched %d issues for %s/%s", len(issues), repo_source.owner, repo_source.repo)
             for issue in issues:
                 if issue.get("pull_request"):
                     continue

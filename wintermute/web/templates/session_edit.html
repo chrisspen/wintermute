@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Session</h3>
+      <p><strong>ID:</strong> {{ session.id }}</p>
+      <p><strong>Status:</strong> {{ session.status }}</p>
+      <p><strong>Project:</strong> {{ project_name }}</p>
+      <p><strong>VM Mapping:</strong> {{ mapping_label }}</p>
+      <p><strong>Agent:</strong> {{ agent_name }}</p>
+      <p><strong>Ticket:</strong> {{ session.ticket_id or 'none' }}</p>
+      <p><strong>Repo Path:</strong> {{ session.repo_path }}</p>
+      <p><strong>Thread TS:</strong> {{ session.thread_ts or 'none' }}</p>
+      <p><strong>Created:</strong> {{ session.created_at }}</p>
+      <p><strong>Updated:</strong> {{ session.updated_at }}</p>
+      <form method="post" action="/sessions/{{ session.id }}/edit">
+        <label>Status</label>
+        <select name="status">
+          <option value="running" {% if session.status == 'running' %}selected{% endif %}>running</option>
+          <option value="done" {% if session.status == 'done' %}selected{% endif %}>done</option>
+          <option value="failed" {% if session.status == 'failed' %}selected{% endif %}>failed</option>
+          <option value="blocked" {% if session.status == 'blocked' %}selected{% endif %}>blocked</option>
+        </select>
+        <button type="submit">Save Session</button>
+      </form>
+      <form method="post" action="/sessions/{{ session.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this session? This cannot be undone.">Delete Session</button>
+      </form>
+    </div>
+    <div class="tile wide">
+      <h3>Last Output</h3>
+      <pre class="code-block">{{ session.last_output or '' }}</pre>
+    </div>
+  </div>
+</div>
+{% endblock %}

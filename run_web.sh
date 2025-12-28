@@ -29,4 +29,4 @@ set -a
 source .env
 set +a
 
-python -m uvicorn wintermute.web.app:create_app --factory --reload --host "${WINTERMUTE_WEB_HOST:-127.0.0.1}" --port "${WINTERMUTE_WEB_PORT:-8000}"
+python -m uvicorn wintermute.web.app:create_app --factory --reload --access-log --log-level info --host "${WINTERMUTE_WEB_HOST:-127.0.0.1}" --port "${WINTERMUTE_WEB_PORT:-8000}"

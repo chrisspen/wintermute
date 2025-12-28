@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Sessions</h3>
+      <p class="muted">All agent sessions.</p>
+    </div>
+    <div class="tile">
+      <h3>Session List</h3>
+      <ul>
+        {% for session in sessions %}
+        <li>
+          <a href="/ui/sessions/{{ session.id }}">{{ session.id }}</a>
+          [{{ session.status }}]
+        </li>
+        {% else %}
+        <li class="muted">No sessions yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

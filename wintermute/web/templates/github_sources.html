@@ -31,9 +31,6 @@
           [{{ token_lookup.get(source.token_id, 'no token') }}]
           [{{ agent_lookup.get(source.agent_id, 'no agent') }}]
           [{{ 'auto' if source.auto_start else 'manual' }}]
-          <form method="post" action="/github-sources/{{ source.id }}/delete" style="display:inline; margin-left:8px;">
-            <button type="submit" class="danger">Delete</button>
-          </form>
         </li>
         {% else %}
         <li class="muted">No GitHub sources yet</li>

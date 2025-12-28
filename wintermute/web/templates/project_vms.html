@@ -14,9 +14,6 @@
         <li>
           <a href="/ui/project-vms/{{ mapping.id }}/edit">{{ project_lookup.get(mapping.project_id, mapping.project_id) }} &rarr; {{ vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id) }}</a>
           ({{ mapping.repo_mode }})
-          <form method="post" action="/project_vms/{{ mapping.id }}/delete" style="display:inline; margin-left:8px;">
-            <button type="submit" class="danger">Delete</button>
-          </form>
         </li>
         {% else %}
         <li class="muted">No mappings yet</li>

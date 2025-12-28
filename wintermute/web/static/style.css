@@ -28,7 +28,7 @@
         justify-content: space-between;
         gap: 16px;
         padding: 24px 28px;
-        background: linear-gradient(120deg, #1f1b16, #3b2e24);
+        background: #1f1b16;
         border-radius: 18px;
         color: #fef9ef;
         box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
@@ -273,6 +273,16 @@
       }
       .perm-col-all {
         margin-top: 6px;
+      }
+      .code-block {
+        background: #1f1b16;
+        color: #f6efe6;
+        border-radius: 12px;
+        padding: 16px;
+        overflow-x: auto;
+        font-size: 13px;
+        line-height: 1.4;
+        white-space: pre-wrap;
       }
       .perm-table th {
         font-size: 12px;

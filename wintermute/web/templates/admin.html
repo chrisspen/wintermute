@@ -98,6 +98,29 @@
       </div>
     </div>
     <div class="group">
+      <p class="group-title">Work Items</p>
+      <div class="tile">
+        <h3>Queued</h3>
+        <ul>
+          {% for item in work_items[:10] %}
+          <li><a href="/ui/work-items/{{ item.work_id|urlencode }}">{{ item.work_id }}</a> [{{ item.status }}]</li>
+          {% else %}
+          <li class="muted">No queued work items</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="tile">
+        <h3>Failed</h3>
+        <ul>
+          {% for item in failed_work_items[:10] %}
+          <li><a href="/ui/work-items/{{ item.work_id|urlencode }}">{{ item.work_id }}</a> [{{ item.status }}]</li>
+          {% else %}
+          <li class="muted">No failed work items</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
       <p class="group-title">Projects</p>
       <div class="tile">
         <h3>Projects</h3>

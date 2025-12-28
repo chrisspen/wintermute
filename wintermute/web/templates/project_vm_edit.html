@@ -35,6 +35,9 @@
         <input type="text" name="repo_url" value="{{ mapping.repo_url or '' }}" />
         <button type="submit">Save Mapping</button>
       </form>
+      <form method="post" action="/project_vms/{{ mapping.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this mapping? This cannot be undone.">Delete Mapping</button>
+      </form>
     </div>
   </div>
 </div>

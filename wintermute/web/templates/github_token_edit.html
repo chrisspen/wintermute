@@ -13,6 +13,9 @@
         <input type="password" name="token" placeholder="leave blank to keep existing" />
         <button type="submit">Save GitHub Token</button>
       </form>
+      <form method="post" action="/github-tokens/{{ token.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this GitHub token? This cannot be undone.">Delete GitHub Token</button>
+      </form>
     </div>
   </div>
 </div>

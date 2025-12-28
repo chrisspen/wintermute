@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Edit Ticket</h3>
+      <form method="post" action="/tickets/{{ ticket.id }}/edit">
+        <label>Project</label>
+        <select name="project_id" required>
+          {% for project in projects %}
+          <option value="{{ project.id }}" {% if project.id == ticket.project_id %}selected{% endif %}>{{ project.name }}</option>
+          {% endfor %}
+        </select>
+        <label>Title</label>
+        <input type="text" name="title" value="{{ ticket.title }}" required />
+        <label>Description</label>
+        <input type="text" name="description" value="{{ ticket.description or '' }}" />
+        <label>Assigned To</label>
+        <input type="text" name="assigned_to" value="{{ ticket.assigned_to or '' }}" />
+        <label>Estimate</label>
+        <input type="text" name="estimate" value="{{ ticket.estimate or '' }}" />
+        <label>Status</label>
+        <select name="status">
+          <option value="open" {% if ticket.status == 'open' %}selected{% endif %}>open</option>
+          <option value="in-progress" {% if ticket.status == 'in-progress' %}selected{% endif %}>in-progress</option>
+          <option value="needs-feedback" {% if ticket.status == 'needs-feedback' %}selected{% endif %}>needs-feedback</option>
+          <option value="done" {% if ticket.status == 'done' %}selected{% endif %}>done</option>
+        </select>
+        <button type="submit">Save Ticket</button>
+      </form>
+      <form method="post" action="/tickets/{{ ticket.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this ticket? This cannot be undone.">Delete Ticket</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

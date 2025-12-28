@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import logging
 
 from wintermute.db import Database
 from wintermute.runner import build_ssh_spec, is_session_running, read_output
@@ -18,6 +19,7 @@ class SessionWorkItem(WorkItem):
     session_id: str
 
     async def resume(self, ctx: WorkItemContext) -> None:
+        logger = logging.getLogger(__name__)
         session = ctx.db.get_session(self.session_id)
         if not session:
             return
@@ -47,6 +49,7 @@ class SessionWorkItem(WorkItem):
         output, new_offset = read_output(spec, session)
         if not output:
             return
+        logger.info("Session %s produced %d bytes", session.id, len(output))
         ctx.db.update_session(session.id, last_output=output, last_output_offset=new_offset)
         prefix = f"[{agent.slug}] "
         chunks = _chunk_text(output, 3000)

@@ -15,40 +15,23 @@
         <button type="submit">Save Project</button>
       </form>
       <div class="divider"></div>
-      <button type="button" class="danger" onclick="openDeleteModal()">Delete Project</button>
+      <form method="post" action="/projects/{{ project.id }}/delete">
+        <input type="hidden" name="confirm" value="" />
+        <div class="checkbox-row">
+          <input type="checkbox" name="delete_slack" id="deleteSlack" />
+          <label for="deleteSlack">Also delete Slack channel</label>
+        </div>
+        <button
+          type="button"
+          class="danger"
+          data-confirm
+          data-confirm-message="Are you sure? This cannot be undone."
+          data-confirm-phrase="delete me"
+        >
+          Delete Project
+        </button>
+      </form>
     </div>
   </div>
 </div>
-<div class="modal" id="deleteModal">
-  <div class="modal-card">
-    <h3>Are you sure? This cannot be undone.</h3>
-    <p class="muted">To delete type <strong>delete me</strong> below</p>
-    <form method="post" action="/projects/{{ project.id }}/delete">
-      <input type="text" name="confirm" id="deleteConfirm" placeholder="delete me" />
-      <div class="checkbox-row">
-        <input type="checkbox" name="delete_slack" id="deleteSlack" />
-        <label for="deleteSlack">Also delete Slack channel</label>
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="ghost" onclick="closeDeleteModal()">Cancel</button>
-        <button type="submit" class="danger" id="deleteSubmit" disabled>Permanently delete project</button>
-      </div>
-    </form>
-  </div>
-</div>
-<script>
-  function openDeleteModal() {
-    document.getElementById('deleteModal').classList.add('open');
-  }
-  function closeDeleteModal() {
-    document.getElementById('deleteModal').classList.remove('open');
-  }
-  var confirmInput = document.getElementById('deleteConfirm');
-  var submitButton = document.getElementById('deleteSubmit');
-  if (confirmInput && submitButton) {
-    confirmInput.addEventListener('input', function () {
-      submitButton.disabled = confirmInput.value.trim().toLowerCase() !== 'delete me';
-    });
-  }
-</script>
 {% endblock %}

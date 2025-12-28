@@ -13,9 +13,6 @@
         {% for token in api_tokens %}
         <li>
           <a href="/ui/api-tokens/{{ token.id }}/edit">{{ token.name }}</a>
-          <form method="post" action="/api-tokens/{{ token.id }}/delete" style="display:inline; margin-left:8px;">
-            <button type="submit" class="danger">Delete</button>
-          </form>
         </li>
         {% else %}
         <li class="muted">No API tokens yet</li>

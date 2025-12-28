@@ -13,10 +13,7 @@
       <ul>
         {% for ticket in tickets %}
         <li>
-          {{ ticket.title }} [{{ ticket.status }}]
-          <form method="post" action="/tickets/{{ ticket.id }}/delete" style="display:inline; margin-left:8px;">
-            <button type="submit" class="danger">Delete</button>
-          </form>
+          <a href="/ui/tickets/{{ ticket.id }}/edit">{{ ticket.title }}</a> [{{ ticket.status }}]
         </li>
         {% else %}
         <li class="muted">No tickets yet</li>

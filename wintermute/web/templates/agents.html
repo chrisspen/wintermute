@@ -13,9 +13,6 @@
         {% for agent in agents %}
         <li>
           <a href="/ui/agents/{{ agent.id }}/edit">{{ agent.name }}</a> ({{ agent.slug }})
-          <form method="post" action="/agents/{{ agent.id }}/delete" style="display:inline; margin-left:8px;">
-            <button type="submit" class="danger">Delete</button>
-          </form>
         </li>
         {% else %}
         <li class="muted">No agents yet</li>

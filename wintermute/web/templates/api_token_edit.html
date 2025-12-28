@@ -45,6 +45,9 @@
         </div>
         <button type="submit">Save API Token</button>
       </form>
+      <form method="post" action="/api-tokens/{{ token.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this API token? This cannot be undone.">Delete API Token</button>
+      </form>
     </div>
   </div>
 </div>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import hashlib
 import hmac
 import os
@@ -60,6 +61,7 @@ API_PERMISSION_MODELS = [
     {"key": "project_vms", "label": "Project VM Mappings"},
     {"key": "projects", "label": "Projects"},
     {"key": "sessions", "label": "Agent Sessions"},
+    {"key": "supervisor_state", "label": "Supervisor State"},
     {"key": "task_sources", "label": "Task Sources"},
     {"key": "tickets", "label": "Tickets"},
     {"key": "users", "label": "Users"},
@@ -186,6 +188,7 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "project_updated": "Project updated",
         "project_deleted": "Deletion of project successful",
         "ticket_created": "Ticket created",
+        "ticket_updated": "Ticket updated",
         "ticket_deleted": "Ticket deleted",
         "vm_created": "VM target created",
         "vm_updated": "VM target updated",
@@ -207,6 +210,8 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "api_token_created": "API token created",
         "api_token_updated": "API token updated",
         "api_token_deleted": "API token deleted",
+        "session_updated": "Session updated",
+        "session_deleted": "Session deleted",
     }
     if not saved:
         return None
@@ -307,7 +312,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     def _record_to_dict(record: Any) -> dict[str, Any]:
         if hasattr(record, "__dataclass_fields__"):
-            return asdict(record)
+            data = asdict(record)
+            if isinstance(data.get("checkpoint"), (dict, list)):
+                data["checkpoint"] = data["checkpoint"]
+            return data
         return dict(record)
 
     def _normalize_permissions(payload: Any) -> dict[str, dict[str, bool]]:
@@ -718,6 +726,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if missing:
             raise HTTPException(status_code=400, detail=f"Missing fields: {', '.join(missing)}")
 
+    def _unsupported_api_action(model: str) -> None:
+        raise HTTPException(status_code=405, detail=f"{model} is read-only")
+
     def _api_model_handlers() -> dict[str, dict[str, Any]]:
         return {
             "projects": {
@@ -846,6 +857,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 ),
                 "delete": database.delete_session,
             },
+            "supervisor_state": {
+                "list": lambda: [state] if (state := database.get_supervisor_state()) else [],
+                "get": lambda item_id: database.get_supervisor_state(),
+                "required": [],
+                "create": lambda payload: _unsupported_api_action("supervisor_state"),
+                "update": lambda item_id, payload: _unsupported_api_action("supervisor_state"),
+                "delete": lambda item_id: _unsupported_api_action("supervisor_state"),
+            },
             "github_tokens": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_github_tokens()],
                 "get": database.get_github_token,
@@ -930,11 +949,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "update": lambda item_id, payload: database.update_work_item_status(
                     item_id,
                     payload.get("status") or "queued",
-                    checkpoint=payload.get("checkpoint"),
+                    checkpoint=payload["checkpoint"] if "checkpoint" in payload else None,
                     priority=payload.get("priority"),
                     run_after=payload.get("run_after"),
                     attempts=payload.get("attempts"),
                     last_error=payload.get("last_error"),
+                    last_traceback=payload.get("last_traceback"),
                 ),
                 "delete": database.delete_work_item,
             },
@@ -1004,7 +1024,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         handlers["create"](payload)
         return {"ok": True}
 
-    @app.get("/api/{model}/{item_id}")
+    @app.get("/api/{model}/{item_id:path}")
     async def api_get(model: str, item_id: str, request: Request) -> dict[str, Any]:
         handlers = _api_model_handlers().get(model)
         if not handlers:
@@ -1013,19 +1033,28 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         record = handlers["get"](item_id)
         if not record:
             raise HTTPException(status_code=404, detail="Not found")
+        if isinstance(record, list):
+            if not record:
+                raise HTTPException(status_code=404, detail="Not found")
+            record = record[0]
         return {"data": _record_to_dict(record)}
 
-    @app.put("/api/{model}/{item_id}")
+    @app.put("/api/{model}/{item_id:path}")
     async def api_update(model: str, item_id: str, request: Request) -> dict[str, Any]:
         handlers = _api_model_handlers().get(model)
         if not handlers:
             raise HTTPException(status_code=404, detail="Unknown model")
         _require_api_permission(request, model, "update")
         payload = await request.json()
-        handlers["update"](item_id, payload)
+        try:
+            handlers["update"](item_id, payload)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=repr(exc)) from exc
         return {"ok": True}
 
-    @app.delete("/api/{model}/{item_id}")
+    @app.delete("/api/{model}/{item_id:path}")
     async def api_delete(model: str, item_id: str, request: Request) -> dict[str, Any]:
         handlers = _api_model_handlers().get(model)
         if not handlers:
@@ -1185,6 +1214,48 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.delete_ticket(ticket_id)
         return RedirectResponse("/ui/tickets?saved=ticket_deleted", status_code=303)
 
+    @app.get("/ui/tickets/{ticket_id}/edit")
+    def tickets_edit_ui(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        ticket = database.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "ticket_edit.html",
+            {
+                "title": "Edit Ticket",
+                "active_nav": "tickets",
+                "growl_message": growl_message,
+                "ticket": ticket,
+                "projects": database.list_projects(),
+            },
+        )
+
+    @app.post("/tickets/{ticket_id}/edit")
+    async def update_ticket(
+        ticket_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        title = str(form.get("title", "")).strip()
+        description = str(form.get("description", "")).strip() or None
+        assigned_to = str(form.get("assigned_to", "")).strip() or None
+        estimate = str(form.get("estimate", "")).strip() or None
+        status = str(form.get("status", "open")).strip() or "open"
+        if not project_id or not title:
+            raise HTTPException(status_code=400, detail="Missing ticket fields")
+        database.update_ticket(
+            ticket_id,
+            project_id=project_id,
+            title=title,
+            description=description,
+            assigned_to=assigned_to,
+            estimate=estimate,
+            status=status,
+        )
+        return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
+
     @app.post("/vms")
     async def create_vm(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
@@ -1311,6 +1382,64 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.delete_project_vm(mapping_id)
         return RedirectResponse("/ui/project-vms?saved=mapping_deleted", status_code=303)
 
+    @app.get("/ui/sessions")
+    def sessions_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        sessions = database.list_sessions()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "sessions.html",
+            {
+                "title": "Sessions",
+                "active_nav": "sessions",
+                "growl_message": growl_message,
+                "sessions": sessions,
+            },
+        )
+
+    @app.get("/ui/sessions/{session_id}")
+    def session_edit_ui(session_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        session = database.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        project = database.get_project(session.project_id)
+        mapping = database.get_project_vm(session.project_vm_id)
+        agent = database.get_agent(session.agent_id)
+        project_name = project.name if project else session.project_id
+        mapping_label = (
+            f"{project_name} -> {mapping.vm_target_id}" if mapping else session.project_vm_id
+        )
+        agent_name = agent.name if agent else session.agent_id
+        return _render_template(
+            request,
+            "session_edit.html",
+            {
+                "title": "Session",
+                "active_nav": "sessions",
+                "growl_message": None,
+                "session": session,
+                "project_name": project_name,
+                "mapping_label": mapping_label,
+                "agent_name": agent_name,
+            },
+        )
+
+    @app.post("/sessions/{session_id}/edit")
+    async def update_session(
+        session_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        status = str(form.get("status", "")).strip()
+        if not status:
+            raise HTTPException(status_code=400, detail="Status is required")
+        database.update_session(session_id, status=status)
+        return RedirectResponse(f"/ui/sessions/{session_id}?saved=session_updated", status_code=303)
+
+    @app.post("/sessions/{session_id}/delete")
+    async def delete_session(session_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_session(session_id)
+        return RedirectResponse("/ui/sessions?saved=session_deleted", status_code=303)
+
     @app.get("/logs/tail")
     def tail_logs(
         limit: int = Query(default=100, ge=1, le=1000), user: str = Depends(_require_login)
@@ -1398,6 +1527,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def ui(request: Request, user: str = Depends(_require_login)) -> Response:
         status = database.get_supervisor_state()
         work_items = database.fetch_ready_work_items(utc_now())
+        failed_work_items = database.list_work_items(status="failed")
         projects = database.list_projects()
         tickets = database.list_tickets()
         vm_targets = database.list_vm_targets()
@@ -1424,6 +1554,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "user": user,
                 "status": status,
                 "work_items": work_items,
+                "failed_work_items": failed_work_items,
                 "projects": projects,
                 "tickets": tickets,
                 "vm_targets": vm_targets,
@@ -1440,6 +1571,40 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "api_tokens": api_tokens,
                 "project_lookup": {project.id: project.name for project in projects},
                 "vm_lookup": {vm.id: vm.name for vm in vm_targets},
+            },
+        )
+
+    @app.get("/ui/work-items")
+    def work_items_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        status_filter = request.query_params.get("status")
+        work_items = database.list_work_items(status=status_filter) if status_filter else database.list_work_items()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "work_items.html",
+            {
+                "title": "Work Items",
+                "active_nav": "work_items",
+                "growl_message": growl_message,
+                "work_items": work_items,
+            },
+        )
+
+    @app.get("/ui/work-items/{work_id:path}")
+    def work_item_edit_ui(work_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        item = database.get_work_item(work_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Work item not found")
+        checkpoint = json.dumps(item.checkpoint, indent=2, sort_keys=True)
+        return _render_template(
+            request,
+            "work_item_edit.html",
+            {
+                "title": "Work Item",
+                "active_nav": "work_items",
+                "growl_message": None,
+                "item": item,
+                "checkpoint": checkpoint,
             },
         )
 

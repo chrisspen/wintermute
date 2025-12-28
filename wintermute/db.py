@@ -54,6 +54,7 @@ class WorkItemRecord:
     run_after: str
     attempts: int
     last_error: Optional[str]
+    last_traceback: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,7 @@ class WorkItemModel(Base):
     run_after: Mapped[str] = mapped_column(String, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False)
     last_error: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    last_traceback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class WorkItemRunModel(Base):
@@ -495,6 +497,7 @@ class Database:
             run_after=now,
             attempts=0,
             last_error=None,
+            last_traceback=None,
         )
         try:
             with self.session() as session:
@@ -547,6 +550,7 @@ class Database:
         run_after: Optional[str] = None,
         attempts: Optional[int] = None,
         last_error: Optional[str] = None,
+        last_traceback: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             model = session.get(WorkItemModel, work_id)
@@ -564,6 +568,8 @@ class Database:
                 model.attempts = attempts
             if last_error is not None:
                 model.last_error = last_error
+            if last_traceback is not None:
+                model.last_traceback = last_traceback
 
     def record_run_start(self, work_id: str) -> int:
         with self.session() as session:
@@ -1304,6 +1310,7 @@ class Database:
         self,
         ticket_id: str,
         *,
+        project_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
         assigned_to: Optional[str] = None,
@@ -1314,6 +1321,8 @@ class Database:
             row = session.get(TicketModel, ticket_id)
             if not row:
                 return
+            if project_id is not None:
+                row.project_id = project_id
             if title is not None:
                 row.title = title
             if description is not None:
@@ -1772,4 +1781,5 @@ class Database:
             run_after=row.run_after,
             attempts=row.attempts,
             last_error=row.last_error,
+            last_traceback=row.last_traceback,
         )
