@@ -32,6 +32,27 @@ Run:
 
 Open `http://127.0.0.1:8000` and complete the initial admin setup.
 
+Relaunchers and restarts
+------------------------
+Use the relaunchers for long-running sessions so restarts are clean and automatic.
+
+Start relaunchers:
+
+```
+./relauncher_web.sh
+./relauncher_supervisor.sh
+```
+
+Stop relaunchers (and running processes):
+
+```
+./stop_web.sh
+./stop_supervisor.sh
+```
+
+Relaunchers restart on SIGTERM (exit 143) and stop on other non-zero exits to
+avoid crash loops. Use the stop scripts to request a clean shutdown.
+
 Slack setup
 -----------
 - Open the admin UI and add the Slack bot/app tokens under "Slack Tokens".
@@ -68,6 +89,13 @@ curl -sS -X POST http://127.0.0.1:8000/api/admin/restart-web \
   -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
 
 curl -sS -X POST http://127.0.0.1:8000/api/admin/restart-supervisor \
+  -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
+```
+
+Process PID/status endpoint:
+
+```
+curl -sS http://127.0.0.1:8000/api/admin/pids \
   -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
 ```
 

@@ -72,6 +72,9 @@ The web admin console provides:
 - GitHub token storage and GitHub source configuration (multiple repos, optional auto-start).
 - API tokens with CRUD permissions and optional env export (`WINTERMUTE_ADMIN_API_TOKEN`).
 - Admin API endpoints can restart web/supervisor (requires Admin update permission).
+- Relaunchers (`relauncher_web.sh`, `relauncher_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
+- Stop scripts (`stop_web.sh`, `stop_supervisor.sh`) request a clean shutdown.
+- PID/status endpoint: `GET /api/admin/pids`.
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.

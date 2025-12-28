@@ -343,6 +343,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return header.split(" ", 1)[1].strip()
         return request.headers.get("X-API-Token")
 
+    def _read_pid_info(pid_file: str, started_file: str) -> dict[str, Optional[str]]:
+        pid = None
+        started_at = None
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, "r", encoding="utf-8") as handle:
+                    value = handle.read().strip()
+                    pid = value or None
+            except OSError:
+                pid = None
+        if os.path.exists(started_file):
+            try:
+                with open(started_file, "r", encoding="utf-8") as handle:
+                    value = handle.read().strip()
+                    started_at = value or None
+            except OSError:
+                started_at = None
+        return {"pid": pid, "started_at": started_at}
+
     def _restart_script(script_name: str, pid_file: str, process_match: str) -> dict[str, Any]:
         logger = logging.getLogger(__name__)
         logger.info("Restart requested for %s", script_name)
@@ -1082,6 +1101,24 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             "WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid")
         )
         return _restart_script("run_supervisor.sh", pid_file, "python -m wintermute.supervisor")
+
+    @app.get("/api/admin/pids")
+    async def api_admin_pids(request: Request) -> dict[str, Any]:
+        _require_api_permission(request, "admin", "update")
+        web_pid_file = os.environ.get("WINTERMUTE_WEB_PID_FILE", os.path.join(repo_root, ".runtime", "web.pid"))
+        web_started_file = os.environ.get(
+            "WINTERMUTE_WEB_STARTED_FILE", os.path.join(repo_root, ".runtime", "web.started")
+        )
+        supervisor_pid_file = os.environ.get(
+            "WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid")
+        )
+        supervisor_started_file = os.environ.get(
+            "WINTERMUTE_SUPERVISOR_STARTED_FILE", os.path.join(repo_root, ".runtime", "supervisor.started")
+        )
+        return {
+            "web": _read_pid_info(web_pid_file, web_started_file),
+            "supervisor": _read_pid_info(supervisor_pid_file, supervisor_started_file),
+        }
 
     @app.get("/api/{model}/{item_id:path}")
     async def api_get(model: str, item_id: str, request: Request) -> dict[str, Any]:

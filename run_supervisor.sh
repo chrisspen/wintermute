@@ -33,5 +33,7 @@ PID_FILE="${WINTERMUTE_SUPERVISOR_PID_FILE:-.runtime/supervisor.pid}"
 mkdir -p "$(dirname "$PID_FILE")"
 echo "$$" > "$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
+STARTED_FILE="${WINTERMUTE_SUPERVISOR_STARTED_FILE:-.runtime/supervisor.started}"
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$STARTED_FILE"
 
 exec python -m wintermute.supervisor

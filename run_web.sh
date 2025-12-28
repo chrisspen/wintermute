@@ -33,6 +33,8 @@ PID_FILE="${WINTERMUTE_WEB_PID_FILE:-.runtime/web.pid}"
 mkdir -p "$(dirname "$PID_FILE")"
 echo "$$" > "$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
+STARTED_FILE="${WINTERMUTE_WEB_STARTED_FILE:-.runtime/web.started}"
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$STARTED_FILE"
 
 RELOAD_FLAG=()
 if [ "${WINTERMUTE_WEB_RELOAD:-}" = "1" ]; then
