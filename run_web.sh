@@ -29,4 +29,9 @@ set -a
 source .env
 set +a
 
+PID_FILE="${WINTERMUTE_WEB_PID_FILE:-.runtime/web.pid}"
+mkdir -p "$(dirname "$PID_FILE")"
+echo "$$" > "$PID_FILE"
+trap 'rm -f "$PID_FILE"' EXIT
+
 python -m uvicorn wintermute.web.app:create_app --factory --reload --access-log --log-level info --host "${WINTERMUTE_WEB_HOST:-127.0.0.1}" --port "${WINTERMUTE_WEB_PORT:-8000}"

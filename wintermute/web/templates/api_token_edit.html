@@ -24,18 +24,18 @@
                 <th>Model</th>
                 <th>All<br /><input type="checkbox" class="perm-col-all" data-col="all" /></th>
                 {% for action in permission_actions %}
-                <th>{{ action|capitalize }}<br /><input type="checkbox" class="perm-col-all" data-col="{{ action }}" /></th>
+                <th>{{ action|capitalize }}<br /><input type="checkbox" class="perm-col-all" data-col="{{ action }}" {% if action != 'update' %}data-admin-disable="1"{% endif %} /></th>
                 {% endfor %}
               </tr>
             </thead>
             <tbody>
               {% for model in permission_models %}
-              <tr data-model="{{ model.key }}">
+              <tr data-model="{{ model.key }}" {% if model.key in ['admin', 'supervisor_state'] %}class="disabled-row"{% endif %}>
                 <td>{{ model.label }}</td>
-                <td><input type="checkbox" class="perm-row-all" /></td>
+                <td><input type="checkbox" class="perm-row-all" {% if model.key in ['admin', 'supervisor_state'] %}disabled{% endif %} /></td>
                 {% for action in permission_actions %}
                 <td>
-                  <input type="checkbox" name="perm-{{ model.key }}-{{ action }}" class="perm-action" {% if permissions.get(model.key, {}).get(action) %}checked{% endif %} />
+                  <input type="checkbox" name="perm-{{ model.key }}-{{ action }}" class="perm-action" {% if permissions.get(model.key, {}).get(action) %}checked{% endif %} {% if (model.key == 'admin' and action != 'update') or (model.key == 'supervisor_state' and action != 'read') %}disabled{% endif %} />
                 </td>
                 {% endfor %}
               </tr>
@@ -103,11 +103,15 @@
       var col = checkbox.getAttribute('data-col');
       if (col === 'all') {
         document.querySelectorAll('.perm-action').forEach(function (input) {
-          input.checked = checkbox.checked;
+          if (!input.disabled) {
+            input.checked = checkbox.checked;
+          }
         });
       } else {
         document.querySelectorAll('input[name$="-' + col + '"]').forEach(function (input) {
-          input.checked = checkbox.checked;
+          if (!input.disabled) {
+            input.checked = checkbox.checked;
+          }
         });
       }
       document.querySelectorAll('table.perm-table tbody tr').forEach(function (row) {

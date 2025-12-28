@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Optional
-import logging
 
 from wintermute.db import AgentRecord, AgentSessionRecord, ProjectVMRecord, VMTargetRecord
 
@@ -47,18 +48,31 @@ def _escape_for_ansic(text: str) -> str:
 
 
 def ensure_repo(spec: SSHSpec, project_vm: ProjectVMRecord) -> Optional[str]:
+    logger = logging.getLogger(__name__)
     if project_vm.repo_mode == "mirror":
+        if not project_vm.repo_path:
+            return None
+        check_cmd = f"test -d {shlex.quote(project_vm.repo_path)}"
+        result = _run_ssh(spec, ["bash", "-lc", check_cmd])
+        if result.returncode != 0:
+            raise RuntimeError(f"Mirror path not found on VM: {project_vm.repo_path}")
         return project_vm.repo_path
     if project_vm.repo_mode == "clone":
         if not project_vm.repo_path or not project_vm.repo_url:
             return None
+        parent_dir = os.path.dirname(project_vm.repo_path)
         clone_cmd = (
-            "if [ ! -d {path} ]; then git clone {url} {path}; fi"
+            "mkdir -p {parent} && if [ ! -d {path} ]; then git clone {url} {path}; fi"
         ).format(
+            parent=shlex.quote(parent_dir),
             path=shlex.quote(project_vm.repo_path),
             url=shlex.quote(project_vm.repo_url),
         )
-        _run_ssh(spec, ["bash", "-lc", clone_cmd])
+        result = _run_ssh(spec, ["bash", "-lc", clone_cmd])
+        if result.returncode != 0:
+            stderr = (result.stderr or b"").decode("utf-8", errors="ignore").strip()
+            logger.error("Repo clone failed: %s", stderr or "unknown error")
+            raise RuntimeError(stderr or "Repo clone failed")
         return project_vm.repo_path
     return None
 

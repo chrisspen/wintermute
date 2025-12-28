@@ -61,6 +61,16 @@ curl -sS http://127.0.0.1:8000/api/projects \
   -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
 ```
 
+Admin restart endpoints (requires API token with Admin update permission):
+
+```
+curl -sS -X POST http://127.0.0.1:8000/api/admin/restart-web \
+  -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
+
+curl -sS -X POST http://127.0.0.1:8000/api/admin/restart-supervisor \
+  -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
+```
+
 Projects, mappings, and sessions
 --------------------------------
 - Create a Project to auto-create a Slack channel (public) for that project.

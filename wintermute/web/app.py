@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
+import sys
+import threading
+import time
 import hashlib
 import hmac
 import os
@@ -54,6 +58,7 @@ class WorkItemStatusUpdate(BaseModel):
 
 
 API_PERMISSION_MODELS = [
+    {"key": "admin", "label": "Admin"},
     {"key": "agents", "label": "Agents"},
     {"key": "credentials", "label": "Credentials"},
     {"key": "github_sources", "label": "GitHub Sources"},
@@ -336,6 +341,33 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if header.lower().startswith("bearer "):
             return header.split(" ", 1)[1].strip()
         return request.headers.get("X-API-Token")
+
+    def _restart_script(script_name: str, pid_file: str) -> dict[str, Any]:
+        logging.getLogger(__name__).info("Restart requested for %s", script_name)
+        pid = None
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, "r", encoding="utf-8") as handle:
+                    pid = int(handle.read().strip() or "0")
+            except ValueError:
+                pid = None
+
+        def _spawn() -> None:
+            env = os.environ.copy()
+            logging.getLogger(__name__).info("Spawning %s", script_name)
+            subprocess.Popen([os.path.join(repo_root, script_name)], cwd=repo_root, env=env)
+
+        def _kill_existing() -> None:
+            if pid:
+                try:
+                    logging.getLogger(__name__).info("Stopping pid %s for %s", pid, script_name)
+                    os.kill(pid, 15)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_kill_existing, daemon=True).start()
+        threading.Thread(target=_spawn, daemon=True).start()
+        return {"ok": True, "message": f"restart requested for {script_name}"}
 
     def _require_api_permission(request: Request, model: str, action: str):
         token_value = _get_bearer_token(request)
@@ -1023,6 +1055,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         _require_fields(payload, handlers.get("required", []))
         handlers["create"](payload)
         return {"ok": True}
+
+    @app.post("/api/admin/restart-web")
+    async def api_restart_web(request: Request) -> dict[str, Any]:
+        _require_api_permission(request, "admin", "update")
+        pid_file = os.environ.get("WINTERMUTE_WEB_PID_FILE", os.path.join(repo_root, ".runtime", "web.pid"))
+        result = _restart_script("run_web.sh", pid_file)
+        def _exit() -> None:
+            time.sleep(0.5)
+            os._exit(0)
+        threading.Thread(target=_exit, daemon=True).start()
+        return result
+
+    @app.post("/api/admin/restart-supervisor")
+    async def api_restart_supervisor(request: Request) -> dict[str, Any]:
+        _require_api_permission(request, "admin", "update")
+        pid_file = os.environ.get(
+            "WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid")
+        )
+        return _restart_script("run_supervisor.sh", pid_file)
 
     @app.get("/api/{model}/{item_id:path}")
     async def api_get(model: str, item_id: str, request: Request) -> dict[str, Any]:

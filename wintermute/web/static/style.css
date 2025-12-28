@@ -311,6 +311,12 @@
       .perm-table td:not(:first-child) {
         width: 13%;
       }
+      .disabled-row td {
+        color: var(--muted);
+      }
+      .disabled-row input:disabled {
+        opacity: 0.35;
+      }
       @keyframes fadeout {
         to {
           opacity: 0;

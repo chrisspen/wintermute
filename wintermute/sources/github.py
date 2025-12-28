@@ -126,7 +126,11 @@ class GitHubIssueWorkItem(WorkItem):
                 logger.info("Project session already running for %s", project.id)
                 raise WorkItemBlocked("Project session already running", delay_seconds=60)
         spec = build_ssh_spec(vm, agent.required_ssh_options)
-        repo_path = ensure_repo(spec, project_vm)
+        try:
+            repo_path = ensure_repo(spec, project_vm)
+        except Exception as exc:
+            await self._notify(ctx, project.slack_channel_id, f"Repo setup failed: {exc}")
+            return
         if not repo_path:
             await self._notify(ctx, project.slack_channel_id, "Repository not configured for this project VM.")
             return

@@ -71,6 +71,7 @@ The web admin console provides:
 - Project VM mapping edit page with repo mode/path/url controls.
 - GitHub token storage and GitHub source configuration (multiple repos, optional auto-start).
 - API tokens with CRUD permissions and optional env export (`WINTERMUTE_ADMIN_API_TOKEN`).
+- Admin API endpoints can restart web/supervisor (requires Admin update permission).
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.

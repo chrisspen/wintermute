@@ -143,7 +143,19 @@ class SlackCommandWorkItem(WorkItem):
             return
 
         spec = build_ssh_spec(vm, agent.required_ssh_options)
-        repo_path = ensure_repo(spec, project_vm)
+        try:
+            repo_path = ensure_repo(spec, project_vm)
+        except Exception as exc:
+            logger.info("Slack start failed: repo setup error %s", exc)
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": f"Repo setup failed: {exc}",
+                },
+            )
+            return
         if not repo_path:
             logger.info("Slack start failed: repo not configured for project %s", project_slug)
             await ctx.tools.call(

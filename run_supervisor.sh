@@ -29,4 +29,9 @@ set -a
 source .env
 set +a
 
+PID_FILE="${WINTERMUTE_SUPERVISOR_PID_FILE:-.runtime/supervisor.pid}"
+mkdir -p "$(dirname "$PID_FILE")"
+echo "$$" > "$PID_FILE"
+trap 'rm -f "$PID_FILE"' EXIT
+
 python -m wintermute.supervisor
