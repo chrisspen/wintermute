@@ -34,4 +34,9 @@ mkdir -p "$(dirname "$PID_FILE")"
 echo "$$" > "$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
 
-python -m uvicorn wintermute.web.app:create_app --factory --reload --access-log --log-level info --host "${WINTERMUTE_WEB_HOST:-127.0.0.1}" --port "${WINTERMUTE_WEB_PORT:-8000}"
+RELOAD_FLAG=()
+if [ "${WINTERMUTE_WEB_RELOAD:-}" = "1" ]; then
+  RELOAD_FLAG=(--reload)
+fi
+
+exec python -m uvicorn wintermute.web.app:create_app --factory "${RELOAD_FLAG[@]}" --access-log --log-level info --host "${WINTERMUTE_WEB_HOST:-127.0.0.1}" --port "${WINTERMUTE_WEB_PORT:-8000}"

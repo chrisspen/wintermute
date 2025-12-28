@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
+import signal
 import subprocess
 import sys
-import threading
 import time
 import hashlib
 import hmac
@@ -342,8 +343,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return header.split(" ", 1)[1].strip()
         return request.headers.get("X-API-Token")
 
-    def _restart_script(script_name: str, pid_file: str) -> dict[str, Any]:
-        logging.getLogger(__name__).info("Restart requested for %s", script_name)
+    def _restart_script(script_name: str, pid_file: str, process_match: str) -> dict[str, Any]:
+        logger = logging.getLogger(__name__)
+        logger.info("Restart requested for %s", script_name)
+        killed: list[int] = []
         pid = None
         if os.path.exists(pid_file):
             try:
@@ -352,22 +355,32 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             except ValueError:
                 pid = None
 
-        def _spawn() -> None:
-            env = os.environ.copy()
-            logging.getLogger(__name__).info("Spawning %s", script_name)
-            subprocess.Popen([os.path.join(repo_root, script_name)], cwd=repo_root, env=env)
+        def _kill_pid(target_pid: int) -> None:
+            try:
+                os.kill(target_pid, signal.SIGTERM)
+                killed.append(target_pid)
+            except Exception as exc:
+                logger.warning("Failed to stop pid %s for %s: %s", target_pid, script_name, exc)
 
-        def _kill_existing() -> None:
-            if pid:
-                try:
-                    logging.getLogger(__name__).info("Stopping pid %s for %s", pid, script_name)
-                    os.kill(pid, 15)
-                except Exception:
-                    pass
+        if pid:
+            _kill_pid(pid)
 
-        threading.Thread(target=_kill_existing, daemon=True).start()
-        threading.Thread(target=_spawn, daemon=True).start()
-        return {"ok": True, "message": f"restart requested for {script_name}"}
+        try:
+            proc = subprocess.run(
+                ["pgrep", "-f", process_match],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            for line in proc.stdout.splitlines():
+                line = line.strip()
+                if line.isdigit():
+                    _kill_pid(int(line))
+        except Exception as exc:
+            logger.warning("Failed to scan processes for %s: %s", script_name, exc)
+
+        return {"ok": True, "message": f"restart requested for {script_name}", "killed": killed}
 
     def _require_api_permission(request: Request, model: str, action: str):
         token_value = _get_bearer_token(request)
@@ -1060,12 +1073,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     async def api_restart_web(request: Request) -> dict[str, Any]:
         _require_api_permission(request, "admin", "update")
         pid_file = os.environ.get("WINTERMUTE_WEB_PID_FILE", os.path.join(repo_root, ".runtime", "web.pid"))
-        result = _restart_script("run_web.sh", pid_file)
-        def _exit() -> None:
-            time.sleep(0.5)
-            os._exit(0)
-        threading.Thread(target=_exit, daemon=True).start()
-        return result
+        return _restart_script("run_web.sh", pid_file, "uvicorn wintermute.web.app:create_app")
 
     @app.post("/api/admin/restart-supervisor")
     async def api_restart_supervisor(request: Request) -> dict[str, Any]:
@@ -1073,7 +1081,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         pid_file = os.environ.get(
             "WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid")
         )
-        return _restart_script("run_supervisor.sh", pid_file)
+        return _restart_script("run_supervisor.sh", pid_file, "python -m wintermute.supervisor")
 
     @app.get("/api/{model}/{item_id:path}")
     async def api_get(model: str, item_id: str, request: Request) -> dict[str, Any]:

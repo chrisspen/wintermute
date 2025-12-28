@@ -34,4 +34,4 @@ mkdir -p "$(dirname "$PID_FILE")"
 echo "$$" > "$PID_FILE"
 trap 'rm -f "$PID_FILE"' EXIT
 
-python -m wintermute.supervisor
+exec python -m wintermute.supervisor
