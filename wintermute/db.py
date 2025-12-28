@@ -139,9 +139,28 @@ class TicketRecord:
     project_id: str
     title: str
     description: Optional[str]
+    internal_notes: Optional[str]
     assigned_to: Optional[str]
     estimate: Optional[str]
     status: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class CommentRecord:
+    id: str
+    ticket_id: str
+    session_id: Optional[str]
+    project_id: Optional[str]
+    agent_id: Optional[str]
+    source_id: Optional[str]
+    issue_number: Optional[int]
+    body: str
+    public: bool
+    approved: bool
+    sent: bool
+    sent_at: Optional[str]
     created_at: str
     updated_at: str
 
@@ -300,9 +319,29 @@ class TicketModel(Base):
     project_id: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    internal_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     assigned_to: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     estimate: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class CommentModel(Base):
+    __tablename__ = "comments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(String, nullable=False)
+    session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    project_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    issue_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    public: Mapped[int] = mapped_column(Integer, nullable=False)
+    approved: Mapped[int] = mapped_column(Integer, nullable=False)
+    sent: Mapped[int] = mapped_column(Integer, nullable=False)
+    sent_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -1254,6 +1293,7 @@ class Database:
                 project_id=row.project_id,
                 title=row.title,
                 description=row.description,
+                internal_notes=row.internal_notes,
                 assigned_to=row.assigned_to,
                 estimate=row.estimate,
                 status=row.status,
@@ -1273,6 +1313,7 @@ class Database:
             project_id=row.project_id,
             title=row.title,
             description=row.description,
+            internal_notes=row.internal_notes,
             assigned_to=row.assigned_to,
             estimate=row.estimate,
             status=row.status,
@@ -1289,6 +1330,7 @@ class Database:
         assigned_to: Optional[str],
         estimate: Optional[str],
         status: str,
+        internal_notes: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1298,6 +1340,7 @@ class Database:
                     project_id=project_id,
                     title=title,
                     description=description,
+                    internal_notes=internal_notes,
                     assigned_to=assigned_to,
                     estimate=estimate,
                     status=status,
@@ -1313,6 +1356,7 @@ class Database:
         project_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
+        internal_notes: Optional[str] = None,
         assigned_to: Optional[str] = None,
         estimate: Optional[str] = None,
         status: Optional[str] = None,
@@ -1327,6 +1371,8 @@ class Database:
                 row.title = title
             if description is not None:
                 row.description = description
+            if internal_notes is not None:
+                row.internal_notes = internal_notes
             if assigned_to is not None:
                 row.assigned_to = assigned_to
             if estimate is not None:
@@ -1338,6 +1384,160 @@ class Database:
     def delete_ticket(self, ticket_id: str) -> None:
         with self.session() as session:
             session.query(TicketModel).filter(TicketModel.id == ticket_id).delete()
+
+    def list_comments(self, ticket_id: Optional[str] = None) -> list[CommentRecord]:
+        with self.session() as session:
+            stmt = select(CommentModel)
+            if ticket_id:
+                stmt = stmt.where(CommentModel.ticket_id == ticket_id)
+            rows = session.execute(stmt.order_by(CommentModel.created_at.desc())).scalars().all()
+        return [
+            CommentRecord(
+                id=row.id,
+                ticket_id=row.ticket_id,
+                session_id=row.session_id,
+                project_id=row.project_id,
+                agent_id=row.agent_id,
+                source_id=row.source_id,
+                issue_number=row.issue_number,
+                body=row.body,
+                public=bool(row.public),
+                approved=bool(row.approved),
+                sent=bool(row.sent),
+                sent_at=row.sent_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_comment(self, comment_id: str) -> Optional[CommentRecord]:
+        with self.session() as session:
+            row = session.get(CommentModel, comment_id)
+        if not row:
+            return None
+        return CommentRecord(
+            id=row.id,
+            ticket_id=row.ticket_id,
+            session_id=row.session_id,
+            project_id=row.project_id,
+            agent_id=row.agent_id,
+            source_id=row.source_id,
+            issue_number=row.issue_number,
+            body=row.body,
+            public=bool(row.public),
+            approved=bool(row.approved),
+            sent=bool(row.sent),
+            sent_at=row.sent_at,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_comment(
+        self,
+        comment_id: str,
+        ticket_id: str,
+        session_id: Optional[str],
+        project_id: Optional[str],
+        agent_id: Optional[str],
+        source_id: Optional[str],
+        issue_number: Optional[int],
+        body: str,
+        public: bool,
+        approved: bool = False,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                CommentModel(
+                    id=comment_id,
+                    ticket_id=ticket_id,
+                    session_id=session_id,
+                    project_id=project_id,
+                    agent_id=agent_id,
+                    source_id=source_id,
+                    issue_number=issue_number,
+                    body=body,
+                    public=1 if public else 0,
+                    approved=1 if approved else 0,
+                    sent=0,
+                    sent_at=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_comment(
+        self,
+        comment_id: str,
+        *,
+        body: Optional[str] = None,
+        public: Optional[bool] = None,
+        approved: Optional[bool] = None,
+        sent: Optional[bool] = None,
+        sent_at: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(CommentModel, comment_id)
+            if not row:
+                return
+            if body is not None:
+                row.body = body
+            if public is not None:
+                row.public = 1 if public else 0
+            if approved is not None:
+                row.approved = 1 if approved else 0
+            if sent is not None:
+                row.sent = 1 if sent else 0
+            if sent_at is not None:
+                row.sent_at = sent_at
+            row.updated_at = utc_now()
+
+    def delete_comment(self, comment_id: str) -> None:
+        with self.session() as session:
+            session.query(CommentModel).filter(CommentModel.id == comment_id).delete()
+
+    def list_pending_comments(self) -> list[CommentRecord]:
+        with self.session() as session:
+            rows = (
+                session.execute(
+                    select(CommentModel)
+                    .where(CommentModel.public == 1)
+                    .where(CommentModel.approved == 1)
+                    .where(CommentModel.sent == 0)
+                    .order_by(CommentModel.created_at.asc())
+                )
+                .scalars()
+                .all()
+            )
+        return [
+            CommentRecord(
+                id=row.id,
+                ticket_id=row.ticket_id,
+                session_id=row.session_id,
+                project_id=row.project_id,
+                agent_id=row.agent_id,
+                source_id=row.source_id,
+                issue_number=row.issue_number,
+                body=row.body,
+                public=bool(row.public),
+                approved=bool(row.approved),
+                sent=bool(row.sent),
+                sent_at=row.sent_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def mark_comment_sent(self, comment_id: str, sent_at: Optional[str] = None) -> None:
+        with self.session() as session:
+            row = session.get(CommentModel, comment_id)
+            if not row:
+                return
+            row.sent = 1
+            row.sent_at = sent_at or utc_now()
+            row.updated_at = utc_now()
 
     def list_vm_targets(self) -> list[VMTargetRecord]:
         with self.session() as session:

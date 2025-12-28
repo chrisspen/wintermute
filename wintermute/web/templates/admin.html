@@ -150,6 +150,25 @@
       </div>
     </div>
     <div class="group">
+      <p class="group-title">Comments</p>
+      <div class="tile">
+        <h3>Comments</h3>
+        <a href="/ui/comments">View Comments</a>
+        <ul>
+          {% for comment in comments[:10] %}
+          <li>
+            {{ comment.body[:60] }}
+            {% if comment.public %}[public]{% else %}[internal]{% endif %}
+            {% if comment.approved %}[approved]{% else %}[pending]{% endif %}
+            {% if comment.sent %}[sent]{% else %}[unsent]{% endif %}
+          </li>
+          {% else %}
+          <li class="muted">No comments yet</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+    <div class="group">
       <p class="group-title">VM Targets</p>
       <div class="tile">
         <h3>VM Targets</h3>

@@ -19,6 +19,7 @@ while true; do
     break
   fi
   set +e
+  ./setup.sh
   ./run_web.sh
   status=$?
   set -e

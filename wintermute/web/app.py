@@ -30,6 +30,7 @@ from slack_sdk.web.client import WebClient
 
 from wintermute.db import Database, utc_now
 from wintermute.sources.github import GitHubIssuesSource
+from wintermute.sources.comment_dispatch import CommentDispatchSource
 from wintermute.sources.slack import (
     SLACK_APP_TOKEN_NAME,
     SLACK_BOT_TOKEN_NAME,
@@ -61,6 +62,7 @@ class WorkItemStatusUpdate(BaseModel):
 API_PERMISSION_MODELS = [
     {"key": "admin", "label": "Admin"},
     {"key": "agents", "label": "Agents"},
+    {"key": "comments", "label": "Comments"},
     {"key": "credentials", "label": "Credentials"},
     {"key": "github_sources", "label": "GitHub Sources"},
     {"key": "github_tokens", "label": "GitHub Tokens"},
@@ -218,6 +220,8 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "api_token_deleted": "API token deleted",
         "session_updated": "Session updated",
         "session_deleted": "Session deleted",
+        "comment_updated": "Comment updated",
+        "comment_deleted": "Comment deleted",
     }
     if not saved:
         return None
@@ -249,6 +253,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
     else:
         _update_slack_channel_filter(database)
+    if not database.get_task_source(CommentDispatchSource.id):
+        database.upsert_task_source(
+            CommentDispatchSource.id,
+            CommentDispatchSource.enabled,
+            CommentDispatchSource.base_priority,
+            CommentDispatchSource.poll_interval_seconds,
+            config={},
+        )
     app = FastAPI(title="Foreman Admin")
     base_dir = os.path.dirname(__file__)
     repo_root = os.path.abspath(os.path.join(base_dir, os.pardir, os.pardir))
@@ -813,6 +825,32 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 ),
                 "delete": database.delete_project,
             },
+            "comments": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_comments()],
+                "get": database.get_comment,
+                "required": ["ticket_id", "body"],
+                "create": lambda payload: database.insert_comment(
+                    payload.get("id") or str(uuid.uuid4()),
+                    payload["ticket_id"],
+                    payload.get("session_id"),
+                    payload.get("project_id"),
+                    payload.get("agent_id"),
+                    payload.get("source_id"),
+                    payload.get("issue_number"),
+                    payload["body"],
+                    bool(payload.get("public")),
+                    bool(payload.get("approved")),
+                ),
+                "update": lambda item_id, payload: database.update_comment(
+                    item_id,
+                    body=payload.get("body"),
+                    public=payload.get("public"),
+                    approved=payload.get("approved"),
+                    sent=payload.get("sent"),
+                    sent_at=payload.get("sent_at"),
+                ),
+                "delete": database.delete_comment,
+            },
             "tickets": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_tickets()],
                 "get": database.get_ticket,
@@ -822,14 +860,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload["project_id"],
                     payload["title"],
                     payload.get("description"),
-                    payload.get("assigned_to"),
-                    payload.get("estimate"),
-                    payload.get("status") or "open",
+                    assigned_to=payload.get("assigned_to"),
+                    estimate=payload.get("estimate"),
+                    status=payload.get("status") or "open",
+                    internal_notes=payload.get("internal_notes"),
                 ),
                 "update": lambda item_id, payload: database.update_ticket(
                     item_id,
                     title=payload.get("title"),
                     description=payload.get("description"),
+                    internal_notes=payload.get("internal_notes"),
                     assigned_to=payload.get("assigned_to"),
                     estimate=payload.get("estimate"),
                     status=payload.get("status"),
@@ -1286,6 +1326,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         project_id = str(form.get("project_id", "")).strip()
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
+        internal_notes = str(form.get("internal_notes", "")).strip() or None
         assigned_to = str(form.get("assigned_to", "")).strip() or None
         estimate = str(form.get("estimate", "")).strip() or None
         status = str(form.get("status", "open")).strip() or "open"
@@ -1302,6 +1343,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             assigned_to=assigned_to,
             estimate=estimate,
             status=status,
+            internal_notes=internal_notes,
         )
         return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
 
@@ -1336,6 +1378,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         project_id = str(form.get("project_id", "")).strip()
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
+        internal_notes = str(form.get("internal_notes", "")).strip() or None
         assigned_to = str(form.get("assigned_to", "")).strip() or None
         estimate = str(form.get("estimate", "")).strip() or None
         status = str(form.get("status", "open")).strip() or "open"
@@ -1346,11 +1389,76 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             project_id=project_id,
             title=title,
             description=description,
+            internal_notes=internal_notes,
             assigned_to=assigned_to,
             estimate=estimate,
             status=status,
         )
         return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
+
+    @app.get("/ui/comments")
+    def comments_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        comments = database.list_comments()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        projects = database.list_projects()
+        agents = database.list_agents()
+        return _render_template(
+            request,
+            "comments.html",
+            {
+                "title": "Comments",
+                "active_nav": "comments",
+                "growl_message": growl_message,
+                "comments": comments,
+                "project_lookup": {project.id: project.name for project in projects},
+                "agent_lookup": {agent.id: agent.name for agent in agents},
+            },
+        )
+
+    @app.get("/ui/comments/{comment_id}/edit")
+    def comment_edit_ui(comment_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        comment = database.get_comment(comment_id)
+        if not comment:
+            raise HTTPException(status_code=404, detail="Comment not found")
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "comment_edit.html",
+            {
+                "title": "Edit Comment",
+                "active_nav": "comments",
+                "growl_message": growl_message,
+                "comment": comment,
+                "tickets": database.list_tickets(),
+                "project_lookup": {
+                    project.id: project.name for project in database.list_projects()
+                },
+                "agent_lookup": {agent.id: agent.name for agent in database.list_agents()},
+            },
+        )
+
+    @app.post("/comments/{comment_id}/edit")
+    async def update_comment(
+        comment_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        body = str(form.get("body", "")).strip()
+        public = form.get("public") == "on"
+        approved = form.get("approved") == "on"
+        if not body:
+            raise HTTPException(status_code=400, detail="Missing comment body")
+        database.update_comment(
+            comment_id,
+            body=body,
+            public=public,
+            approved=approved,
+        )
+        return RedirectResponse(f"/ui/comments/{comment_id}/edit?saved=comment_updated", status_code=303)
+
+    @app.post("/comments/{comment_id}/delete")
+    async def delete_comment(comment_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_comment(comment_id)
+        return RedirectResponse("/ui/comments?saved=comment_deleted", status_code=303)
 
     @app.post("/vms")
     async def create_vm(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -1626,6 +1734,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         failed_work_items = database.list_work_items(status="failed")
         projects = database.list_projects()
         tickets = database.list_tickets()
+        comments = database.list_comments()
         vm_targets = database.list_vm_targets()
         agents = database.list_agents()
         project_vms = database.list_project_vms()
@@ -1653,6 +1762,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "failed_work_items": failed_work_items,
                 "projects": projects,
                 "tickets": tickets,
+                "comments": comments,
                 "vm_targets": vm_targets,
                 "agents": agents,
                 "project_vms": project_vms,

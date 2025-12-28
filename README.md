@@ -68,6 +68,10 @@ GitHub issues setup
 - Optional: enable "auto-start agent sessions" on a GitHub Source to automatically start a
   session per issue (requires an Agent + Project VM mapping).
 - Enable the GitHub poller under "GitHub Sources".
+- Agent output conventions:
+  - Lines prefixed with `PUBLIC:` are stored as comments marked public but not sent until approved.
+  - Lines prefixed with `NOTE:` are stored as internal comments only.
+- Approved public comments are auto-dispatched by the comment dispatch source.
 
 REST API
 --------

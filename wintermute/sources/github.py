@@ -9,11 +9,33 @@ from typing import Any, Optional
 import aiohttp
 
 from wintermute.db import Database
-from wintermute.runner import build_ssh_spec, ensure_repo, send_input, start_session
+from wintermute.runner import build_ssh_spec, ensure_repo, prepare_issue_branch, send_input, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft, WorkItemBlocked
 
 
 GITHUB_API_BASE = "https://api.github.com"
+
+
+async def _fetch_issue_comments(
+    token: str,
+    owner: str,
+    repo: str,
+    issue_number: int,
+) -> list[dict[str, Any]]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "wintermute",
+    }
+    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params={"per_page": 100}) as response:
+            payload = await response.json()
+            if response.status >= 400:
+                return []
+            if isinstance(payload, list):
+                return payload
+            return []
 
 
 def _tool_schema(ctx: WorkItemContext) -> list[dict[str, Any]]:
@@ -110,6 +132,7 @@ class GitHubIssueWorkItem(WorkItem):
                 assigned_to=agent.name,
                 estimate=None,
                 status="open",
+                internal_notes=None,
             )
         else:
             ctx.db.update_ticket(
@@ -135,6 +158,18 @@ class GitHubIssueWorkItem(WorkItem):
             await self._notify(ctx, project.slack_channel_id, "Repository not configured for this project VM.")
             return
         issue_url = self.checkpoint.get("html_url") or ""
+        token_record = ctx.db.get_github_token(source.token_id) if source.token_id else None
+        comments: list[dict[str, Any]] = []
+        if token_record:
+            try:
+                comments = await _fetch_issue_comments(
+                    token_record.token,
+                    source.owner,
+                    source.repo,
+                    int(issue_number),
+                )
+            except Exception as exc:
+                logger.warning("Failed to fetch issue comments: %s", exc)
         title_line = f"Issue #{issue_number}: {issue_title}".strip()
         thread_ts = await self._notify(
             ctx,
@@ -153,10 +188,25 @@ class GitHubIssueWorkItem(WorkItem):
             thread_ts=thread_ts,
         )
         logger.info("Started session %s for issue %s", session_id, issue_number)
+        try:
+            branch_name = prepare_issue_branch(spec, repo_path, int(issue_number))
+        except Exception as exc:
+            await self._notify(ctx, project.slack_channel_id, f"Branch prep failed: {exc}")
+            return
         start_session(spec, session_id, agent, repo_path)
         session = ctx.db.get_session(session_id)
         if session:
-            prompt = _issue_prompt(self.checkpoint, source.owner, source.repo)
+            internal_notes = None
+            if existing_ticket:
+                internal_notes = existing_ticket.internal_notes
+            prompt = _issue_prompt(
+                self.checkpoint,
+                source.owner,
+                source.repo,
+                comments=comments,
+                internal_notes=internal_notes,
+                branch_name=branch_name,
+            )
             send_input(spec, session, prompt)
         if thread_ts:
             await self._notify(
@@ -184,23 +234,48 @@ class GitHubIssueWorkItem(WorkItem):
         return response.get("ts")
 
 
-def _issue_prompt(issue: dict[str, Any], owner: str, repo: str) -> str:
+def _issue_prompt(
+    issue: dict[str, Any],
+    owner: str,
+    repo: str,
+    *,
+    comments: list[dict[str, Any]],
+    internal_notes: Optional[str],
+    branch_name: str,
+) -> str:
     issue_number = issue.get("issue_number")
     title = issue.get("title") or ""
     body = issue.get("body") or ""
     url = issue.get("html_url") or ""
+    comments_text = ""
+    if comments:
+        formatted = []
+        for comment in comments:
+            author = (comment.get("user") or {}).get("login") or "unknown"
+            created_at = comment.get("created_at") or ""
+            text = comment.get("body") or ""
+            formatted.append(f"- {author} ({created_at}):\n{text}")
+        comments_text = "\n".join(formatted)
+    notes_text = internal_notes or ""
     return (
         "You are working on a GitHub issue.\n"
         f"Repo: {owner}/{repo}\n"
         f"Issue #{issue_number}: {title}\n"
         f"URL: {url}\n\n"
         "Instructions:\n"
-        "- Create a new branch from the default branch (main/master).\n"
-        f"- Branch name: issue-{issue_number} (or similar).\n"
+        "- A working branch has been created for you.\n"
+        f"- Branch name: {branch_name}.\n"
         "- Implement the fix, commit changes with a clear message, and push the branch.\n"
-        "- Post status updates and questions in the Slack thread for this issue.\n\n"
+        "- Post status updates and questions in the Slack thread for this issue.\n"
+        "- If more details are needed, ask in Slack and then exit.\n"
+        "- For GitHub comments, prefix lines with 'PUBLIC:'; they will be stored for approval.\n"
+        "- For internal notes, prefix lines with 'NOTE:' so they stay private.\n\n"
         "Issue description:\n"
-        f"{body}\n"
+        f"{body}\n\n"
+        "Issue comments:\n"
+        f"{comments_text or 'No comments yet.'}\n\n"
+        "Internal notes:\n"
+        f"{notes_text or 'No internal notes yet.'}\n"
     )
 
 

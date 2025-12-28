@@ -16,6 +16,8 @@
         <input type="text" name="title" value="{{ ticket.title }}" required />
         <label>Description</label>
         <input type="text" name="description" value="{{ ticket.description or '' }}" />
+        <label>Internal Notes</label>
+        <textarea name="internal_notes" rows="6">{{ ticket.internal_notes or '' }}</textarea>
         <label>Assigned To</label>
         <input type="text" name="assigned_to" value="{{ ticket.assigned_to or '' }}" />
         <label>Estimate</label>

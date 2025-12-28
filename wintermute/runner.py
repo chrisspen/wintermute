@@ -77,6 +77,41 @@ def ensure_repo(spec: SSHSpec, project_vm: ProjectVMRecord) -> Optional[str]:
     return None
 
 
+def prepare_issue_branch(spec: SSHSpec, repo_path: str, issue_number: int) -> str:
+    logger = logging.getLogger(__name__)
+    branch = f"issue{issue_number}"
+    cmd = (
+        "set -e; cd {repo}; "
+        "git fetch origin --prune; "
+        "default=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'); "
+        "if [ -z \"$default\" ]; then "
+        "  if git show-ref --verify --quiet refs/remotes/origin/main; then default=main; "
+        "  elif git show-ref --verify --quiet refs/remotes/origin/master; then default=master; "
+        "  else default=main; fi; "
+        "fi; "
+        "if git show-ref --verify --quiet refs/heads/$default; then "
+        "  git checkout $default; "
+        "else "
+        "  git checkout -b $default origin/$default; "
+        "fi; "
+        "git pull --ff-only origin $default || true; "
+        "if git show-ref --verify --quiet refs/heads/{branch}; then "
+        "  git checkout {branch}; "
+        "else "
+        "  git checkout -b {branch}; "
+        "fi"
+    ).format(
+        repo=shlex.quote(repo_path),
+        branch=shlex.quote(branch),
+    )
+    result = _run_ssh(spec, ["bash", "-lc", cmd])
+    if result.returncode != 0:
+        stderr = (result.stderr or b"").decode("utf-8", errors="ignore").strip()
+        logger.error("Branch prep failed: %s", stderr or "unknown error")
+        raise RuntimeError(stderr or "Branch prep failed")
+    return branch
+
+
 def start_session(
     spec: SSHSpec,
     session_id: str,

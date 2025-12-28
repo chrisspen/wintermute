@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 import logging
 
-from wintermute.db import Database
+import uuid
+
+from wintermute.db import Database, AgentSessionRecord
 from wintermute.runner import build_ssh_spec, is_session_running, read_output
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
@@ -62,6 +64,84 @@ class SessionWorkItem(WorkItem):
                     "text": prefix + chunk,
                 },
             )
+        await _handle_session_markers(ctx, session, output)
+
+
+async def _handle_session_markers(
+    ctx: WorkItemContext, session: AgentSessionRecord, output: str
+) -> None:
+    ticket_id = session.ticket_id
+    if not ticket_id:
+        return
+    public_lines, note_lines = _extract_marked_lines(output)
+    source_id = _parse_github_source_id(ticket_id)
+    issue_number = _parse_github_issue_number(ticket_id)
+    for line in public_lines:
+        ctx.db.insert_comment(
+            comment_id=str(uuid.uuid4()),
+            ticket_id=ticket_id,
+            session_id=session.id,
+            project_id=session.project_id,
+            agent_id=session.agent_id,
+            source_id=source_id,
+            issue_number=issue_number,
+            body=line,
+            public=True,
+            approved=False,
+        )
+    for line in note_lines:
+        ctx.db.insert_comment(
+            comment_id=str(uuid.uuid4()),
+            ticket_id=ticket_id,
+            session_id=session.id,
+            project_id=session.project_id,
+            agent_id=session.agent_id,
+            source_id=source_id,
+            issue_number=issue_number,
+            body=line,
+            public=False,
+            approved=False,
+        )
+
+
+def _extract_marked_lines(output: str) -> tuple[list[str], list[str]]:
+    public_lines: list[str] = []
+    note_lines: list[str] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        upper = line.upper()
+        if upper.startswith("PUBLIC:") or upper.startswith("GITHUB:"):
+            public_lines.append(line.split(":", 1)[1].strip())
+            continue
+        if upper.startswith("NOTE:"):
+            note_lines.append(line.split(":", 1)[1].strip())
+            continue
+    return public_lines, note_lines
+
+
+def _parse_github_source_id(ticket_id: str) -> Optional[str]:
+    if not ticket_id.startswith("github:"):
+        return None
+    parts = ticket_id.split(":")
+    if len(parts) < 3:
+        return None
+    return parts[1] or None
+
+
+def _parse_github_issue_number(ticket_id: str) -> Optional[int]:
+    if not ticket_id.startswith("github:"):
+        return None
+    parts = ticket_id.split(":")
+    if len(parts) < 3:
+        return None
+    try:
+        return int(parts[2])
+    except ValueError:
+        return None
+
+
 
 
 def _chunk_text(text: str, size: int) -> list[str]:

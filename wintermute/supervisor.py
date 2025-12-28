@@ -17,6 +17,7 @@ from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext, WorkItemBlocked
 from wintermute.sources.demo import DemoSource
 from wintermute.sources.github import GitHubIssuesSource
+from wintermute.sources.comment_dispatch import CommentDispatchSource
 from wintermute.sources.slack import (
     SlackSource,
     SLACK_APP_TOKEN_NAME,
@@ -305,6 +306,7 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     register(DemoSource())
+    register(CommentDispatchSource())
     register(GitHubIssuesSource())
     register(SlackSource())
     register(SessionSource())

@@ -70,6 +70,8 @@ The web admin console provides:
 - Slack channel per project; Slack command `start <projectslug> <agentslug>` to launch sessions.
 - Project VM mapping edit page with repo mode/path/url controls.
 - GitHub token storage and GitHub source configuration (multiple repos, optional auto-start).
+- GitHub session output: `PUBLIC:` lines become comments pending approval; `NOTE:` lines stay internal.
+- Approved public comments are auto-dispatched to GitHub by the comment dispatch source.
 - API tokens with CRUD permissions and optional env export (`WINTERMUTE_ADMIN_API_TOKEN`).
 - Admin API endpoints can restart web/supervisor (requires Admin update permission).
 - Relaunchers (`relauncher_web.sh`, `relauncher_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
