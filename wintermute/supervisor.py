@@ -194,7 +194,7 @@ class Supervisor:
                 self.db.record_run_end(run_id, "preempted")
                 self._update_state(f"preempted {record.work_id}")
                 return
-            self.db.update_work_item_status(record.work_id, "done")
+            self.db.update_work_item_status(record.work_id, "done", clear_errors=True)
             self.db.record_run_end(run_id, "done")
             self._update_state(f"completed {record.work_id}")
         except WorkItemBlocked as exc:

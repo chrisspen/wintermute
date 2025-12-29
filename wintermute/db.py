@@ -592,6 +592,7 @@ class Database:
         attempts: Optional[int] = None,
         last_error: Optional[str] = None,
         last_traceback: Optional[str] = None,
+        clear_errors: bool = False,
     ) -> None:
         with self.session() as session:
             model = session.get(WorkItemModel, work_id)
@@ -607,10 +608,14 @@ class Database:
                 model.run_after = run_after
             if attempts is not None:
                 model.attempts = attempts
-            if last_error is not None:
-                model.last_error = last_error
-            if last_traceback is not None:
-                model.last_traceback = last_traceback
+            if clear_errors:
+                model.last_error = None
+                model.last_traceback = None
+            else:
+                if last_error is not None:
+                    model.last_error = last_error
+                if last_traceback is not None:
+                    model.last_traceback = last_traceback
 
     def record_run_start(self, work_id: str) -> int:
         with self.session() as session:

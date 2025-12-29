@@ -9,7 +9,16 @@ from typing import Any, Optional
 import aiohttp
 
 from wintermute.db import Database
-from wintermute.runner import build_ssh_spec, ensure_repo, prepare_issue_branch, send_input, start_session
+from wintermute.runner import (
+    build_ssh_spec,
+    build_ssh_spec_with_options,
+    ensure_repo,
+    parse_ssh_options,
+    prepare_issue_branch,
+    send_input,
+    start_session,
+    strip_port_forwards,
+)
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft, WorkItemBlocked
 
 
@@ -119,6 +128,7 @@ class GitHubIssueWorkItem(WorkItem):
         issue_number = self.checkpoint.get("issue_number")
         if issue_number is None:
             return
+        issue_url = self.checkpoint.get("html_url") or ""
         ticket_id = f"github:{source.id}:{issue_number}"
         existing_ticket = ctx.db.get_ticket(ticket_id)
         issue_title = str(self.checkpoint.get("title") or "")
@@ -150,16 +160,19 @@ class GitHubIssueWorkItem(WorkItem):
             if session.project_vm_id == project_vm.id:
                 logger.info("Project session already running for %s", project.id)
                 raise WorkItemBlocked("Project session already running", delay_seconds=60)
-        spec = build_ssh_spec(vm, agent.required_ssh_options)
+        session_spec = build_ssh_spec(vm, agent.required_ssh_options)
+        base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
+        base_spec = build_ssh_spec_with_options(vm, base_options)
         try:
-            repo_path = ensure_repo(spec, project_vm)
+            repo_path = ensure_repo(base_spec, project_vm)
         except Exception as exc:
-            await self._notify(ctx, project.slack_channel_id, f"Repo setup failed: {exc}")
-            return
+            message = f"Repo setup failed: {exc}"
+            await self._notify(ctx, project.slack_channel_id, message)
+            raise WorkItemBlocked(message, delay_seconds=60) from exc
         if not repo_path:
-            await self._notify(ctx, project.slack_channel_id, "Repository not configured for this project VM.")
-            return
-        issue_url = self.checkpoint.get("html_url") or ""
+            message = "Repository not configured for this project VM."
+            await self._notify(ctx, project.slack_channel_id, message)
+            raise WorkItemBlocked(message, delay_seconds=300)
         token_record = ctx.db.get_github_token(source.token_id) if source.token_id else None
         comments: list[dict[str, Any]] = []
         if token_record:
@@ -191,11 +204,12 @@ class GitHubIssueWorkItem(WorkItem):
         )
         logger.info("Started session %s for issue %s", session_id, issue_number)
         try:
-            branch_name = prepare_issue_branch(spec, repo_path, int(issue_number))
+            branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
         except Exception as exc:
-            await self._notify(ctx, project.slack_channel_id, f"Branch prep failed: {exc}")
-            return
-        start_session(spec, session_id, agent, repo_path)
+            message = f"Branch prep failed: {exc}"
+            await self._notify(ctx, project.slack_channel_id, message)
+            raise WorkItemBlocked(message, delay_seconds=60) from exc
+        start_session(session_spec, session_id, agent, repo_path)
         session = ctx.db.get_session(session_id)
         if session:
             internal_notes = None
@@ -209,7 +223,7 @@ class GitHubIssueWorkItem(WorkItem):
                 internal_notes=internal_notes,
                 branch_name=branch_name,
             )
-            send_input(spec, session, prompt)
+            send_input(session_spec, session, prompt)
         if thread_ts:
             await self._notify(
                 ctx,

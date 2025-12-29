@@ -1105,6 +1105,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     attempts=payload.get("attempts"),
                     last_error=payload.get("last_error"),
                     last_traceback=payload.get("last_traceback"),
+                    clear_errors=(
+                        ("last_error" in payload and payload.get("last_error") is None)
+                        or ("last_traceback" in payload and payload.get("last_traceback") is None)
+                    ),
                 ),
                 "delete": database.delete_work_item,
             },
