@@ -2,38 +2,99 @@
 
 {% block content %}
 <div class="panel">
-  <div class="grid">
+  <div class="grid section-gap">
     <div class="tile">
       <h3>Edit Ticket</h3>
       <form method="post" action="/tickets/{{ ticket.id }}/edit">
-        <label>Project</label>
-        <select name="project_id" required>
-          {% for project in projects %}
-          <option value="{{ project.id }}" {% if project.id == ticket.project_id %}selected{% endif %}>{{ project.name }}</option>
-          {% endfor %}
-        </select>
-        <label>Title</label>
-        <input type="text" name="title" value="{{ ticket.title }}" required />
-        <label>Description</label>
-        <input type="text" name="description" value="{{ ticket.description or '' }}" />
-        <label>Internal Notes</label>
-        <textarea name="internal_notes" rows="6">{{ ticket.internal_notes or '' }}</textarea>
-        <label>Assigned To</label>
-        <input type="text" name="assigned_to" value="{{ ticket.assigned_to or '' }}" />
-        <label>Estimate</label>
-        <input type="text" name="estimate" value="{{ ticket.estimate or '' }}" />
-        <label>Status</label>
-        <select name="status">
-          <option value="open" {% if ticket.status == 'open' %}selected{% endif %}>open</option>
-          <option value="in-progress" {% if ticket.status == 'in-progress' %}selected{% endif %}>in-progress</option>
-          <option value="needs-feedback" {% if ticket.status == 'needs-feedback' %}selected{% endif %}>needs-feedback</option>
-          <option value="done" {% if ticket.status == 'done' %}selected{% endif %}>done</option>
-        </select>
+        <div class="field-group">
+          <label>Project</label>
+          <select name="project_id" required>
+            {% for project in projects %}
+            <option value="{{ project.id }}" {% if project.id == ticket.project_id %}selected{% endif %}>{{ project.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Title</label>
+          <input type="text" name="title" value="{{ ticket.title }}" required />
+        </div>
+        <div class="field-group">
+          <label>Description</label>
+          <textarea name="description" rows="4">{{ ticket.description or '' }}</textarea>
+        </div>
+        <div class="field-group">
+          <label>Source URL</label>
+          <div class="inline-field">
+            <input type="text" name="source_url" value="{{ ticket.source_url or '' }}" />
+            {% if ticket.source_url %}
+            <a href="{{ ticket.source_url }}" target="_blank" class="inline-link">view</a>
+            {% endif %}
+          </div>
+        </div>
+        <div class="field-group">
+          <label>Internal Notes</label>
+          <textarea name="internal_notes" rows="6">{{ ticket.internal_notes or '' }}</textarea>
+        </div>
+        <div class="field-group">
+          <label>Assigned To</label>
+          <input type="text" name="assigned_to" value="{{ ticket.assigned_to or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Estimate</label>
+          <input type="text" name="estimate" value="{{ ticket.estimate or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Status</label>
+          <select name="status">
+            <option value="open" {% if ticket.status == 'open' %}selected{% endif %}>open</option>
+            <option value="in-progress" {% if ticket.status == 'in-progress' %}selected{% endif %}>in-progress</option>
+            <option value="needs-feedback" {% if ticket.status == 'needs-feedback' %}selected{% endif %}>needs-feedback</option>
+            <option value="done" {% if ticket.status == 'done' %}selected{% endif %}>done</option>
+          </select>
+        </div>
         <button type="submit">Save Ticket</button>
       </form>
-      <form method="post" action="/tickets/{{ ticket.id }}/delete">
-        <button type="button" class="danger" data-confirm data-confirm-message="Delete this ticket? This cannot be undone.">Delete Ticket</button>
-      </form>
+      <div class="form-actions">
+        <form method="post" action="/tickets/{{ ticket.id }}/delete">
+          <button type="button" class="danger" data-confirm data-confirm-message="Delete this ticket? This cannot be undone.">Delete Ticket</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="grid section-gap">
+    <div class="tile wide">
+      <h3>Linked Comments</h3>
+      <ul>
+        {% for comment in comments %}
+        <li>
+          <a href="/ui/comments/{{ comment.id }}/edit">{{ comment.body[:80] }}</a>
+          {% if comment.public %}[public]{% else %}[internal]{% endif %}
+          {% if comment.approved %}[approved]{% else %}[pending]{% endif %}
+          {% if comment.sent %}[sent]{% else %}[unsent]{% endif %}
+        </li>
+        {% else %}
+        <li class="muted">No comments yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="grid section-gap">
+    <div class="tile wide">
+      <h3>GitHub Comments</h3>
+      {% if github_comments_error %}
+      <p class="muted">GitHub comments fetch failed: {{ github_comments_error }}</p>
+      {% endif %}
+      <ul>
+        {% for comment in github_comments %}
+        <li>
+          <strong>{{ (comment.user or {}).login or 'unknown' }}</strong>
+          <span class="muted">{{ comment.created_at or '' }}</span>
+          <div class="code-block">{{ comment.body or '' }}</div>
+        </li>
+        {% else %}
+        <li class="muted">No GitHub comments found</li>
+        {% endfor %}
+      </ul>
     </div>
   </div>
 </div>

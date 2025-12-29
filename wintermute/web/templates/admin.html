@@ -142,7 +142,12 @@
         <a href="/ui/tickets/create?return_to=/ui">Add Ticket</a>
         <ul>
           {% for ticket in tickets[:10] %}
-          <li>{{ ticket.title }} [{{ ticket.status }}]</li>
+          <li>
+            <a href="/ui/tickets/{{ ticket.id }}/edit">{{ ticket.title }}</a> [{{ ticket.status }}]
+            {% if ticket.source_url %}
+            <a href="{{ ticket.source_url }}" target="_blank">source</a>
+            {% endif %}
+          </li>
           {% else %}
           <li class="muted">No tickets yet</li>
           {% endfor %}

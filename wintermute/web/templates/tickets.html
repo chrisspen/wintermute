@@ -14,6 +14,9 @@
         {% for ticket in tickets %}
         <li>
           <a href="/ui/tickets/{{ ticket.id }}/edit">{{ ticket.title }}</a> [{{ ticket.status }}]
+          {% if ticket.source_url %}
+          <a href="{{ ticket.source_url }}" target="_blank">source</a>
+          {% endif %}
         </li>
         {% else %}
         <li class="muted">No tickets yet</li>

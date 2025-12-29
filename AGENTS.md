@@ -109,6 +109,7 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - Every external call (Jira/GitHub/IM) must be mockable and have timeouts + retries.
 - Add metrics hooks (queue depth, task latency, error rates) early.
 - UI rule: no HTML or CSS embedded in Python files; use template files and static assets.
+- UI rule: never add margin-bottom directly to input/select/textarea; use container spacing.
 
 ## Minimal local run (dev)
 Run setup:
@@ -119,6 +120,7 @@ Then run:
 
 ## Agent testing
 When running local tests as an agent, prefer a per-agent venv at `.<agent>/.venv` (use `./setup.sh --agent-name <agent>` or `./setup.sh --venv-dir .<agent>/.venv`). At runtime, set `WINTERMUTE_AGENT_NAME=<agent>` or `WINTERMUTE_VENV=.<agent>/.venv`.
+Use the agent-specific venv for this environment: `.codex/.venv` (run `./setup.sh --venv-dir .codex/.venv`).
 
 When testing `./run_web.sh` or `./run_supervisor.sh`, they block; run with `PYTHONUNBUFFERED=1` and stop once the “ready” log line appears to avoid waiting on timeouts.
 

@@ -71,15 +71,17 @@
         letter-spacing: 1px;
         text-transform: uppercase;
       }
-      input, button, select {
+      input, button, select, textarea {
         font-family: inherit;
         padding: 12px 14px;
         border-radius: 10px;
         border: 1px solid var(--edge);
-        margin-bottom: 16px;
         width: 100%;
         box-sizing: border-box;
         background: #fffdf8;
+      }
+      .field-group {
+        margin-bottom: 16px;
       }
       input[type="checkbox"] {
         width: auto;
@@ -98,7 +100,6 @@
         display: flex;
         align-items: center;
         gap: 12px;
-        margin-bottom: 16px;
       }
       .inline-field select {
         flex: 1;
@@ -113,6 +114,12 @@
         display: flex;
         align-items: center;
         height: 44px;
+      }
+      .form-actions {
+        margin-top: 16px;
+      }
+      .section-gap {
+        margin-top: 16px;
       }
       button {
         background: #1f8a3b;
@@ -164,6 +171,9 @@
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
         gap: 18px;
+      }
+      .panel > .grid + .grid {
+        margin-top: 16px;
       }
       .grid.full {
         grid-template-columns: 1fr;

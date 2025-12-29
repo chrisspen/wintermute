@@ -143,6 +143,7 @@ class TicketRecord:
     assigned_to: Optional[str]
     estimate: Optional[str]
     status: str
+    source_url: Optional[str]
     created_at: str
     updated_at: str
 
@@ -323,6 +324,7 @@ class TicketModel(Base):
     assigned_to: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     estimate: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
+    source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -1297,6 +1299,7 @@ class Database:
                 assigned_to=row.assigned_to,
                 estimate=row.estimate,
                 status=row.status,
+                source_url=row.source_url,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -1317,6 +1320,7 @@ class Database:
             assigned_to=row.assigned_to,
             estimate=row.estimate,
             status=row.status,
+            source_url=row.source_url,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1331,6 +1335,7 @@ class Database:
         estimate: Optional[str],
         status: str,
         internal_notes: Optional[str] = None,
+        source_url: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1344,6 +1349,7 @@ class Database:
                     assigned_to=assigned_to,
                     estimate=estimate,
                     status=status,
+                    source_url=source_url,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1360,6 +1366,7 @@ class Database:
         assigned_to: Optional[str] = None,
         estimate: Optional[str] = None,
         status: Optional[str] = None,
+        source_url: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(TicketModel, ticket_id)
@@ -1379,6 +1386,8 @@ class Database:
                 row.estimate = estimate
             if status is not None:
                 row.status = status
+            if source_url is not None:
+                row.source_url = source_url
             row.updated_at = utc_now()
 
     def delete_ticket(self, ticket_id: str) -> None:

@@ -133,12 +133,14 @@ class GitHubIssueWorkItem(WorkItem):
                 estimate=None,
                 status="open",
                 internal_notes=None,
+                source_url=issue_url or None,
             )
         else:
             ctx.db.update_ticket(
                 ticket_id,
                 title=issue_title or existing_ticket.title,
                 description=issue_body or existing_ticket.description,
+                source_url=issue_url or existing_ticket.source_url,
             )
         if ctx.db.get_session_by_ticket(ticket_id):
             logger.info("Session already exists for ticket %s", ticket_id)

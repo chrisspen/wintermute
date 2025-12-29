@@ -96,6 +96,50 @@ def _verify_password(password: str, salt_b64: str, stored_hash: str) -> bool:
     return hmac.compare_digest(candidate, stored_hash)
 
 
+async def _fetch_github_issue_comments(
+    token: str, owner: str, repo: str, issue_number: int
+) -> tuple[list[dict[str, Any]], Optional[str]]:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "wintermute",
+    }
+    comments: list[dict[str, Any]] = []
+    page = 1
+    while page <= 3:
+        params = {"per_page": 100, "page": page}
+        url = f"https://api.github.com/repos/{owner}/{repo}/issues/{issue_number}/comments"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params) as response:
+                payload = await response.json()
+                if response.status >= 400:
+                    message = payload.get("message") if isinstance(payload, dict) else str(payload)
+                    return [], f"{response.status} {message}"
+                if not isinstance(payload, list):
+                    return [], "Unexpected response format"
+                if not payload:
+                    break
+                comments.extend(payload)
+                if len(payload) < 100:
+                    break
+        page += 1
+    return comments, None
+
+
+def _parse_github_ticket(ticket_id: str) -> tuple[Optional[str], Optional[int]]:
+    if not ticket_id.startswith("github:"):
+        return None, None
+    parts = ticket_id.split(":")
+    if len(parts) < 3:
+        return None, None
+    source_id = parts[1] or None
+    try:
+        issue_number = int(parts[2])
+    except ValueError:
+        issue_number = None
+    return source_id, issue_number
+
+
 def _require_login(request: Request) -> str:
     username = request.session.get("user")
     if not username:
@@ -864,6 +908,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     estimate=payload.get("estimate"),
                     status=payload.get("status") or "open",
                     internal_notes=payload.get("internal_notes"),
+                    source_url=payload.get("source_url"),
                 ),
                 "update": lambda item_id, payload: database.update_ticket(
                     item_id,
@@ -873,6 +918,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     assigned_to=payload.get("assigned_to"),
                     estimate=payload.get("estimate"),
                     status=payload.get("status"),
+                    source_url=payload.get("source_url"),
                 ),
                 "delete": database.delete_ticket,
             },
@@ -1142,6 +1188,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
         return _restart_script("run_supervisor.sh", pid_file, "python -m wintermute.supervisor")
 
+    @app.get("/api/tickets/{ticket_id}/github-comments")
+    async def api_ticket_github_comments(ticket_id: str, request: Request) -> dict[str, Any]:
+        _require_api_permission(request, "tickets", "read")
+        source_id, issue_number = _parse_github_ticket(ticket_id)
+        if not source_id or issue_number is None:
+            raise HTTPException(status_code=400, detail="Ticket is not a GitHub issue")
+        source = database.get_github_source(source_id)
+        if not source or not source.token_id:
+            raise HTTPException(status_code=400, detail="GitHub source or token missing")
+        token_record = database.get_github_token(source.token_id)
+        if not token_record:
+            raise HTTPException(status_code=400, detail="GitHub token not found")
+        comments, error = await _fetch_github_issue_comments(
+            token_record.token, source.owner, source.repo, issue_number
+        )
+        if error:
+            return {"data": [], "error": error}
+        return {"data": comments}
+
     @app.get("/api/admin/pids")
     async def api_admin_pids(request: Request) -> dict[str, Any]:
         _require_api_permission(request, "admin", "update")
@@ -1330,6 +1395,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         assigned_to = str(form.get("assigned_to", "")).strip() or None
         estimate = str(form.get("estimate", "")).strip() or None
         status = str(form.get("status", "open")).strip() or "open"
+        source_url = str(form.get("source_url", "")).strip() or None
         return_to = str(form.get("return_to", "/ui/tickets")).strip() or "/ui/tickets"
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
@@ -1344,6 +1410,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             estimate=estimate,
             status=status,
             internal_notes=internal_notes,
+            source_url=source_url,
         )
         return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
 
@@ -1353,11 +1420,22 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/tickets?saved=ticket_deleted", status_code=303)
 
     @app.get("/ui/tickets/{ticket_id}/edit")
-    def tickets_edit_ui(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+    async def tickets_edit_ui(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         ticket = database.get_ticket(ticket_id)
         if not ticket:
             raise HTTPException(status_code=404, detail="Ticket not found")
         growl_message = _growl_message(request.query_params.get("saved"))
+        github_comments: list[dict[str, Any]] = []
+        github_comments_error: Optional[str] = None
+        source_id, issue_number = _parse_github_ticket(ticket_id)
+        if source_id and issue_number is not None:
+            source = database.get_github_source(source_id)
+            if source and source.token_id:
+                token_record = database.get_github_token(source.token_id)
+                if token_record:
+                    github_comments, github_comments_error = await _fetch_github_issue_comments(
+                        token_record.token, source.owner, source.repo, issue_number
+                    )
         return _render_template(
             request,
             "ticket_edit.html",
@@ -1367,6 +1445,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": growl_message,
                 "ticket": ticket,
                 "projects": database.list_projects(),
+                "comments": database.list_comments(ticket_id=ticket_id),
+                "github_comments": github_comments,
+                "github_comments_error": github_comments_error,
             },
         )
 
@@ -1382,6 +1463,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         assigned_to = str(form.get("assigned_to", "")).strip() or None
         estimate = str(form.get("estimate", "")).strip() or None
         status = str(form.get("status", "open")).strip() or "open"
+        source_url = str(form.get("source_url", "")).strip() or None
         if not project_id or not title:
             raise HTTPException(status_code=400, detail="Missing ticket fields")
         database.update_ticket(
@@ -1393,6 +1475,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             assigned_to=assigned_to,
             estimate=estimate,
             status=status,
+            source_url=source_url,
         )
         return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
 
