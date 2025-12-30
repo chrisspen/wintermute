@@ -1,6 +1,25 @@
 {% extends "base.html" %}
 
 {% block content %}
+<div class="panel sticky-panel">
+  <div class="agent-panel">
+    <div class="agent-status">
+      <span class="status-label">Status</span>
+      <span id="agent-status" class="status-value">{% if session_running %}online{% else %}offline{% endif %}</span>
+    </div>
+    <div class="agent-status">
+      <span class="status-label">Location</span>
+      <span id="agent-location" class="status-value {% if not session_running %}muted{% endif %}" data-running="{{ location_label }}">{% if session_running %}{{ location_label }}{% else %}none{% endif %}</span>
+    </div>
+    <div class="agent-actions">
+      <button type="button" id="agent-start" {% if session_running or not start_ready %}disabled{% endif %}{% if not start_ready %} title="{{ start_reason }}"{% endif %}>Start</button>
+      <button type="button" id="agent-stop" class="danger" {% if not session_running %}disabled{% endif %}>Stop</button>
+    </div>
+    {% if not start_ready %}
+    <p class="muted agent-warning">{{ start_reason }}</p>
+    {% endif %}
+  </div>
+</div>
 <div class="panel">
   <div class="grid section-gap">
     <div class="tile">
@@ -15,12 +34,46 @@
           </select>
         </div>
         <div class="field-group">
+          <label>VM Mapping</label>
+          {% if project_vm %}
+          <div class="inline-field">
+            <span class="inline-value">{{ project_vm.repo_mode }}{% if project_vm.repo_path %}: {{ project_vm.repo_path }}{% endif %}</span>
+            <a href="/ui/project-vms/{{ project_vm.id }}/edit" class="inline-link">view</a>
+          </div>
+          {% else %}
+          <p class="muted">
+            No VM mapping configured for this project.
+            <a href="/ui/project-vms/create?return_to=/ui/tickets/{{ ticket.id }}/edit">Add VM mapping</a>
+          </p>
+          {% endif %}
+        </div>
+        <div class="field-group">
+          <label>Agent</label>
+          <select name="agent_id">
+            <option value="">(none)</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}" {% if ticket.agent_id == agent.id %}selected{% endif %}>{{ agent.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
           <label>Title</label>
           <input type="text" name="title" value="{{ ticket.title }}" required />
         </div>
         <div class="field-group">
-          <label>Description</label>
-          <textarea name="description" rows="4">{{ ticket.description or '' }}</textarea>
+          <div class="label-row">
+            <label>Description</label>
+            {% if not is_github_ticket %}
+            <button type="button" id="desc-edit" class="ghost small">Edit</button>
+            {% endif %}
+          </div>
+          <div id="desc-view" class="markdown-body">{{ description_html | safe }}</div>
+          {% if not is_github_ticket %}
+          <div id="desc-edit-panel" class="description-edit hidden">
+            <textarea id="desc-text" rows="6">{{ ticket.description or '' }}</textarea>
+            <button type="button" id="desc-save">Save Description</button>
+          </div>
+          {% endif %}
         </div>
         <div class="field-group">
           <label>Source URL</label>
@@ -31,13 +84,43 @@
             {% endif %}
           </div>
         </div>
+        {% if source_record %}
+        <div class="field-group">
+          <label>Source</label>
+          <div class="inline-field">
+            <span class="inline-value">{{ source_record.owner }}/{{ source_record.repo }}</span>
+            <a href="/ui/github-sources/{{ source_record.id }}/edit" class="inline-link">view</a>
+          </div>
+        </div>
+        {% endif %}
         <div class="field-group">
           <label>Internal Notes</label>
           <textarea name="internal_notes" rows="6">{{ ticket.internal_notes or '' }}</textarea>
         </div>
         <div class="field-group">
           <label>Assigned To</label>
-          <input type="text" name="assigned_to" value="{{ ticket.assigned_to or '' }}" />
+          <select name="assigned_to">
+            <option value="" {% if not ticket.assigned_to %}selected{% endif %}>(unassigned)</option>
+            {% if users %}
+            <optgroup label="Users">
+              {% for user in users %}
+              <option value="user:{{ user.id }}" {% if ticket.assigned_to == ('user:' ~ user.id) %}selected{% endif %}>{{ user.username }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+            {% if agents %}
+            <optgroup label="Agents">
+              {% for agent in agents %}
+              <option value="agent:{{ agent.id }}" {% if ticket.assigned_to == ('agent:' ~ agent.id) %}selected{% endif %}>{{ agent.name }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+            {% if ticket.assigned_to and not ticket.assigned_to.startswith('user:') and not ticket.assigned_to.startswith('agent:') %}
+            <optgroup label="Legacy">
+              <option value="{{ ticket.assigned_to }}" selected>{{ ticket.assigned_to }}</option>
+            </optgroup>
+            {% endif %}
+          </select>
         </div>
         <div class="field-group">
           <label>Estimate</label>
@@ -63,24 +146,52 @@
   </div>
   <div class="grid section-gap">
     <div class="tile wide">
-      <h3>Linked Comments</h3>
-      <ul>
+      <div class="tile-header">
+        <h3>Linked Comments</h3>
+      </div>
+      <ul id="comment-list" data-since="{{ last_comment_ts or '' }}">
         {% for comment in comments %}
-        <li>
-          <a href="/ui/comments/{{ comment.id }}/edit">{{ comment.body[:80] }}</a>
-          {% if comment.public %}[public]{% else %}[internal]{% endif %}
-          {% if comment.approved %}[approved]{% else %}[pending]{% endif %}
-          {% if comment.sent %}[sent]{% else %}[unsent]{% endif %}
+        <li class="comment-entry">
+          <div class="comment-meta">
+            <strong>{{ comment.author }}</strong>
+            <span class="muted">{{ comment.created_at }}</span>
+            <span class="comment-flags">
+              {% if comment.public %}[public]{% else %}[internal]{% endif %}
+              {% if comment.approved %}[approved]{% else %}[pending]{% endif %}
+              {% if comment.sent %}[sent]{% else %}[unsent]{% endif %}
+            </span>
+            <a href="/ui/comments/{{ comment.id }}/edit" class="inline-link small-link">edit</a>
+          </div>
+          <div class="comment-body">{{ comment.rendered_body | safe }}</div>
         </li>
         {% else %}
         <li class="muted">No comments yet</li>
         {% endfor %}
       </ul>
+      <form id="comment-form" class="comment-form">
+        <label for="comment-body">Add Comment</label>
+        <textarea id="comment-body" name="body" rows="4" placeholder="Type a message to send to the running agent..."></textarea>
+        <label class="checkbox">
+          <input type="checkbox" name="public" value="1" />
+          Public (send to GitHub when approved)
+        </label>
+      </form>
     </div>
   </div>
   <div class="grid section-gap">
     <div class="tile wide">
-      <h3>GitHub Comments</h3>
+      <div class="panel-title-row">
+        <h3>GitHub Comments</h3>
+        {% if is_github_ticket %}
+        <button type="button" class="btn-secondary small" id="github-refresh">Refresh</button>
+        {% endif %}
+      </div>
+      {% if github_comments_fetched_at %}
+      <p class="muted">
+        Last fetched: {{ github_comments_fetched_at }}
+        {% if github_comments_cached %}(cached){% endif %}
+      </p>
+      {% endif %}
       {% if github_comments_error %}
       <p class="muted">GitHub comments fetch failed: {{ github_comments_error }}</p>
       {% endif %}
@@ -98,4 +209,244 @@
     </div>
   </div>
 </div>
+<script>
+  (() => {
+    const listEl = document.getElementById("comment-list");
+    const formEl = document.getElementById("comment-form");
+    const bodyEl = document.getElementById("comment-body");
+    const statusEl = document.getElementById("agent-status");
+    const startBtn = document.getElementById("agent-start");
+    const stopBtn = document.getElementById("agent-stop");
+    const locationEl = document.getElementById("agent-location");
+    const ticketId = "{{ ticket.id }}";
+    const descEditButton = document.getElementById("desc-edit");
+    const descView = document.getElementById("desc-view");
+    const descEditPanel = document.getElementById("desc-edit-panel");
+    const descText = document.getElementById("desc-text");
+    const descSave = document.getElementById("desc-save");
+    const since = listEl?.dataset?.since || "";
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = `${protocol}://${window.location.host}/ws/tickets/${encodeURIComponent(ticketId)}${since ? `?since=${encodeURIComponent(since)}` : ""}`;
+    let ws;
+    let sessionId = "{{ session_id or '' }}";
+    const githubRefresh = document.getElementById("github-refresh");
+
+    const appendComment = (comment) => {
+      if (!comment || !comment.id) {
+        return;
+      }
+      if (listEl && listEl.querySelector(`[data-comment-id="${comment.id}"]`)) {
+        return;
+      }
+      const item = document.createElement("li");
+      item.classList.add("comment-entry");
+      item.dataset.commentId = comment.id;
+      const meta = document.createElement("div");
+      meta.classList.add("comment-meta");
+      const author = document.createElement("strong");
+      author.textContent = comment.author || "unknown";
+      const timestamp = document.createElement("span");
+      timestamp.classList.add("muted");
+      timestamp.textContent = comment.created_at || "";
+      const flags = document.createElement("span");
+      flags.classList.add("comment-flags");
+      flags.textContent = [
+        comment.public ? "[public]" : "[internal]",
+        comment.approved ? "[approved]" : "[pending]",
+        comment.sent ? "[sent]" : "[unsent]",
+      ].join(" ");
+      const link = document.createElement("a");
+      link.href = `/ui/comments/${comment.id}/edit`;
+      link.textContent = "edit";
+      link.classList.add("inline-link", "small-link");
+      meta.appendChild(author);
+      meta.appendChild(timestamp);
+      meta.appendChild(flags);
+      meta.appendChild(link);
+      const body = document.createElement("div");
+      body.classList.add("comment-body");
+      body.innerHTML = comment.rendered_body || "";
+      item.appendChild(meta);
+      item.appendChild(body);
+      listEl.appendChild(item);
+    };
+
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "comment") {
+          const emptyState = listEl.querySelector("li.muted");
+          if (emptyState && !listEl.querySelector(".comment-entry")) {
+            emptyState.remove();
+          }
+            appendComment(payload.data);
+          }
+        } catch (err) {
+          console.warn("WS parse error", err);
+        }
+      };
+      ws.onclose = () => {
+        setTimeout(connect, 2000);
+      };
+    };
+
+    if (listEl) {
+      connect();
+    }
+
+    const updateStatus = (running, newSessionId, location) => {
+      sessionId = newSessionId || "";
+      if (statusEl) {
+        statusEl.textContent = running ? "online" : "offline";
+      }
+      if (locationEl) {
+        if (running) {
+          locationEl.textContent = location || locationEl.dataset.running || locationEl.textContent || "";
+          locationEl.classList.remove("muted");
+        } else {
+          locationEl.textContent = "none";
+          locationEl.classList.add("muted");
+        }
+      }
+      if (startBtn) {
+        startBtn.disabled = running;
+      }
+      if (stopBtn) {
+        stopBtn.disabled = !running;
+      }
+    };
+
+    const refreshStatus = async () => {
+      try {
+        const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/session-status`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        updateStatus(payload.running, payload.session_id, payload.location);
+      } catch (err) {
+        console.warn("Status refresh failed", err);
+      }
+    };
+
+    setInterval(refreshStatus, 3000);
+
+    if (formEl && bodyEl) {
+      bodyEl.addEventListener("keydown", async (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          formEl.dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+      });
+      formEl.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const body = bodyEl.value.trim();
+        if (!body) return;
+        const publicFlag = formEl.querySelector("input[name='public']").checked;
+        const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/comments`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body, public: publicFlag }),
+        });
+        if (response.ok) {
+          const payload = await response.json();
+          if (payload.comment) {
+            const emptyState = listEl.querySelector("li.muted");
+            if (emptyState && !listEl.querySelector(".comment-entry")) {
+              emptyState.remove();
+            }
+            appendComment(payload.comment);
+          }
+          bodyEl.value = "";
+        } else {
+          alert("Failed to send comment");
+        }
+      });
+    }
+
+    if (stopBtn) {
+      stopBtn.addEventListener("click", async () => {
+        stopBtn.disabled = true;
+        if (!sessionId) return;
+        const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/stop`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          alert("Failed to stop session");
+          stopBtn.disabled = false;
+          return;
+        }
+        updateStatus(false, "");
+      });
+    }
+
+    if (startBtn) {
+      startBtn.addEventListener("click", async () => {
+        if (startBtn.disabled) {
+          return;
+        }
+        startBtn.disabled = true;
+        const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/start-session`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          alert("Failed to start session");
+          startBtn.disabled = false;
+          return;
+        }
+        const payload = await response.json();
+        updateStatus(true, payload.session_id, payload.location);
+      });
+    }
+
+    if (githubRefresh) {
+      githubRefresh.addEventListener("click", async () => {
+        githubRefresh.disabled = true;
+        try {
+          await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/github-comments?refresh=1`, {
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+          });
+        } finally {
+          window.location.reload();
+        }
+      });
+    }
+
+    if (descEditButton && descEditPanel && descText && descSave && descView) {
+      descEditButton.addEventListener("click", () => {
+        descEditButton.disabled = true;
+        descEditPanel.classList.remove("hidden");
+        descView.classList.add("hidden");
+        descText.focus();
+      });
+      descSave.addEventListener("click", async () => {
+        descSave.disabled = true;
+        try {
+          const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/description`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ description: descText.value || "" }),
+          });
+          if (!response.ok) {
+            const data = await response.json();
+            alert(data.detail || "Failed to save description");
+            descSave.disabled = false;
+            descEditButton.disabled = false;
+            return;
+          }
+          const data = await response.json();
+          descView.innerHTML = data.html || "";
+          descView.classList.remove("hidden");
+          descEditPanel.classList.add("hidden");
+          descEditButton.disabled = false;
+          descSave.disabled = false;
+        } catch (error) {
+          alert("Failed to save description");
+          descSave.disabled = false;
+          descEditButton.disabled = false;
+        }
+      });
+    }
+  })();
+</script>
 {% endblock %}

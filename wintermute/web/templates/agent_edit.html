@@ -2,23 +2,61 @@
 
 {% block content %}
 <div class="panel">
-  <div class="grid">
+  <div class="grid section-gap">
     <div class="tile">
       <h3>Edit Agent</h3>
       <form method="post" action="/agents/{{ agent.id }}/edit">
-        <label>Name</label>
-        <input type="text" name="name" value="{{ agent.name }}" required />
-        <label>Slug</label>
-        <input type="text" name="slug" value="{{ agent.slug }}" required />
-        <label>Command</label>
-        <input type="text" name="command" value="{{ agent.command }}" required />
-        <label>Required SSH Options</label>
-        <input type="text" name="required_ssh_options" value="{{ agent.required_ssh_options or '' }}" />
+        <div class="field-group">
+          <label>Name</label>
+          <input type="text" name="name" value="{{ agent.name }}" required />
+        </div>
+        <div class="field-group">
+          <label>Slug</label>
+          <input type="text" name="slug" value="{{ agent.slug }}" required />
+        </div>
+        <div class="field-group">
+          <label>Command</label>
+          <input type="text" name="command" value="{{ agent.command }}" required />
+        </div>
+        <div class="field-group">
+          <label>Required SSH Options</label>
+          <input type="text" name="required_ssh_options" value="{{ agent.required_ssh_options or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Environment Variables</label>
+          <input type="text" name="env_vars" value="{{ agent.env_vars or '' }}" placeholder="TERM=dumb NO_COLOR=1" />
+        </div>
+        <div class="field-group">
+          <label>Input Echo Prefix</label>
+          <input type="text" name="input_echo_prefix" value="{{ agent.input_echo_prefix or '' }}" placeholder="›" />
+        </div>
+        <div class="field-group">
+          <label>Response Prefix</label>
+          <input type="text" name="response_prefix" value="{{ agent.response_prefix or '' }}" placeholder="•" />
+        </div>
         <button type="submit">Save Agent</button>
       </form>
-      <form method="post" action="/agents/{{ agent.id }}/delete">
-        <button type="button" class="danger" data-confirm data-confirm-message="Delete this agent? This cannot be undone.">Delete Agent</button>
-      </form>
+      <div class="form-actions">
+        <form method="post" action="/agents/{{ agent.id }}/delete">
+          <button type="button" class="danger" data-confirm data-confirm-message="Delete this agent? This cannot be undone.">Delete Agent</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="grid section-gap">
+    <div class="tile wide">
+      <h3>Response Rules</h3>
+      <a href="/ui/agent-responses/create?agent_id={{ agent.id }}&return_to=/ui/agents/{{ agent.id }}/edit">Add Response Rule</a>
+      <ul>
+        {% for response in responses %}
+        <li>
+          <a href="/ui/agent-responses/{{ response.id }}/edit">{{ response.pattern }}</a>
+          &rarr; {{ response.response }}
+        </li>
+        {% else %}
+        <li class="muted">No response rules yet</li>
+        {% endfor %}
+      </ul>
     </div>
   </div>
 </div>

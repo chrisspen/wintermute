@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Optional
 import logging
+import re
 
 import uuid
 
-from wintermute.db import Database, AgentSessionRecord
-from wintermute.runner import build_ssh_spec, is_session_running, read_output
+from wintermute.db import Database, AgentSessionRecord, utc_now
+from wintermute.runner import build_ssh_spec, send_input, is_session_running, read_output
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 
@@ -33,12 +35,10 @@ class SessionWorkItem(WorkItem):
         vm = ctx.db.get_vm_target(project_vm.vm_target_id) if project_vm else None
         if not (project and project_vm and agent and vm):
             return
-        if not project.slack_channel_id or not session.thread_ts:
-            return
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         if not is_session_running(spec, session.id):
             ctx.db.update_session(session.id, status="done")
-            if ctx.tools.get("slack_post_message"):
+            if project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
                 await ctx.tools.call(
                     "slack_post_message",
                     {
@@ -49,22 +49,32 @@ class SessionWorkItem(WorkItem):
                 )
             return
         output, new_offset = read_output(spec, session)
-        if not output:
-            return
-        logger.info("Session %s produced %d bytes", session.id, len(output))
-        ctx.db.update_session(session.id, last_output=output, last_output_offset=new_offset)
-        prefix = f"[{agent.slug}] "
-        chunks = _chunk_text(output, 3000)
-        for chunk in chunks:
-            await ctx.tools.call(
-                "slack_post_message",
-                {
-                    "channel": project.slack_channel_id,
-                    "thread_ts": session.thread_ts,
-                    "text": prefix + chunk,
-                },
+        buffer_text = session.output_buffer or ""
+        buffer_updated_at = session.output_buffer_updated_at
+        if output:
+            logger.info("Session %s produced %d bytes", session.id, len(output))
+            ctx.db.update_session(
+                session.id,
+                last_output=output,
+                last_output_offset=new_offset,
+                output_buffer=buffer_text + output,
+                output_buffer_updated_at=utc_now(),
+                last_output_at=utc_now(),
             )
-        await _handle_session_markers(ctx, session, output)
+            await _maybe_send_prompt(ctx, session, spec, buffer_text + output)
+            return
+        if buffer_text and _should_flush_buffer(buffer_updated_at, seconds=4):
+            cleaned_buffer = _strip_echo_lines(buffer_text, agent.input_echo_prefix)
+            await _emit_output(ctx, session, project, agent, cleaned_buffer)
+            await _apply_agent_responses(ctx, session, spec, cleaned_buffer)
+            await _handle_session_markers(ctx, session, cleaned_buffer)
+            ctx.db.update_session(
+                session.id,
+                output_buffer="",
+                output_buffer_updated_at=utc_now(),
+            )
+        await _maybe_send_prompt(ctx, session, spec, buffer_text)
+        return
 
 
 async def _handle_session_markers(
@@ -74,6 +84,8 @@ async def _handle_session_markers(
     if not ticket_id:
         return
     public_lines, note_lines = _extract_marked_lines(output)
+    agent = ctx.db.get_agent(session.agent_id)
+    author = agent.name if agent else None
     source_id = _parse_github_source_id(ticket_id)
     issue_number = _parse_github_issue_number(ticket_id)
     for line in public_lines:
@@ -83,6 +95,7 @@ async def _handle_session_markers(
             session_id=session.id,
             project_id=session.project_id,
             agent_id=session.agent_id,
+            author=author,
             source_id=source_id,
             issue_number=issue_number,
             body=line,
@@ -96,6 +109,7 @@ async def _handle_session_markers(
             session_id=session.id,
             project_id=session.project_id,
             agent_id=session.agent_id,
+            author=author,
             source_id=source_id,
             issue_number=issue_number,
             body=line,
@@ -142,6 +156,78 @@ def _parse_github_issue_number(ticket_id: str) -> Optional[int]:
         return None
 
 
+def _store_output_comments(
+    ctx: WorkItemContext, session: AgentSessionRecord, agent: Any, chunks: list[str]
+) -> None:
+    ticket_id = session.ticket_id
+    if not ticket_id:
+        return
+    source_id = _parse_github_source_id(ticket_id)
+    issue_number = _parse_github_issue_number(ticket_id)
+    author = agent.name if agent else None
+    for chunk in chunks:
+        text = chunk.strip()
+        if not text:
+            continue
+        ctx.db.insert_comment(
+            comment_id=str(uuid.uuid4()),
+            ticket_id=ticket_id,
+            session_id=session.id,
+            project_id=session.project_id,
+            agent_id=session.agent_id,
+            author=author,
+            source_id=source_id,
+            issue_number=issue_number,
+            body=text,
+            public=False,
+            approved=False,
+        )
+
+
+async def _apply_agent_responses(
+    ctx: WorkItemContext, session: AgentSessionRecord, spec: Any, output: str
+) -> None:
+    responses = ctx.db.list_agent_responses(agent_id=session.agent_id)
+    if not responses:
+        return
+    for response in responses:
+        raw_pattern = response.pattern.strip()
+        if not raw_pattern:
+            continue
+        patterns = [line.strip() for line in raw_pattern.splitlines() if line.strip()]
+        if not patterns:
+            continue
+        matched_all = True
+        for pattern in patterns:
+            try:
+                if not re.search(pattern, output, flags=re.IGNORECASE | re.MULTILINE):
+                    matched_all = False
+                    break
+            except re.error:
+                matched_all = False
+                break
+        if matched_all:
+            text = response.response.strip()
+            if not text:
+                continue
+            agent = ctx.db.get_agent(session.agent_id)
+            author = agent.name if agent else None
+            ctx.db.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=session.ticket_id,
+                session_id=session.id,
+                project_id=session.project_id,
+                agent_id=session.agent_id,
+                author=author,
+                source_id=_parse_github_source_id(session.ticket_id),
+                issue_number=_parse_github_issue_number(session.ticket_id),
+                body=f"[auto-response] {text}",
+                public=False,
+                approved=False,
+            )
+            send_input(spec, session, text)
+
+
 
 
 def _chunk_text(text: str, size: int) -> list[str]:
@@ -153,6 +239,114 @@ def _chunk_text(text: str, size: int) -> list[str]:
         chunks.append(text[start : start + size])
         start += size
     return chunks
+
+
+def _extract_response_blocks(text: str, prefix: Optional[str]) -> list[str]:
+    if not prefix:
+        return [text]
+    blocks: list[str] = []
+    current: list[str] = []
+    stripped_prefix = prefix.strip()
+    for line in text.splitlines(keepends=True):
+        raw = line.lstrip()
+        plain = _strip_control_sequences(raw).lstrip()
+        if plain.startswith(stripped_prefix):
+            if current:
+                blocks.append("".join(current).strip())
+                current = []
+            content = raw[len(stripped_prefix):].lstrip()
+            current.append(content)
+            continue
+        if current:
+            current.append(line)
+    if current:
+        blocks.append("".join(current).strip())
+    return [block for block in blocks if block]
+
+
+def _strip_control_sequences(text: str) -> str:
+    cleaned = re.sub(r"\r", "", text)
+    cleaned = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", cleaned)
+    cleaned = re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)", "", cleaned)
+    cleaned = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", cleaned)
+    cleaned = re.sub(r"\[[0-9;?<>]*[A-Za-z]", "", cleaned)
+    cleaned = re.sub(r"\[[0-9;?<>]*[\\\"]", "", cleaned)
+    cleaned = re.sub(r"\][0-9;?<>]*[\\\"]", "", cleaned)
+    return cleaned
+
+
+def _strip_echo_lines(text: str, prefix: Optional[str]) -> str:
+    if not prefix:
+        return text
+    kept: list[str] = []
+    for line in text.splitlines(keepends=True):
+        plain = _strip_control_sequences(line)
+        if prefix in plain:
+            continue
+        kept.append(line)
+    return "".join(kept)
+
+
+def _should_flush_buffer(updated_at: Optional[str], seconds: int) -> bool:
+    if not updated_at:
+        return False
+    try:
+        updated = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return False
+    now = datetime.now(timezone.utc)
+    return (now - updated).total_seconds() >= seconds
+
+
+async def _emit_output(
+    ctx: WorkItemContext,
+    session: AgentSessionRecord,
+    project: Any,
+    agent: Any,
+    text: str,
+) -> None:
+    prefix = f"[{agent.slug}] "
+    cleaned = _strip_echo_lines(text, agent.input_echo_prefix)
+    blocks = _extract_response_blocks(cleaned, agent.response_prefix)
+    comment_chunks: list[str] = []
+    for block in blocks:
+        comment_chunks.extend(_chunk_text(block, 3000))
+    if project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
+        for chunk in _chunk_text(cleaned, 3000):
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": project.slack_channel_id,
+                    "thread_ts": session.thread_ts,
+                    "text": prefix + chunk,
+                },
+            )
+    _store_output_comments(ctx, session, agent, comment_chunks)
+
+
+async def _maybe_send_prompt(
+    ctx: WorkItemContext,
+    session: AgentSessionRecord,
+    spec: Any,
+    buffer_text: str,
+    quiet_seconds: int = 4,
+) -> None:
+    if not session.prompt_pending:
+        return
+    if buffer_text.strip():
+        return
+    if not _should_flush_buffer(session.last_output_at, seconds=quiet_seconds):
+        return
+    text = session.prompt_pending.strip()
+    if not text:
+        ctx.db.update_session(session.id, prompt_pending="")
+        return
+    send_input(spec, session, text)
+    ctx.db.update_session(
+        session.id,
+        prompt_pending="",
+        prompt_sent_at=utc_now(),
+    )
 
 
 class SessionSource(TaskSource):

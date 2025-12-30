@@ -56,6 +56,12 @@
         box-shadow: 0 16px 36px rgba(0, 0, 0, 0.12);
         border: 1px solid var(--edge);
       }
+      .sticky-panel {
+        position: sticky;
+        top: 16px;
+        z-index: 50;
+        margin-bottom: 16px;
+      }
       .tile {
         padding: 16px;
         background: #fffdf7;
@@ -93,6 +99,9 @@
         gap: 12px;
         margin-bottom: 16px;
       }
+      .checkbox-row.field-group {
+        margin-top: 16px;
+      }
       .checkbox-row label {
         margin: 0;
       }
@@ -100,6 +109,11 @@
         display: flex;
         align-items: center;
         gap: 12px;
+      }
+      .inline-value {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
       }
       .inline-field select {
         flex: 1;
@@ -115,7 +129,149 @@
         align-items: center;
         height: 44px;
       }
+      .label-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .hidden {
+        display: none;
+      }
+      .description-edit {
+        margin-top: 12px;
+      }
+      .markdown-body {
+        border: 1px solid var(--edge);
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: #fffdf7;
+        line-height: 1.5;
+      }
+      .markdown-body p {
+        margin: 0 0 12px;
+      }
+      .markdown-body p:last-child {
+        margin-bottom: 0;
+      }
+      .markdown-body code {
+        font-family: "Courier New", Courier, monospace;
+        background: #f2e7d7;
+        padding: 2px 4px;
+        border-radius: 4px;
+      }
+      .small {
+        padding: 6px 12px;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .perm-panel {
+        margin-top: 16px;
+      }
+      .agent-panel {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .agent-status {
+        flex: 1;
+        min-width: 220px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .agent-warning {
+        margin: 6px 0 0;
+      }
+      .comment-entry {
+        padding: 12px 0;
+        border-bottom: 1px solid var(--edge);
+      }
+      .comment-entry:last-child {
+        border-bottom: none;
+      }
+      .comment-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .comment-flags {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .comment-body {
+        margin-top: 10px;
+        font-family: "Courier New", Courier, monospace;
+      }
+      .comment-body pre {
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        background: #fffdf7;
+        border: 1px solid var(--edge);
+        border-radius: 12px;
+        padding: 12px 14px;
+      }
+      .small-link {
+        height: auto;
+        font-size: 11px;
+      }
+      .status-label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+      }
+      .status-value {
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .agent-actions {
+        display: flex;
+        gap: 12px;
+      }
+      .agent-actions button {
+        width: auto;
+        min-width: 120px;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .tile-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .tile-header button {
+        width: auto;
+      }
+      .comment-form {
+        margin-top: 16px;
+        display: grid;
+        gap: 12px;
+      }
+      .checkbox {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 0;
+        text-transform: none;
+        letter-spacing: 0;
+        color: var(--muted);
+      }
+      .checkbox input {
+        margin: 0;
+      }
       .form-actions {
+        margin-top: 16px;
+      }
+      .tile form + form {
         margin-top: 16px;
       }
       .section-gap {

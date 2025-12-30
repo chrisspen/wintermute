@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import logging
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -253,6 +254,43 @@ def prepare_issue_branch(spec: SSHSpec, repo_path: str, issue_number: int) -> st
     return branch
 
 
+def prepare_ticket_branch(spec: SSHSpec, repo_path: str, ticket_id: str) -> str:
+    logger = logging.getLogger(__name__)
+    safe_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")
+    short_id = safe_id[:10] if safe_id else "ticket"
+    branch = f"ticket-{short_id}"
+    cmd = (
+        "set -e; cd {repo}; "
+        "git fetch origin --prune; "
+        "default=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@'); "
+        "if [ -z \"$default\" ]; then "
+        "  if git show-ref --verify --quiet refs/remotes/origin/main; then default=main; "
+        "  elif git show-ref --verify --quiet refs/remotes/origin/master; then default=master; "
+        "  else default=main; fi; "
+        "fi; "
+        "if git show-ref --verify --quiet refs/heads/$default; then "
+        "  git checkout $default; "
+        "else "
+        "  git checkout -b $default origin/$default; "
+        "fi; "
+        "git pull --ff-only origin $default || true; "
+        "if git show-ref --verify --quiet refs/heads/{branch}; then "
+        "  git checkout {branch}; "
+        "else "
+        "  git checkout -b {branch}; "
+        "fi"
+    ).format(
+        repo=shlex.quote(repo_path),
+        branch=shlex.quote(branch),
+    )
+    result = _run_ssh_script(spec, f"{cmd}\n", timeout=120)
+    if result.returncode != 0:
+        stderr = _stderr_text(result.stderr).strip()
+        logger.error("Branch prep failed: %s", stderr or "unknown error")
+        raise RuntimeError(stderr or "Branch prep failed")
+    return branch
+
+
 def start_session(
     spec: SSHSpec,
     session_id: str,
@@ -262,13 +300,18 @@ def start_session(
     logger = logging.getLogger(__name__)
     name = _screen_name(session_id)
     logfile = _log_path(session_id)
+    agent_cmd = agent.command
+    if agent.env_vars:
+        env_vars = agent.env_vars.strip()
+        if env_vars:
+            agent_cmd = f"env {env_vars} {agent.command}"
     cmd = (
         "cd {repo} && screen -S {name} -dmL -Logfile {log} bash -lc {agent_cmd}"
     ).format(
         repo=shlex.quote(repo_path),
         name=shlex.quote(name),
         log=shlex.quote(logfile),
-        agent_cmd=shlex.quote(agent.command),
+        agent_cmd=shlex.quote(agent_cmd),
     )
     logger.info("Starting session %s in %s", session_id, repo_path)
     _run_ssh(spec, ["bash", "-lc", cmd], timeout=30)
@@ -277,10 +320,37 @@ def start_session(
 def send_input(spec: SSHSpec, session: AgentSessionRecord, text: str) -> None:
     logger = logging.getLogger(__name__)
     name = _screen_name(session.id)
-    payload = _escape_for_ansic(text) + "\\n"
-    cmd = f"screen -S {shlex.quote(name)} -X stuff $'{payload}'"
+    trimmed = text.rstrip("\r\n")
+    payload = _escape_for_ansic(trimmed)
+    cmd = "\n".join(
+        [
+            f"screen -S {shlex.quote(name)} -p 0 -X stuff $'{payload}'",
+            f"screen -S {shlex.quote(name)} -p 0 -X stuff $'\\015'",
+        ]
+    )
     logger.info("Sending input to session %s (%d chars)", session.id, len(text))
-    _run_ssh(spec, ["bash", "-lc", cmd], timeout=30)
+    result = _run_ssh_script(spec, f"{cmd}\n", timeout=30)
+    if result.returncode != 0:
+        stderr = _stderr_text(result.stderr).strip()
+        logger.error("Failed to send input to session %s: %s", session.id, stderr or "unknown error")
+
+
+def send_interrupt(spec: SSHSpec, session_id: str, count: int = 2) -> None:
+    logger = logging.getLogger(__name__)
+    name = _screen_name(session_id)
+    payload = "\\003" * max(count, 1)
+    cmd = f"screen -S {shlex.quote(name)} -X stuff $'{payload}'"
+    logger.info("Sending interrupt to session %s (x%d)", session_id, count)
+    _run_ssh_script(spec, f"{cmd}\n", timeout=10)
+
+
+def stop_session(spec: SSHSpec, session_id: str, count: int = 2) -> None:
+    logger = logging.getLogger(__name__)
+    name = _screen_name(session_id)
+    send_interrupt(spec, session_id, count=count)
+    quit_cmd = f"screen -S {shlex.quote(name)} -X quit"
+    logger.info("Requesting screen quit for session %s", session_id)
+    _run_ssh_script(spec, f"{quit_cmd}\n", timeout=10)
 
 
 def is_session_running(spec: SSHSpec, session_id: str) -> bool:

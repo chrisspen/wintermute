@@ -200,6 +200,21 @@
           {% endfor %}
         </ul>
       </div>
+      <div class="tile">
+        <h3>Response Rules</h3>
+        <a href="/ui/agent-responses/create?return_to=/ui">Add Response Rule</a>
+        <ul>
+          {% for response in agent_responses[:10] %}
+          <li>
+            <a href="/ui/agent-responses/{{ response.id }}/edit">
+              {{ agent_lookup.get(response.agent_id, response.agent_id) }}: {{ response.pattern }}
+            </a>
+          </li>
+          {% else %}
+          <li class="muted">No response rules yet</li>
+          {% endfor %}
+        </ul>
+      </div>
     </div>
     <div class="group">
       <p class="group-title">Project VM Mapping</p>

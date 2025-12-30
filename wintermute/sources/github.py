@@ -137,6 +137,7 @@ class GitHubIssueWorkItem(WorkItem):
             ctx.db.insert_ticket(
                 ticket_id=ticket_id,
                 project_id=project.id,
+                agent_id=agent.id,
                 title=issue_title or f"GitHub issue #{issue_number}",
                 description=issue_body,
                 assigned_to=agent.name,
@@ -152,6 +153,8 @@ class GitHubIssueWorkItem(WorkItem):
                 description=issue_body or existing_ticket.description,
                 source_url=issue_url or existing_ticket.source_url,
             )
+            if not existing_ticket.agent_id:
+                ctx.db.update_ticket(ticket_id, agent_id=agent.id)
         if ctx.db.get_session_by_ticket(ticket_id):
             logger.info("Session already exists for ticket %s", ticket_id)
             return
@@ -223,7 +226,7 @@ class GitHubIssueWorkItem(WorkItem):
                 internal_notes=internal_notes,
                 branch_name=branch_name,
             )
-            send_input(session_spec, session, prompt)
+            ctx.db.update_session(session_id, prompt_pending=prompt)
         if thread_ts:
             await self._notify(
                 ctx,

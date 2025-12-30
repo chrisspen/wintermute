@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Add Response Rule</h3>
+      <form method="post" action="/agent-responses">
+        <input type="hidden" name="return_to" value="{{ return_to }}" />
+        <div class="field-group">
+          <label>Agent</label>
+          <select name="agent_id" required>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}" {% if agent.id == agent_id %}selected{% endif %}>{{ agent.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Pattern</label>
+          <textarea name="pattern" rows="5" placeholder="Update available!\nRelease notes:\nnpm install -g @openai/codex\nSkip$\nSkip until next version$" required></textarea>
+          <p class="muted">One regex per line. All lines must match (case-insensitive, multiline).</p>
+        </div>
+        <div class="field-group">
+          <label>Response</label>
+          <textarea name="response" rows="3" placeholder="2" required></textarea>
+        </div>
+        <button type="submit">Create Response Rule</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

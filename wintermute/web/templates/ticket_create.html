@@ -16,6 +16,15 @@
           </select>
         </div>
         <div class="field-group">
+          <label>Agent</label>
+          <select name="agent_id">
+            <option value="">(none)</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}">{{ agent.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
           <label>Title</label>
           <input type="text" name="title" required />
         </div>
@@ -33,7 +42,23 @@
         </div>
         <div class="field-group">
           <label>Assigned To</label>
-          <input type="text" name="assigned_to" />
+          <select name="assigned_to">
+            <option value="">(unassigned)</option>
+            {% if users %}
+            <optgroup label="Users">
+              {% for user in users %}
+              <option value="user:{{ user.id }}">{{ user.username }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+            {% if agents %}
+            <optgroup label="Agents">
+              {% for agent in agents %}
+              <option value="agent:{{ agent.id }}">{{ agent.name }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+          </select>
         </div>
         <div class="field-group">
           <label>Estimate</label>

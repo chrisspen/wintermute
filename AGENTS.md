@@ -77,6 +77,7 @@ The web admin console provides:
 - Relaunchers (`relauncher_web.sh`, `relauncher_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
 - Stop scripts (`stop_web.sh`, `stop_supervisor.sh`) request a clean shutdown.
 - PID/status endpoint: `GET /api/admin/pids`.
+- `.codex/token` stores `WINTERMUTE_ADMIN_API_TOKEN=<token>`; strip the prefix when sending the bearer token.
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.
@@ -110,6 +111,8 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - Add metrics hooks (queue depth, task latency, error rates) early.
 - UI rule: no HTML or CSS embedded in Python files; use template files and static assets.
 - UI rule: never add margin-bottom directly to input/select/textarea; use container spacing.
+- Never run commands inside the user's `.venv` or upgrade it directly; use the restart/setup flow instead.
+- Ensure full network access before attempting to call the host API (e.g., `http://192.168.123.1:8000`).
 
 ## Minimal local run (dev)
 Run setup:

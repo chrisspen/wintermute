@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import html
 import json
 import logging
 import signal
@@ -15,11 +17,12 @@ import os
 import re
 import secrets
 import uuid
+from datetime import datetime, timezone
 from dataclasses import asdict
 from typing import Any, Optional
 
 import aiohttp
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import RedirectResponse
 from fastapi import Query
 from fastapi.staticfiles import StaticFiles
@@ -29,7 +32,20 @@ from starlette.middleware.sessions import SessionMiddleware
 from slack_sdk.web.client import WebClient
 
 from wintermute.db import Database, utc_now
-from wintermute.sources.github import GitHubIssuesSource
+from wintermute.runner import (
+    build_ssh_spec,
+    build_ssh_spec_with_options,
+    ensure_repo,
+    is_session_running,
+    parse_ssh_options,
+    prepare_issue_branch,
+    prepare_ticket_branch,
+    send_input,
+    start_session,
+    stop_session,
+    strip_port_forwards,
+)
+from wintermute.sources.github import GitHubIssuesSource, _fetch_issue_comments, _issue_prompt
 from wintermute.sources.comment_dispatch import CommentDispatchSource
 from wintermute.sources.slack import (
     SLACK_APP_TOKEN_NAME,
@@ -62,6 +78,7 @@ class WorkItemStatusUpdate(BaseModel):
 API_PERMISSION_MODELS = [
     {"key": "admin", "label": "Admin"},
     {"key": "agents", "label": "Agents"},
+    {"key": "agent_responses", "label": "Agent Responses"},
     {"key": "comments", "label": "Comments"},
     {"key": "credentials", "label": "Credentials"},
     {"key": "github_sources", "label": "GitHub Sources"},
@@ -126,6 +143,61 @@ async def _fetch_github_issue_comments(
     return comments, None
 
 
+def _github_cache_seconds() -> int:
+    raw = os.environ.get("WINTERMUTE_GITHUB_COMMENT_CACHE_SECONDS", "300")
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 300
+    return max(value, 0)
+
+
+def _load_cached_github_comments(ticket: Any) -> list[dict[str, Any]]:
+    raw = getattr(ticket, "github_comments_json", None)
+    if not raw:
+        return []
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
+async def _get_github_comments_cached(
+    db: Database,
+    ticket: Any,
+    token: str,
+    owner: str,
+    repo: str,
+    issue_number: int,
+    force_refresh: bool = False,
+) -> tuple[list[dict[str, Any]], Optional[str], bool]:
+    cached = _load_cached_github_comments(ticket)
+    fetched_at = getattr(ticket, "github_comments_fetched_at", None)
+    if not force_refresh and cached and fetched_at:
+        try:
+            fetched = datetime.fromisoformat(fetched_at)
+        except ValueError:
+            fetched = None
+        if fetched:
+            age = (datetime.now(timezone.utc) - fetched).total_seconds()
+            if age < _github_cache_seconds():
+                return cached, None, True
+    comments, error = await _fetch_github_issue_comments(token, owner, repo, issue_number)
+    if comments:
+        db.update_ticket(
+            ticket.id,
+            github_comments_json=json.dumps(comments),
+            github_comments_fetched_at=utc_now(),
+        )
+        return comments, None, False
+    if cached:
+        return cached, error or "GitHub fetch failed; using cached comments", True
+    return [], error, False
+
+
 def _parse_github_ticket(ticket_id: str) -> tuple[Optional[str], Optional[int]]:
     if not ticket_id.startswith("github:"):
         return None, None
@@ -185,6 +257,39 @@ async def _fetch_github_user(token: str) -> tuple[str, str]:
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or "project"
+
+
+def _ticket_prompt(
+    *,
+    title: str,
+    description: str,
+    source_url: Optional[str],
+    internal_notes: Optional[str],
+    repo_path: str,
+    branch_name: str,
+) -> str:
+    lines = [
+        "You are a coding agent working on the following ticket.",
+        "",
+        f"Title: {title}",
+    ]
+    if description:
+        lines.extend(["", "Description:", description])
+    if source_url:
+        lines.extend(["", f"Source URL: {source_url}"])
+    if internal_notes:
+        lines.extend(["", "Internal notes:", internal_notes])
+    lines.extend(
+        [
+            "",
+            f"Repo path: {repo_path}",
+            f"Branch: {branch_name}",
+            "",
+            "Please do the work, commit your changes, and push the branch for review.",
+            "If you need clarification, ask your questions clearly.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _slack_client(database: Database) -> WebClient:
@@ -266,6 +371,9 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "session_deleted": "Session deleted",
         "comment_updated": "Comment updated",
         "comment_deleted": "Comment deleted",
+        "agent_response_created": "Agent response created",
+        "agent_response_updated": "Agent response updated",
+        "agent_response_deleted": "Agent response deleted",
     }
     if not saved:
         return None
@@ -329,6 +437,86 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     )
     app.add_middleware(SessionMiddleware, secret_key=secret_key)
 
+    def _render_markdown(text: Optional[str]) -> str:
+        raw = text or ""
+        try:
+            import markdown as md
+            import bleach
+        except Exception:
+            escaped = html.escape(raw)
+            return escaped.replace("\n", "<br />")
+        rendered = md.markdown(raw, extensions=["extra", "sane_lists", "nl2br"])
+        allowed_tags = list(bleach.sanitizer.ALLOWED_TAGS) + [
+            "p",
+            "pre",
+            "code",
+            "blockquote",
+            "ul",
+            "ol",
+            "li",
+            "strong",
+            "em",
+            "hr",
+            "br",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+        ]
+        allowed_attrs = {
+            "a": ["href", "title", "rel", "target"],
+            "code": ["class"],
+            "span": ["class"],
+        }
+        cleaned = bleach.clean(rendered, tags=allowed_tags, attributes=allowed_attrs, strip=True)
+        return bleach.linkify(cleaned)
+
+    def _render_comment_body(text: Optional[str]) -> str:
+        raw = text or ""
+        raw = re.sub(r"\r", "", raw)
+        raw = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", raw)
+        raw = re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)", "", raw)
+        raw = re.sub(
+            r"\x1b\[[0-9;?]*[A-Za-z]",
+            lambda match: match.group(0) if match.group(0).endswith("m") else "",
+            raw,
+        )
+        raw = re.sub(r"\[[0-9;?<>]*[A-Za-z]", "", raw)
+        raw = re.sub(r"\[[0-9;?<>]*[\\\"]", "", raw)
+        raw = re.sub(r"\][0-9;?<>]*[\\\"]", "", raw)
+        raw = re.sub(r"(?m)^M{3,}$", "", raw)
+        raw = re.sub(r"M{5,}", "", raw)
+        try:
+            import bleach
+            from ansi2html import Ansi2HTMLConverter
+        except Exception:
+            return f"<pre>{html.escape(raw)}</pre>"
+        ansi_re = re.compile(r"\x1b\[[0-9;]*m")
+        if ansi_re.search(raw):
+            converter = Ansi2HTMLConverter(inline=True)
+            rendered = converter.convert(raw, full=False)
+            rendered = f"<pre>{rendered}</pre>"
+        else:
+            raw = re.sub(r"\[[0-9;]*m", "", raw)
+            rendered = f"<pre>{html.escape(raw)}</pre>"
+        allowed_tags = list(bleach.sanitizer.ALLOWED_TAGS) + ["span", "pre", "code", "br"]
+        allowed_attrs = {"span": ["style", "class"], "pre": ["class"], "code": ["class"]}
+        return bleach.clean(rendered, tags=allowed_tags, attributes=allowed_attrs, strip=True)
+
+    def _comment_author(record: Any) -> str:
+        if getattr(record, "author", None):
+            return str(record.author)
+        if record.agent_id:
+            agent = database.get_agent(record.agent_id)
+            if agent:
+                return agent.name
+            return f"agent:{record.agent_id}"
+        if record.session_id:
+            return "agent"
+        return "user"
+
     def _render_template(request: Request, template_name: str, context: dict[str, Any]) -> Response:
         try:
             static_version = int(os.path.getmtime(static_css_path))
@@ -346,6 +534,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             }
         )
         return response
+
+    def _ensure_agent_response(agent_id: str, pattern: str, response: str) -> None:
+        existing = database.list_agent_responses(agent_id=agent_id)
+        for item in existing:
+            if item.pattern.strip() == pattern.strip() and item.response.strip() == response.strip():
+                return
+        database.insert_agent_response(str(uuid.uuid4()), agent_id, pattern, response)
 
     def _write_env_token(env_path: str, token_value: str) -> None:
         if not env_path:
@@ -379,6 +574,27 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 data["checkpoint"] = data["checkpoint"]
             return data
         return dict(record)
+
+    def _comment_to_dict(record: Any) -> dict[str, Any]:
+        data = _record_to_dict(record)
+        return {
+            "id": data.get("id"),
+            "ticket_id": data.get("ticket_id"),
+            "session_id": data.get("session_id"),
+            "project_id": data.get("project_id"),
+            "agent_id": data.get("agent_id"),
+            "source_id": data.get("source_id"),
+            "issue_number": data.get("issue_number"),
+            "body": data.get("body"),
+            "author": _comment_author(record),
+            "rendered_body": _render_comment_body(data.get("body")),
+            "public": data.get("public"),
+            "approved": data.get("approved"),
+            "sent": data.get("sent"),
+            "sent_at": data.get("sent_at"),
+            "created_at": data.get("created_at"),
+            "updated_at": data.get("updated_at"),
+        }
 
     def _normalize_permissions(payload: Any) -> dict[str, dict[str, bool]]:
         permissions: dict[str, dict[str, bool]] = {}
@@ -468,6 +684,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not permissions.get(action):
             raise HTTPException(status_code=403, detail="Permission denied")
         return token_record
+
+    def _require_login_or_api(request: Request, model: str, action: str) -> tuple[Optional[str], Optional[Any]]:
+        user = request.session.get("user")
+        if user:
+            return user, None
+        token_record = _require_api_permission(request, model, action)
+        return None, token_record
 
     @app.get("/status")
     def status(user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -879,6 +1102,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload.get("session_id"),
                     payload.get("project_id"),
                     payload.get("agent_id"),
+                    payload.get("author"),
                     payload.get("source_id"),
                     payload.get("issue_number"),
                     payload["body"],
@@ -904,6 +1128,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload["project_id"],
                     payload["title"],
                     payload.get("description"),
+                    agent_id=payload.get("agent_id"),
                     assigned_to=payload.get("assigned_to"),
                     estimate=payload.get("estimate"),
                     status=payload.get("status") or "open",
@@ -912,6 +1137,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 ),
                 "update": lambda item_id, payload: database.update_ticket(
                     item_id,
+                    agent_id=("" if "agent_id" in payload and payload.get("agent_id") is None else payload.get("agent_id"))
+                    if "agent_id" in payload
+                    else None,
                     title=payload.get("title"),
                     description=payload.get("description"),
                     internal_notes=payload.get("internal_notes"),
@@ -952,6 +1180,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload.get("slug") or _slugify(payload["name"]),
                     payload["command"],
                     payload.get("required_ssh_options"),
+                    payload.get("env_vars"),
+                    payload.get("input_echo_prefix"),
+                    payload.get("response_prefix"),
                 ),
                 "update": lambda item_id, payload: database.update_agent(
                     item_id,
@@ -959,8 +1190,29 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     slug=payload.get("slug"),
                     command=payload.get("command"),
                     required_ssh_options=payload.get("required_ssh_options"),
+                    env_vars=payload.get("env_vars"),
+                    input_echo_prefix=payload.get("input_echo_prefix"),
+                    response_prefix=payload.get("response_prefix"),
                 ),
                 "delete": database.delete_agent,
+            },
+            "agent_responses": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_agent_responses()],
+                "get": database.get_agent_response,
+                "required": ["agent_id", "pattern", "response"],
+                "create": lambda payload: database.insert_agent_response(
+                    payload.get("id") or str(uuid.uuid4()),
+                    payload["agent_id"],
+                    payload["pattern"],
+                    payload["response"],
+                ),
+                "update": lambda item_id, payload: database.update_agent_response(
+                    item_id,
+                    agent_id=payload.get("agent_id"),
+                    pattern=payload.get("pattern"),
+                    response=payload.get("response"),
+                ),
+                "delete": database.delete_agent_response,
             },
             "project_vms": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_project_vms()],
@@ -1004,6 +1256,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     thread_ts=payload.get("thread_ts"),
                     last_output=payload.get("last_output"),
                     last_output_offset=payload.get("last_output_offset"),
+                    output_buffer=payload.get("output_buffer"),
+                    output_buffer_updated_at=payload.get("output_buffer_updated_at"),
+                    prompt_pending=payload.get("prompt_pending"),
+                    prompt_sent_at=payload.get("prompt_sent_at"),
+                    last_output_at=payload.get("last_output_at"),
                 ),
                 "delete": database.delete_session,
             },
@@ -1165,7 +1422,35 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not handlers:
             raise HTTPException(status_code=404, detail="Unknown model")
         _require_api_permission(request, model, "read")
-        return {"data": handlers["list"]()}
+        rows = handlers["list"]()
+        fields_raw = request.query_params.get("fields")
+        if model == "comments" and request.query_params:
+            filters = dict(request.query_params)
+            if "fields" in filters:
+                filters.pop("fields", None)
+
+            def matches(row: dict[str, Any]) -> bool:
+                for key, expected in filters.items():
+                    if key not in row:
+                        return False
+                    value = row.get(key)
+                    if value is None:
+                        return False
+                    if str(value) != expected:
+                        return False
+                return True
+
+            rows = [row for row in rows if matches(row)]
+        if fields_raw:
+            fields = [item.strip() for item in fields_raw.split(",") if item.strip()]
+            if not fields:
+                return {"data": rows}
+            allowed = set(rows[0].keys()) if rows else set()
+            unknown = [field for field in fields if field not in allowed]
+            if unknown:
+                raise HTTPException(status_code=400, detail=f"Unknown fields: {', '.join(unknown)}")
+            rows = [{field: row.get(field) for field in fields} for row in rows]
+        return {"data": rows}
 
     @app.post("/api/{model}")
     async def api_create(model: str, request: Request) -> dict[str, Any]:
@@ -1177,6 +1462,37 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         _require_fields(payload, handlers.get("required", []))
         handlers["create"](payload)
         return {"ok": True}
+
+    @app.delete("/api/{model}")
+    async def api_delete_filtered(model: str, request: Request) -> dict[str, Any]:
+        handlers = _api_model_handlers().get(model)
+        if not handlers:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        _require_api_permission(request, model, "delete")
+        if model != "comments":
+            raise HTTPException(status_code=405, detail=f"{model} does not support bulk delete")
+        filters = dict(request.query_params)
+        if not filters:
+            raise HTTPException(status_code=400, detail="At least one filter is required")
+        fields_raw = filters.pop("fields", None)
+        if fields_raw is not None:
+            filters.pop("fields", None)
+
+        def matches(row: dict[str, Any]) -> bool:
+            for key, expected in filters.items():
+                if key not in row:
+                    return False
+                value = row.get(key)
+                if value is None:
+                    return False
+                if str(value) != expected:
+                    return False
+            return True
+
+        rows = [row for row in handlers["list"]() if matches(row)]
+        for row in rows:
+            database.delete_comment(row["id"])
+        return {"ok": True, "deleted": len(rows)}
 
     @app.post("/api/admin/restart-web")
     async def api_restart_web(request: Request) -> dict[str, Any]:
@@ -1192,24 +1508,265 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
         return _restart_script("run_supervisor.sh", pid_file, "python -m wintermute.supervisor")
 
+    @app.post("/api/admin/backfill-ticket-sources")
+    async def api_backfill_ticket_sources(request: Request) -> dict[str, Any]:
+        _require_api_permission(request, "admin", "update")
+        updated = database.backfill_ticket_source_urls()
+        return {"ok": True, "updated": updated}
+
+    @app.post("/api/{model}/{item_id}")
+    async def api_update(model: str, item_id: str, request: Request) -> dict[str, Any]:
+        handlers = _api_model_handlers().get(model)
+        if not handlers or "update" not in handlers:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        _require_api_permission(request, model, "update")
+        payload = await request.json()
+        handlers["update"](item_id, payload)
+        return {"ok": True}
+
     @app.get("/api/tickets/{ticket_id}/github-comments")
     async def api_ticket_github_comments(ticket_id: str, request: Request) -> dict[str, Any]:
         _require_api_permission(request, "tickets", "read")
         source_id, issue_number = _parse_github_ticket(ticket_id)
         if not source_id or issue_number is None:
             raise HTTPException(status_code=400, detail="Ticket is not a GitHub issue")
+        ticket = database.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
         source = database.get_github_source(source_id)
         if not source or not source.token_id:
             raise HTTPException(status_code=400, detail="GitHub source or token missing")
         token_record = database.get_github_token(source.token_id)
         if not token_record:
             raise HTTPException(status_code=400, detail="GitHub token not found")
-        comments, error = await _fetch_github_issue_comments(
-            token_record.token, source.owner, source.repo, issue_number
+        force_refresh = request.query_params.get("refresh") in {"1", "true", "yes"}
+        comments, error, cached = await _get_github_comments_cached(
+            database,
+            ticket,
+            token_record.token,
+            source.owner,
+            source.repo,
+            issue_number,
+            force_refresh=force_refresh,
         )
+        payload = {"data": comments, "cached": cached, "fetched_at": ticket.github_comments_fetched_at}
         if error:
-            return {"data": [], "error": error}
-        return {"data": comments}
+            payload["error"] = error
+        return payload
+
+    @app.post("/api/tickets/{ticket_id}/comments")
+    async def api_ticket_add_comment(
+        ticket_id: str, request: Request
+    ) -> dict[str, Any]:
+        user, token_record = _require_login_or_api(request, "comments", "create")
+        payload = await request.json()
+        body = str(payload.get("body") or "").strip()
+        if not body:
+            raise HTTPException(status_code=400, detail="Comment body required")
+        public = bool(payload.get("public", False))
+        approved = bool(payload.get("approved", False)) if public else False
+        ticket = database.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        session = database.get_session_by_ticket(ticket_id)
+        source_id, issue_number = _parse_github_ticket(ticket_id)
+        comment_id = str(uuid.uuid4())
+        database.insert_comment(
+            comment_id=comment_id,
+            ticket_id=ticket_id,
+            session_id=session.id if session else None,
+            project_id=ticket.project_id,
+            agent_id=session.agent_id if session else None,
+            author=user or (token_record.name if token_record else None),
+            source_id=source_id,
+            issue_number=issue_number,
+            body=body,
+            public=public,
+            approved=approved,
+        )
+        if session and session.status == "running":
+            project_vm = database.get_project_vm(session.project_vm_id)
+            agent = database.get_agent(session.agent_id)
+            vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
+            if agent and vm:
+                spec = build_ssh_spec(vm, agent.required_ssh_options)
+                send_input(spec, session, body)
+        return {"ok": True, "comment": _comment_to_dict(database.get_comment(comment_id))}
+
+    @app.get("/api/tickets/{ticket_id}/session-status")
+    async def api_ticket_session_status(
+        ticket_id: str, user: str = Depends(_require_login)
+    ) -> dict[str, Any]:
+        session = database.get_session_by_ticket(ticket_id)
+        if not session:
+            return {"running": False, "session_id": None, "location": None}
+        if session.status != "running":
+            return {"running": False, "session_id": session.id, "location": None}
+        project_vm = database.get_project_vm(session.project_vm_id)
+        agent = database.get_agent(session.agent_id)
+        vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
+        if not (project_vm and agent and vm):
+            return {"running": False, "session_id": session.id, "location": None}
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+        if not is_session_running(spec, session.id):
+            database.update_session(session.id, status="done")
+            return {"running": False, "session_id": session.id, "location": None}
+        return {"running": True, "session_id": session.id, "location": vm.name}
+
+    @app.post("/api/tickets/{ticket_id}/start-session")
+    async def api_ticket_start_session(
+        ticket_id: str, user: str = Depends(_require_login)
+    ) -> dict[str, Any]:
+        ticket = database.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        existing = database.get_session_by_ticket(ticket_id)
+        if existing and existing.status == "running":
+            return {"ok": True, "message": "Session already running", "session_id": existing.id}
+        source_id, issue_number = _parse_github_ticket(ticket_id)
+        source = database.get_github_source(source_id) if source_id else None
+        if issue_number is not None and not source:
+            raise HTTPException(status_code=400, detail="GitHub source not found")
+        agent_id = ticket.agent_id or (source.agent_id if source else None)
+        if not agent_id:
+            raise HTTPException(status_code=400, detail="Ticket agent not configured")
+        agent = database.get_agent(agent_id)
+        if agent:
+            approval_pattern = "\n".join(
+                [
+                    r"^You are running Codex in",
+                    r"^Yes, allow Codex to work in this folder without asking for",
+                ]
+            )
+            _ensure_agent_response(agent_id, approval_pattern, "1")
+        if source and ticket.project_id != source.project_id:
+            database.update_ticket(ticket_id, project_id=source.project_id)
+            ticket = database.get_ticket(ticket_id) or ticket
+        project_id = source.project_id if source else ticket.project_id
+        project = database.get_project(project_id)
+        project_vm = database.get_project_vm_for_project(project.id)
+        if not (agent and project and project_vm):
+            raise HTTPException(status_code=400, detail="Project configuration missing")
+        vm = database.get_vm_target(project_vm.vm_target_id)
+        if not vm:
+            raise HTTPException(status_code=400, detail="VM target missing")
+        base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
+        base_spec = build_ssh_spec_with_options(vm, base_options)
+        session_spec = build_ssh_spec(vm, agent.required_ssh_options)
+        repo_path = ensure_repo(base_spec, project_vm)
+        if not repo_path:
+            raise HTTPException(status_code=400, detail="Repository not configured")
+        if issue_number is not None:
+            branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
+        else:
+            branch_name = prepare_ticket_branch(base_spec, repo_path, ticket_id)
+        if issue_number is not None:
+            session_id = f"{project.slug}-{agent.slug}-issue-{issue_number}-{int(time.time())}"
+        else:
+            short_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")[:10]
+            session_id = f"{project.slug}-{agent.slug}-ticket-{short_id}-{int(time.time())}"
+        thread_ts = None
+        if project.slack_channel_id:
+            try:
+                client = _slack_client(database)
+                if issue_number is not None:
+                    text = f"Issue #{issue_number}: {ticket.title}\n{ticket.source_url or ''}\nStarting agent session..."
+                else:
+                    text = f"Ticket: {ticket.title}\n{ticket.source_url or ''}\nStarting agent session..."
+                response = client.chat_postMessage(channel=project.slack_channel_id, text=text)
+                thread_ts = response.get("ts")
+            except Exception:
+                thread_ts = None
+        if source and source.agent_id and not ticket.agent_id:
+            database.update_ticket(ticket_id, agent_id=source.agent_id)
+        database.insert_session(
+            session_id=session_id,
+            project_id=project.id,
+            project_vm_id=project_vm.id,
+            agent_id=agent.id,
+            ticket_id=ticket_id,
+            status="running",
+            repo_path=repo_path,
+            thread_ts=thread_ts,
+        )
+        start_session(session_spec, session_id, agent, repo_path)
+        if issue_number is not None and source:
+            token_record = database.get_github_token(source.token_id) if source.token_id else None
+            comments: list[dict[str, Any]] = []
+            if token_record:
+                comments = await _fetch_issue_comments(
+                    token_record.token, source.owner, source.repo, int(issue_number)
+                )
+            prompt = _issue_prompt(
+                {
+                    "issue_number": issue_number,
+                    "title": ticket.title,
+                    "body": ticket.description or "",
+                    "html_url": ticket.source_url or "",
+                },
+                source.owner,
+                source.repo,
+                comments=comments,
+                internal_notes=ticket.internal_notes,
+                branch_name=branch_name,
+            )
+        else:
+            prompt = _ticket_prompt(
+                title=ticket.title,
+                description=ticket.description or "",
+                source_url=ticket.source_url,
+                internal_notes=ticket.internal_notes,
+                repo_path=repo_path,
+                branch_name=branch_name,
+            )
+        session = database.get_session(session_id)
+        if session:
+            database.update_session(session_id, prompt_pending=prompt)
+        return {"ok": True, "session_id": session_id, "location": vm.name}
+
+    @app.post("/api/sessions/{session_id}/stop")
+    async def api_session_stop(
+        session_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> dict[str, Any]:
+        session = database.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.status != "running":
+            return {"ok": True, "message": "Session not running"}
+        project_vm = database.get_project_vm(session.project_vm_id)
+        agent = database.get_agent(session.agent_id)
+        vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
+        if not (project_vm and agent and vm):
+            raise HTTPException(status_code=400, detail="Session environment missing")
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+        stop_session(spec, session.id, count=2)
+        if not is_session_running(spec, session.id):
+            database.update_session(session.id, status="done")
+        return {"ok": True, "message": "Stop signal sent"}
+
+    @app.websocket("/ws/tickets/{ticket_id}")
+    async def ws_ticket_comments(websocket: WebSocket, ticket_id: str) -> None:
+        await websocket.accept()
+        session_data = getattr(websocket, "session", {})
+        if not session_data or not session_data.get("user"):
+            await websocket.close(code=1008)
+            return
+        last_seen = websocket.query_params.get("since")
+        try:
+            while True:
+                rows = database.list_comments_since(ticket_id, last_seen)
+                if rows:
+                    last_seen = rows[-1].created_at
+                    for row in rows:
+                        await websocket.send_json(
+                            {"type": "comment", "data": _comment_to_dict(row)}
+                        )
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
+        except WebSocketDisconnect:
+            return
 
     @app.get("/api/admin/pids")
     async def api_admin_pids(request: Request) -> dict[str, Any]:
@@ -1393,6 +1950,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     async def create_ticket(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
+        agent_id = str(form.get("agent_id", "")).strip() or None
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
         internal_notes = str(form.get("internal_notes", "")).strip() or None
@@ -1408,6 +1966,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.insert_ticket(
             ticket_id=str(uuid.uuid4()),
             project_id=project_id,
+            agent_id=agent_id,
             title=title,
             description=description,
             assigned_to=assigned_to,
@@ -1429,17 +1988,64 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not ticket:
             raise HTTPException(status_code=404, detail="Ticket not found")
         growl_message = _growl_message(request.query_params.get("saved"))
+        session = database.get_session_by_ticket(ticket_id)
+        session_running = bool(session and session.status == "running")
+        is_github_ticket = ticket.id.startswith("github:")
+        description_html = _render_markdown(ticket.description)
         github_comments: list[dict[str, Any]] = []
         github_comments_error: Optional[str] = None
+        github_comments_cached = False
         source_id, issue_number = _parse_github_ticket(ticket_id)
+        source_record = database.get_github_source(source_id) if source_id else None
+        if source_record and ticket.project_id != source_record.project_id:
+            database.update_ticket(ticket.id, project_id=source_record.project_id)
+            ticket = database.get_ticket(ticket.id) or ticket
+        mapping_project_id = source_record.project_id if source_record else ticket.project_id
+        project_vm = database.get_project_vm_for_project(mapping_project_id)
+        location_label = "none"
+        if session_running and session:
+            mapping = database.get_project_vm(session.project_vm_id)
+            vm_target = database.get_vm_target(mapping.vm_target_id) if mapping else None
+            if vm_target:
+                location_label = vm_target.name
+        start_ready = True
+        start_reason = ""
+        if not project_vm:
+            start_ready = False
+            start_reason = "No VM mapping configured for this project."
+        if is_github_ticket and not source_record:
+            start_ready = False
+            start_reason = "GitHub source is missing for this ticket."
+        agent_id = ticket.agent_id or (source_record.agent_id if source_record else None)
+        if not agent_id:
+            start_ready = False
+            start_reason = "No agent assigned to this ticket."
         if source_id and issue_number is not None:
             source = database.get_github_source(source_id)
             if source and source.token_id:
                 token_record = database.get_github_token(source.token_id)
                 if token_record:
-                    github_comments, github_comments_error = await _fetch_github_issue_comments(
-                        token_record.token, source.owner, source.repo, issue_number
+                    (
+                        github_comments,
+                        github_comments_error,
+                        github_comments_cached,
+                    ) = await _get_github_comments_cached(
+                        database,
+                        ticket,
+                        token_record.token,
+                        source.owner,
+                        source.repo,
+                        issue_number,
                     )
+        comment_rows = database.list_comments(ticket_id=ticket_id)
+        comments = [
+            {
+                **_comment_to_dict(row),
+                "created_at": row.created_at,
+            }
+            for row in comment_rows
+        ]
+        last_comment_ts = comment_rows[0].created_at if comment_rows else None
         return _render_template(
             request,
             "ticket_edit.html",
@@ -1449,9 +2055,23 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": growl_message,
                 "ticket": ticket,
                 "projects": database.list_projects(),
-                "comments": database.list_comments(ticket_id=ticket_id),
+                "agents": database.list_agents(),
+                "users": database.list_users(),
+                "description_html": description_html,
+                "is_github_ticket": is_github_ticket,
+                "project_vm": project_vm,
+                "start_ready": start_ready,
+                "start_reason": start_reason,
+                "location_label": location_label,
+                "comments": comments,
+                "last_comment_ts": last_comment_ts,
                 "github_comments": github_comments,
                 "github_comments_error": github_comments_error,
+                "github_comments_cached": github_comments_cached,
+                "github_comments_fetched_at": ticket.github_comments_fetched_at,
+                "session_running": session_running,
+                "session_id": session.id if session else None,
+                "source_record": source_record,
             },
         )
 
@@ -1461,6 +2081,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     ) -> RedirectResponse:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
+        agent_id = str(form.get("agent_id", "")).strip()
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
         internal_notes = str(form.get("internal_notes", "")).strip() or None
@@ -1473,6 +2094,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.update_ticket(
             ticket_id,
             project_id=project_id,
+            agent_id=agent_id,
             title=title,
             description=description,
             internal_notes=internal_notes,
@@ -1483,12 +2105,27 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
         return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
 
+    @app.post("/api/tickets/{ticket_id}/description")
+    async def api_ticket_update_description(
+        ticket_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> dict[str, Any]:
+        ticket = database.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        if ticket.id.startswith("github:"):
+            raise HTTPException(status_code=400, detail="GitHub ticket descriptions are read-only")
+        payload = await request.json()
+        description = str(payload.get("description", ""))
+        database.update_ticket(ticket_id, description=description)
+        return {"ok": True, "html": _render_markdown(description)}
+
     @app.get("/ui/comments")
     def comments_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         comments = database.list_comments()
         growl_message = _growl_message(request.query_params.get("saved"))
         projects = database.list_projects()
         agents = database.list_agents()
+        users = database.list_users()
         return _render_template(
             request,
             "comments.html",
@@ -1602,12 +2239,24 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slug = str(form.get("slug", "")).strip()
         command = str(form.get("command", "")).strip()
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
+        env_vars = str(form.get("env_vars", "")).strip() or None
+        input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
+        response_prefix = str(form.get("response_prefix", "")).strip() or None
         return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
-        database.insert_agent(str(uuid.uuid4()), name, slug, command, ssh_options)
+        database.insert_agent(
+            str(uuid.uuid4()),
+            name,
+            slug,
+            command,
+            ssh_options,
+            env_vars,
+            input_echo_prefix,
+            response_prefix,
+        )
         return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
 
     @app.get("/ui/agents/{agent_id}/edit")
@@ -1615,6 +2264,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
+        responses = database.list_agent_responses(agent_id=agent_id)
         return _render_template(
             request,
             "agent_edit.html",
@@ -1623,6 +2273,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "active_nav": "agents",
                 "growl_message": None,
                 "agent": agent,
+                "responses": responses,
             },
         )
 
@@ -1633,15 +2284,71 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slug = str(form.get("slug", "")).strip()
         command = str(form.get("command", "")).strip()
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
+        env_vars = str(form.get("env_vars", "")).strip() or None
+        input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
+        response_prefix = str(form.get("response_prefix", "")).strip() or None
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
-        database.update_agent(agent_id, name=name, slug=slug, command=command, required_ssh_options=ssh_options)
+        database.update_agent(
+            agent_id,
+            name=name,
+            slug=slug,
+            command=command,
+            required_ssh_options=ssh_options,
+            env_vars=env_vars,
+            input_echo_prefix=input_echo_prefix,
+            response_prefix=response_prefix,
+        )
         return RedirectResponse("/ui/agents?saved=agent_updated", status_code=303)
 
     @app.post("/agents/{agent_id}/delete")
     async def delete_agent(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_agent(agent_id)
         return RedirectResponse("/ui/agents?saved=agent_deleted", status_code=303)
+
+    @app.post("/agent-responses")
+    async def create_agent_response(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        agent_id = str(form.get("agent_id", "")).strip()
+        pattern = str(form.get("pattern", "")).strip()
+        response = str(form.get("response", "")).strip()
+        return_to = str(form.get("return_to", "/ui/agent-responses")).strip() or "/ui/agent-responses"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/agent-responses"
+        if not agent_id or not pattern or not response:
+            raise HTTPException(status_code=400, detail="Missing response fields")
+        database.insert_agent_response(str(uuid.uuid4()), agent_id, pattern, response)
+        return RedirectResponse(f"{return_to}?saved=agent_response_created", status_code=303)
+
+    @app.post("/agent-responses/{response_id}/edit")
+    async def update_agent_response(
+        response_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        agent_id = str(form.get("agent_id", "")).strip()
+        pattern = str(form.get("pattern", "")).strip()
+        response = str(form.get("response", "")).strip()
+        return_to = str(form.get("return_to", "/ui/agent-responses")).strip() or "/ui/agent-responses"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/agent-responses"
+        if not agent_id or not pattern or not response:
+            raise HTTPException(status_code=400, detail="Missing response fields")
+        database.update_agent_response(
+            response_id,
+            agent_id=agent_id,
+            pattern=pattern,
+            response=response,
+        )
+        return RedirectResponse(f"{return_to}?saved=agent_response_updated", status_code=303)
+
+    @app.post("/agent-responses/{response_id}/delete")
+    async def delete_agent_response(
+        response_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_agent_response(response_id)
+        return RedirectResponse("/ui/agent-responses?saved=agent_response_deleted", status_code=303)
 
     @app.post("/project_vms")
     async def create_project_vm(
@@ -1824,6 +2531,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         comments = database.list_comments()
         vm_targets = database.list_vm_targets()
         agents = database.list_agents()
+        agent_responses = database.list_agent_responses()
         project_vms = database.list_project_vms()
         sessions = database.list_sessions()
         slack_source = database.get_task_source("slack")
@@ -1852,6 +2560,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "comments": comments,
                 "vm_targets": vm_targets,
                 "agents": agents,
+                "agent_responses": agent_responses,
                 "project_vms": project_vms,
                 "sessions": sessions,
                 "slack_source": slack_source,
@@ -1864,6 +2573,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "api_tokens": api_tokens,
                 "project_lookup": {project.id: project.name for project in projects},
                 "vm_lookup": {vm.id: vm.name for vm in vm_targets},
+                "agent_lookup": {agent.id: agent.name for agent in agents},
             },
         )
 
@@ -1990,6 +2700,68 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Add Agent",
                 "active_nav": "agents",
                 "growl_message": None,
+                "return_to": return_to,
+            },
+        )
+
+    @app.get("/ui/agent-responses")
+    def agent_responses_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        responses = database.list_agent_responses()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        agents = database.list_agents()
+        return _render_template(
+            request,
+            "agent_responses.html",
+            {
+                "title": "Agent Responses",
+                "active_nav": "agent_responses",
+                "growl_message": growl_message,
+                "responses": responses,
+                "agent_lookup": {agent.id: agent.name for agent in agents},
+            },
+        )
+
+    @app.get("/ui/agent-responses/create")
+    def agent_response_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        return_to = request.query_params.get("return_to", "/ui/agent-responses")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/agent-responses"
+        agent_id = request.query_params.get("agent_id")
+        agents = database.list_agents()
+        return _render_template(
+            request,
+            "agent_response_create.html",
+            {
+                "title": "Add Response Rule",
+                "active_nav": "agent_responses",
+                "growl_message": None,
+                "agents": agents,
+                "agent_id": agent_id,
+                "return_to": return_to,
+            },
+        )
+
+    @app.get("/ui/agent-responses/{response_id}/edit")
+    def agent_response_edit_ui(
+        response_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> Response:
+        response = database.get_agent_response(response_id)
+        if not response:
+            raise HTTPException(status_code=404, detail="Response rule not found")
+        return_to = request.query_params.get("return_to", "/ui/agent-responses")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/agent-responses"
+        agents = database.list_agents()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "agent_response_edit.html",
+            {
+                "title": "Edit Response Rule",
+                "active_nav": "agent_responses",
+                "growl_message": growl_message,
+                "response": response,
+                "agents": agents,
                 "return_to": return_to,
             },
         )
@@ -2311,6 +3083,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     @app.get("/ui/tickets/create")
     def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
+        agents = database.list_agents()
         return_to = request.query_params.get("return_to", "/ui/tickets")
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
@@ -2322,6 +3095,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "active_nav": "tickets",
                 "growl_message": None,
                 "projects": projects,
+                "agents": agents,
+                "users": users,
                 "return_to": return_to,
             },
         )

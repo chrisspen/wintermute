@@ -137,6 +137,7 @@ class GitHubTokenRecord:
 class TicketRecord:
     id: str
     project_id: str
+    agent_id: Optional[str]
     title: str
     description: Optional[str]
     internal_notes: Optional[str]
@@ -144,6 +145,8 @@ class TicketRecord:
     estimate: Optional[str]
     status: str
     source_url: Optional[str]
+    github_comments_json: Optional[str]
+    github_comments_fetched_at: Optional[str]
     created_at: str
     updated_at: str
 
@@ -155,6 +158,7 @@ class CommentRecord:
     session_id: Optional[str]
     project_id: Optional[str]
     agent_id: Optional[str]
+    author: Optional[str]
     source_id: Optional[str]
     issue_number: Optional[int]
     body: str
@@ -196,6 +200,9 @@ class AgentRecord:
     slug: str
     command: str
     required_ssh_options: Optional[str]
+    env_vars: Optional[str]
+    input_echo_prefix: Optional[str]
+    response_prefix: Optional[str]
     created_at: str
     updated_at: str
 
@@ -212,6 +219,21 @@ class AgentSessionRecord:
     thread_ts: Optional[str]
     last_output: Optional[str]
     last_output_offset: int
+    output_buffer: Optional[str]
+    output_buffer_updated_at: Optional[str]
+    prompt_pending: Optional[str]
+    prompt_sent_at: Optional[str]
+    last_output_at: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class AgentResponseRecord:
+    id: str
+    agent_id: str
+    pattern: str
+    response: str
     created_at: str
     updated_at: str
 
@@ -318,6 +340,7 @@ class TicketModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
+    agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     internal_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -325,6 +348,8 @@ class TicketModel(Base):
     estimate: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
     source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    github_comments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    github_comments_fetched_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -337,6 +362,7 @@ class CommentModel(Base):
     session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     project_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    author: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     issue_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
@@ -410,6 +436,9 @@ class AgentModel(Base):
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     command: Mapped[str] = mapped_column(String, nullable=False)
     required_ssh_options: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    env_vars: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    input_echo_prefix: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    response_prefix: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -427,6 +456,22 @@ class AgentSessionModel(Base):
     thread_ts: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_output_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_buffer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    output_buffer_updated_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    prompt_pending: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    prompt_sent_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    last_output_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class AgentResponseModel(Base):
+    __tablename__ = "agent_responses"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String, nullable=False)
+    pattern: Mapped[str] = mapped_column(Text, nullable=False)
+    response: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -1294,10 +1339,35 @@ class Database:
             if project_id:
                 stmt = stmt.where(TicketModel.project_id == project_id)
             rows = session.execute(stmt.order_by(TicketModel.created_at.desc())).scalars().all()
-        return [
-            TicketRecord(
+            return [
+                TicketRecord(
+                    id=row.id,
+                    project_id=row.project_id,
+                    agent_id=row.agent_id,
+                    title=row.title,
+                    description=row.description,
+                    internal_notes=row.internal_notes,
+                    assigned_to=row.assigned_to,
+                    estimate=row.estimate,
+                    status=row.status,
+                    source_url=row.source_url,
+                    github_comments_json=row.github_comments_json,
+                    github_comments_fetched_at=row.github_comments_fetched_at,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                for row in rows
+            ]
+
+    def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:
+        with self.session() as session:
+            row = session.get(TicketModel, ticket_id)
+            if not row:
+                return None
+            return TicketRecord(
                 id=row.id,
                 project_id=row.project_id,
+                agent_id=row.agent_id,
                 title=row.title,
                 description=row.description,
                 internal_notes=row.internal_notes,
@@ -1305,30 +1375,11 @@ class Database:
                 estimate=row.estimate,
                 status=row.status,
                 source_url=row.source_url,
+                github_comments_json=row.github_comments_json,
+                github_comments_fetched_at=row.github_comments_fetched_at,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
-            for row in rows
-        ]
-
-    def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:
-        with self.session() as session:
-            row = session.get(TicketModel, ticket_id)
-        if not row:
-            return None
-        return TicketRecord(
-            id=row.id,
-            project_id=row.project_id,
-            title=row.title,
-            description=row.description,
-            internal_notes=row.internal_notes,
-            assigned_to=row.assigned_to,
-            estimate=row.estimate,
-            status=row.status,
-            source_url=row.source_url,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
 
     def insert_ticket(
         self,
@@ -1341,6 +1392,7 @@ class Database:
         status: str,
         internal_notes: Optional[str] = None,
         source_url: Optional[str] = None,
+        agent_id: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1348,6 +1400,7 @@ class Database:
                 TicketModel(
                     id=ticket_id,
                     project_id=project_id,
+                    agent_id=agent_id,
                     title=title,
                     description=description,
                     internal_notes=internal_notes,
@@ -1355,6 +1408,8 @@ class Database:
                     estimate=estimate,
                     status=status,
                     source_url=source_url,
+                    github_comments_json=None,
+                    github_comments_fetched_at=None,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1365,6 +1420,7 @@ class Database:
         ticket_id: str,
         *,
         project_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
         internal_notes: Optional[str] = None,
@@ -1372,6 +1428,8 @@ class Database:
         estimate: Optional[str] = None,
         status: Optional[str] = None,
         source_url: Optional[str] = None,
+        github_comments_json: Optional[str] = None,
+        github_comments_fetched_at: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(TicketModel, ticket_id)
@@ -1379,6 +1437,8 @@ class Database:
                 return
             if project_id is not None:
                 row.project_id = project_id
+            if agent_id is not None:
+                row.agent_id = agent_id or None
             if title is not None:
                 row.title = title
             if description is not None:
@@ -1393,7 +1453,39 @@ class Database:
                 row.status = status
             if source_url is not None:
                 row.source_url = source_url
+            if github_comments_json is not None:
+                row.github_comments_json = github_comments_json
+            if github_comments_fetched_at is not None:
+                row.github_comments_fetched_at = github_comments_fetched_at
             row.updated_at = utc_now()
+
+    def backfill_ticket_source_urls(self) -> int:
+        updated = 0
+        with self.session() as session:
+            rows = (
+                session.execute(
+                    select(TicketModel).where(
+                        TicketModel.source_url.is_(None)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in rows:
+                if not row.id.startswith("github:"):
+                    continue
+                parts = row.id.split(":")
+                if len(parts) < 3:
+                    continue
+                source_id = parts[1]
+                issue_number = parts[2]
+                source = session.get(GitHubSourceModel, source_id)
+                if not source:
+                    continue
+                row.source_url = f"https://github.com/{source.owner}/{source.repo}/issues/{issue_number}"
+                row.updated_at = utc_now()
+                updated += 1
+        return updated
 
     def delete_ticket(self, ticket_id: str) -> None:
         with self.session() as session:
@@ -1412,6 +1504,34 @@ class Database:
                 session_id=row.session_id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                author=row.author,
+                source_id=row.source_id,
+                issue_number=row.issue_number,
+                body=row.body,
+                public=bool(row.public),
+                approved=bool(row.approved),
+                sent=bool(row.sent),
+                sent_at=row.sent_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def list_comments_since(self, ticket_id: str, since: Optional[str]) -> list[CommentRecord]:
+        with self.session() as session:
+            stmt = select(CommentModel).where(CommentModel.ticket_id == ticket_id)
+            if since:
+                stmt = stmt.where(CommentModel.created_at > since)
+            rows = session.execute(stmt.order_by(CommentModel.created_at.asc())).scalars().all()
+        return [
+            CommentRecord(
+                id=row.id,
+                ticket_id=row.ticket_id,
+                session_id=row.session_id,
+                project_id=row.project_id,
+                agent_id=row.agent_id,
+                author=row.author,
                 source_id=row.source_id,
                 issue_number=row.issue_number,
                 body=row.body,
@@ -1436,6 +1556,7 @@ class Database:
             session_id=row.session_id,
             project_id=row.project_id,
             agent_id=row.agent_id,
+            author=row.author,
             source_id=row.source_id,
             issue_number=row.issue_number,
             body=row.body,
@@ -1454,6 +1575,7 @@ class Database:
         session_id: Optional[str],
         project_id: Optional[str],
         agent_id: Optional[str],
+        author: Optional[str],
         source_id: Optional[str],
         issue_number: Optional[int],
         body: str,
@@ -1469,6 +1591,7 @@ class Database:
                     session_id=session_id,
                     project_id=project_id,
                     agent_id=agent_id,
+                    author=author,
                     source_id=source_id,
                     issue_number=issue_number,
                     body=body,
@@ -1531,6 +1654,7 @@ class Database:
                 session_id=row.session_id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                author=row.author,
                 source_id=row.source_id,
                 issue_number=row.issue_number,
                 body=row.body,
@@ -1746,11 +1870,90 @@ class Database:
                 slug=row.slug,
                 command=row.command,
                 required_ssh_options=row.required_ssh_options,
+                env_vars=row.env_vars,
+                input_echo_prefix=row.input_echo_prefix,
+                response_prefix=row.response_prefix,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
             for row in rows
         ]
+
+    def list_agent_responses(self, agent_id: Optional[str] = None) -> list[AgentResponseRecord]:
+        with self.session() as session:
+            stmt = select(AgentResponseModel)
+            if agent_id:
+                stmt = stmt.where(AgentResponseModel.agent_id == agent_id)
+            rows = session.execute(stmt.order_by(AgentResponseModel.created_at.desc())).scalars().all()
+        return [
+            AgentResponseRecord(
+                id=row.id,
+                agent_id=row.agent_id,
+                pattern=row.pattern,
+                response=row.response,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_agent_response(self, response_id: str) -> Optional[AgentResponseRecord]:
+        with self.session() as session:
+            row = session.get(AgentResponseModel, response_id)
+        if not row:
+            return None
+        return AgentResponseRecord(
+            id=row.id,
+            agent_id=row.agent_id,
+            pattern=row.pattern,
+            response=row.response,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_agent_response(
+        self,
+        response_id: str,
+        agent_id: str,
+        pattern: str,
+        response: str,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                AgentResponseModel(
+                    id=response_id,
+                    agent_id=agent_id,
+                    pattern=pattern,
+                    response=response,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_agent_response(
+        self,
+        response_id: str,
+        *,
+        agent_id: Optional[str] = None,
+        pattern: Optional[str] = None,
+        response: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(AgentResponseModel, response_id)
+            if not row:
+                return
+            if agent_id is not None:
+                row.agent_id = agent_id
+            if pattern is not None:
+                row.pattern = pattern
+            if response is not None:
+                row.response = response
+            row.updated_at = utc_now()
+
+    def delete_agent_response(self, response_id: str) -> None:
+        with self.session() as session:
+            session.query(AgentResponseModel).filter(AgentResponseModel.id == response_id).delete()
 
     def insert_agent(
         self,
@@ -1759,6 +1962,9 @@ class Database:
         slug: str,
         command: str,
         required_ssh_options: Optional[str],
+        env_vars: Optional[str],
+        input_echo_prefix: Optional[str],
+        response_prefix: Optional[str],
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1769,6 +1975,9 @@ class Database:
                     slug=slug,
                     command=command,
                     required_ssh_options=required_ssh_options,
+                    env_vars=env_vars,
+                    input_echo_prefix=input_echo_prefix,
+                    response_prefix=response_prefix,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1782,6 +1991,9 @@ class Database:
         slug: Optional[str] = None,
         command: Optional[str] = None,
         required_ssh_options: Optional[str] = None,
+        env_vars: Optional[str] = None,
+        input_echo_prefix: Optional[str] = None,
+        response_prefix: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -1795,6 +2007,12 @@ class Database:
                 row.command = command
             if required_ssh_options is not None:
                 row.required_ssh_options = required_ssh_options
+            if env_vars is not None:
+                row.env_vars = env_vars
+            if input_echo_prefix is not None:
+                row.input_echo_prefix = input_echo_prefix
+            if response_prefix is not None:
+                row.response_prefix = response_prefix
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -1812,6 +2030,9 @@ class Database:
             slug=row.slug,
             command=row.command,
             required_ssh_options=row.required_ssh_options,
+            env_vars=row.env_vars,
+            input_echo_prefix=row.input_echo_prefix,
+            response_prefix=row.response_prefix,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1827,6 +2048,9 @@ class Database:
             slug=row.slug,
             command=row.command,
             required_ssh_options=row.required_ssh_options,
+            env_vars=row.env_vars,
+            input_echo_prefix=row.input_echo_prefix,
+            response_prefix=row.response_prefix,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1853,6 +2077,11 @@ class Database:
                 thread_ts=row.thread_ts,
                 last_output=row.last_output,
                 last_output_offset=row.last_output_offset,
+                output_buffer=row.output_buffer,
+                output_buffer_updated_at=row.output_buffer_updated_at,
+                prompt_pending=row.prompt_pending,
+                prompt_sent_at=row.prompt_sent_at,
+                last_output_at=row.last_output_at,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -1861,9 +2090,15 @@ class Database:
 
     def get_session_by_ticket(self, ticket_id: str) -> Optional[AgentSessionRecord]:
         with self.session() as session:
-            row = session.execute(
-                select(AgentSessionModel).where(AgentSessionModel.ticket_id == ticket_id)
-            ).scalar_one_or_none()
+            row = (
+                session.execute(
+                    select(AgentSessionModel)
+                    .where(AgentSessionModel.ticket_id == ticket_id)
+                    .order_by(AgentSessionModel.created_at.desc())
+                )
+                .scalars()
+                .first()
+            )
         if not row:
             return None
         return AgentSessionRecord(
@@ -1877,6 +2112,11 @@ class Database:
             thread_ts=row.thread_ts,
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
+            output_buffer=row.output_buffer,
+            output_buffer_updated_at=row.output_buffer_updated_at,
+            prompt_pending=row.prompt_pending,
+            prompt_sent_at=row.prompt_sent_at,
+            last_output_at=row.last_output_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1906,6 +2146,11 @@ class Database:
                     thread_ts=thread_ts,
                     last_output=None,
                     last_output_offset=0,
+                    output_buffer=None,
+                    output_buffer_updated_at=None,
+                    prompt_pending=None,
+                    prompt_sent_at=None,
+                    last_output_at=None,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1919,6 +2164,11 @@ class Database:
         thread_ts: Optional[str] = None,
         last_output: Optional[str] = None,
         last_output_offset: Optional[int] = None,
+        output_buffer: Optional[str] = None,
+        output_buffer_updated_at: Optional[str] = None,
+        prompt_pending: Optional[str] = None,
+        prompt_sent_at: Optional[str] = None,
+        last_output_at: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentSessionModel, session_id)
@@ -1932,6 +2182,16 @@ class Database:
                 row.last_output = last_output
             if last_output_offset is not None:
                 row.last_output_offset = last_output_offset
+            if output_buffer is not None or output_buffer == "":
+                row.output_buffer = output_buffer
+            if output_buffer_updated_at is not None:
+                row.output_buffer_updated_at = output_buffer_updated_at
+            if prompt_pending is not None or prompt_pending == "":
+                row.prompt_pending = prompt_pending
+            if prompt_sent_at is not None:
+                row.prompt_sent_at = prompt_sent_at
+            if last_output_at is not None:
+                row.last_output_at = last_output_at
             row.updated_at = utc_now()
 
     def delete_session(self, session_id: str) -> None:
@@ -1959,6 +2219,11 @@ class Database:
             thread_ts=row.thread_ts,
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
+            output_buffer=row.output_buffer,
+            output_buffer_updated_at=row.output_buffer_updated_at,
+            prompt_pending=row.prompt_pending,
+            prompt_sent_at=row.prompt_sent_at,
+            last_output_at=row.last_output_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1979,6 +2244,11 @@ class Database:
             thread_ts=row.thread_ts,
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
+            output_buffer=row.output_buffer,
+            output_buffer_updated_at=row.output_buffer_updated_at,
+            prompt_pending=row.prompt_pending,
+            prompt_sent_at=row.prompt_sent_at,
+            last_output_at=row.last_output_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

@@ -6,14 +6,22 @@
     <div class="tile">
       <h3>Edit VM</h3>
       <form method="post" action="/vms/{{ vm.id }}/edit">
-        <label>Name</label>
-        <input type="text" name="name" value="{{ vm.name }}" required />
-        <label>Host</label>
-        <input type="text" name="host" value="{{ vm.host }}" required />
-        <label>User</label>
-        <input type="text" name="user" value="{{ vm.user }}" required />
-        <label>Port</label>
-        <input type="number" name="port" value="{{ vm.port }}" />
+        <div class="field-group">
+          <label>Name</label>
+          <input type="text" name="name" value="{{ vm.name }}" required />
+        </div>
+        <div class="field-group">
+          <label>Host</label>
+          <input type="text" name="host" value="{{ vm.host }}" required />
+        </div>
+        <div class="field-group">
+          <label>User</label>
+          <input type="text" name="user" value="{{ vm.user }}" required />
+        </div>
+        <div class="field-group">
+          <label>Port</label>
+          <input type="number" name="port" value="{{ vm.port }}" />
+        </div>
         <button type="submit">Save VM</button>
       </form>
       <form method="post" action="/vms/{{ vm.id }}/delete">

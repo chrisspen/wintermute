@@ -15,6 +15,12 @@
         <input type="text" name="command" required />
         <label>Required SSH Options</label>
         <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
+        <label>Environment Variables</label>
+        <input type="text" name="env_vars" placeholder="TERM=dumb NO_COLOR=1" />
+        <label>Input Echo Prefix</label>
+        <input type="text" name="input_echo_prefix" placeholder="›" />
+        <label>Response Prefix</label>
+        <input type="text" name="response_prefix" placeholder="•" />
         <button type="submit">Add Agent</button>
       </form>
     </div>

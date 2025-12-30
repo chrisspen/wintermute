@@ -10,37 +10,51 @@
           <input type="checkbox" name="enabled" {% if source.enabled %}checked{% endif %} />
           <label>Enabled</label>
         </div>
-        <label>Project</label>
-        <select name="project_id" required>
-          {% for project in projects %}
-          <option value="{{ project.id }}" {% if project.id == source.project_id %}selected{% endif %}>{{ project.name }}</option>
-          {% endfor %}
-        </select>
-        <label>Token</label>
-        <select name="token_id" required>
-          {% for token in tokens %}
-          <option value="{{ token.id }}" {% if token.id == source.token_id %}selected{% endif %}>{{ token.note or token.user_login or token.id }}</option>
-          {% endfor %}
-        </select>
-        <label>Agent</label>
-        <select name="agent_id">
-          <option value="">None</option>
-          {% for agent in agents %}
-          <option value="{{ agent.id }}" {% if agent.id == source.agent_id %}selected{% endif %}>{{ agent.name }}</option>
-          {% endfor %}
-        </select>
-        <label>Repo Owner</label>
-        <input type="text" name="owner" value="{{ source.owner }}" required />
-        <label>Repo Name</label>
-        <input type="text" name="repo" value="{{ source.repo }}" required />
-        <label>Issue State</label>
-        <select name="state">
-          <option value="open" {% if source.state == 'open' %}selected{% endif %}>open</option>
-          <option value="closed" {% if source.state == 'closed' %}selected{% endif %}>closed</option>
-          <option value="all" {% if source.state == 'all' %}selected{% endif %}>all</option>
-        </select>
-        <label>Labels (comma-separated)</label>
-        <input type="text" name="labels" value="{{ labels }}" />
+        <div class="field-group">
+          <label>Project</label>
+          <select name="project_id" required>
+            {% for project in projects %}
+            <option value="{{ project.id }}" {% if project.id == source.project_id %}selected{% endif %}>{{ project.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Token</label>
+          <select name="token_id" required>
+            {% for token in tokens %}
+            <option value="{{ token.id }}" {% if token.id == source.token_id %}selected{% endif %}>{{ token.note or token.user_login or token.id }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Agent</label>
+          <select name="agent_id">
+            <option value="">None</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}" {% if agent.id == source.agent_id %}selected{% endif %}>{{ agent.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Repo Owner</label>
+          <input type="text" name="owner" value="{{ source.owner }}" required />
+        </div>
+        <div class="field-group">
+          <label>Repo Name</label>
+          <input type="text" name="repo" value="{{ source.repo }}" required />
+        </div>
+        <div class="field-group">
+          <label>Issue State</label>
+          <select name="state">
+            <option value="open" {% if source.state == 'open' %}selected{% endif %}>open</option>
+            <option value="closed" {% if source.state == 'closed' %}selected{% endif %}>closed</option>
+            <option value="all" {% if source.state == 'all' %}selected{% endif %}>all</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Labels (comma-separated)</label>
+          <input type="text" name="labels" value="{{ labels }}" />
+        </div>
         <div class="checkbox-row">
           <input type="checkbox" name="auto_start" {% if source.auto_start %}checked{% endif %} />
           <label>Auto-start agent sessions for issues</label>

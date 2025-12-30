@@ -6,33 +6,43 @@
     <div class="tile">
       <h3>Edit Mapping</h3>
       <form method="post" action="/project_vms/{{ mapping.id }}/edit">
-        <label>Project</label>
-        <div class="inline-field">
-          <select name="project_id" required>
-            {% for project in projects %}
-            <option value="{{ project.id }}" {% if project.id == mapping.project_id %}selected{% endif %}>{{ project.name }}</option>
-            {% endfor %}
-          </select>
-          <a class="inline-link" href="/ui/projects/{{ mapping.project_id }}/edit">Edit project</a>
+        <div class="field-group">
+          <label>Project</label>
+          <div class="inline-field">
+            <select name="project_id" required>
+              {% for project in projects %}
+              <option value="{{ project.id }}" {% if project.id == mapping.project_id %}selected{% endif %}>{{ project.name }}</option>
+              {% endfor %}
+            </select>
+            <a class="inline-link" href="/ui/projects/{{ mapping.project_id }}/edit">Edit project</a>
+          </div>
         </div>
-        <label>VM Target</label>
-        <div class="inline-field">
-          <select name="vm_target_id" required>
-            {% for vm in vm_targets %}
-            <option value="{{ vm.id }}" {% if vm.id == mapping.vm_target_id %}selected{% endif %}>{{ vm.name }} ({{ vm.host }})</option>
-            {% endfor %}
-          </select>
-          <a class="inline-link" href="/ui/vms/{{ mapping.vm_target_id }}/edit">Edit VM target</a>
+        <div class="field-group">
+          <label>VM Target</label>
+          <div class="inline-field">
+            <select name="vm_target_id" required>
+              {% for vm in vm_targets %}
+              <option value="{{ vm.id }}" {% if vm.id == mapping.vm_target_id %}selected{% endif %}>{{ vm.name }} ({{ vm.host }})</option>
+              {% endfor %}
+            </select>
+            <a class="inline-link" href="/ui/vms/{{ mapping.vm_target_id }}/edit">Edit VM target</a>
+          </div>
         </div>
-        <label>Repo Mode</label>
-        <select name="repo_mode">
-          <option value="mirror" {% if mapping.repo_mode == 'mirror' %}selected{% endif %}>mirror</option>
-          <option value="clone" {% if mapping.repo_mode == 'clone' %}selected{% endif %}>clone</option>
-        </select>
-        <label>Repo Path</label>
-        <input type="text" name="repo_path" value="{{ mapping.repo_path or '' }}" />
-        <label>Repo URL (clone mode)</label>
-        <input type="text" name="repo_url" value="{{ mapping.repo_url or '' }}" />
+        <div class="field-group">
+          <label>Repo Mode</label>
+          <select name="repo_mode">
+            <option value="mirror" {% if mapping.repo_mode == 'mirror' %}selected{% endif %}>mirror</option>
+            <option value="clone" {% if mapping.repo_mode == 'clone' %}selected{% endif %}>clone</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Repo Path</label>
+          <input type="text" name="repo_path" value="{{ mapping.repo_path or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Repo URL (clone mode)</label>
+          <input type="text" name="repo_url" value="{{ mapping.repo_url or '' }}" />
+        </div>
         <button type="submit">Save Mapping</button>
       </form>
       <form method="post" action="/project_vms/{{ mapping.id }}/delete">

@@ -194,6 +194,19 @@ class Supervisor:
                 self.db.record_run_end(run_id, "preempted")
                 self._update_state(f"preempted {record.work_id}")
                 return
+            if record.source_id == "session":
+                session_id = record.checkpoint.get("session_id")
+                session = self.db.get_session(session_id) if session_id else None
+                if session and session.status == "running":
+                    self.db.update_work_item_status(
+                        record.work_id,
+                        "queued",
+                        run_after=utc_now(),
+                        clear_errors=True,
+                    )
+                    self.db.record_run_end(run_id, "queued")
+                    self._update_state(f"queued {record.work_id}")
+                    return
             self.db.update_work_item_status(record.work_id, "done", clear_errors=True)
             self.db.record_run_end(run_id, "done")
             self._update_state(f"completed {record.work_id}")

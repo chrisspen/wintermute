@@ -6,18 +6,24 @@
     <div class="tile">
       <h3>Edit Project</h3>
       <form method="post" action="/projects/{{ project.id }}">
-        <label>Name</label>
-        <input type="text" name="name" value="{{ project.name }}" required />
-        <label>Slug</label>
-        <input type="text" name="slug" value="{{ project.slug }}" required />
-        <label>Slack Channel ID</label>
-        <input type="text" name="slack_channel_id" value="{{ project.slack_channel_id or '' }}" />
+        <div class="field-group">
+          <label>Name</label>
+          <input type="text" name="name" value="{{ project.name }}" required />
+        </div>
+        <div class="field-group">
+          <label>Slug</label>
+          <input type="text" name="slug" value="{{ project.slug }}" required />
+        </div>
+        <div class="field-group">
+          <label>Slack Channel ID</label>
+          <input type="text" name="slack_channel_id" value="{{ project.slack_channel_id or '' }}" />
+        </div>
         <button type="submit">Save Project</button>
       </form>
       <div class="divider"></div>
       <form method="post" action="/projects/{{ project.id }}/delete">
         <input type="hidden" name="confirm" value="" />
-        <div class="checkbox-row">
+        <div class="checkbox-row field-group">
           <input type="checkbox" name="delete_slack" id="deleteSlack" />
           <label for="deleteSlack">Also delete Slack channel</label>
         </div>
