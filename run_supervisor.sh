@@ -29,6 +29,10 @@ set -a
 source .env
 set +a
 
+LOG_DIR="${WINTERMUTE_LOG_DIR:-.runtime/logs}"
+mkdir -p "$LOG_DIR"
+export WINTERMUTE_SUPERVISOR_LOG_FILE="${WINTERMUTE_SUPERVISOR_LOG_FILE:-$LOG_DIR/supervisor.log}"
+
 PID_FILE="${WINTERMUTE_SUPERVISOR_PID_FILE:-.runtime/supervisor.pid}"
 mkdir -p "$(dirname "$PID_FILE")"
 echo "$$" > "$PID_FILE"

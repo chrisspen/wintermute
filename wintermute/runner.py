@@ -1,4 +1,4 @@
-"""SSH and screen-based agent session runner."""
+"""SSH and tmux-based agent session runner."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def _run_ssh(
         f"{spec.user}@{spec.host}",
         remote_cmd,
     ]
-    logger.info("SSH run %s %s", spec.host, remote_args[0] if remote_args else "")
+    logger.debug("SSH run %s %s", spec.host, remote_args[0] if remote_args else "")
     try:
         return subprocess.run(cmd, check=False, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired as exc:
@@ -136,16 +136,12 @@ def _run_ssh_script(
         return subprocess.CompletedProcess(exc.cmd, 124, stdout=b"", stderr=b"Command timed out")
 
 
-def _screen_name(session_id: str) -> str:
+def _session_name(session_id: str) -> str:
     return f"wm_{session_id}"
 
 
 def _log_path(session_id: str) -> str:
     return f"/tmp/wintermute-{session_id}.log"
-
-
-def _escape_for_ansic(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("'", "\\'")
 
 
 def _stderr_text(value: object) -> str:
@@ -298,64 +294,73 @@ def start_session(
     repo_path: str,
 ) -> None:
     logger = logging.getLogger(__name__)
-    name = _screen_name(session_id)
+    name = _session_name(session_id)
     logfile = _log_path(session_id)
     agent_cmd = agent.command
     if agent.env_vars:
         env_vars = agent.env_vars.strip()
         if env_vars:
             agent_cmd = f"env {env_vars} {agent.command}"
-    cmd = (
-        "cd {repo} && screen -S {name} -dmL -Logfile {log} bash -lc {agent_cmd}"
-    ).format(
-        repo=shlex.quote(repo_path),
-        name=shlex.quote(name),
-        log=shlex.quote(logfile),
-        agent_cmd=shlex.quote(agent_cmd),
+    cmd = "\n".join(
+        [
+            f"tmux new-session -d -s {shlex.quote(name)} -c {shlex.quote(repo_path)}",
+            f"tmux set-option -t {shlex.quote(name)} prefix C-a",
+            f"tmux unbind-key -t {shlex.quote(name)} C-b",
+            f"tmux bind-key -t {shlex.quote(name)} C-a send-prefix",
+            f"tmux send-keys -t {shlex.quote(name)} \"bash -lc {shlex.quote(agent_cmd)}\" Enter",
+            f"tmux pipe-pane -o -t {shlex.quote(name)} \"cat >> {shlex.quote(logfile)}\"",
+        ]
     )
     logger.info("Starting session %s in %s", session_id, repo_path)
-    _run_ssh(spec, ["bash", "-lc", cmd], timeout=30)
+    _run_ssh_script(spec, f"{cmd}\n", timeout=30)
 
 
 def send_input(spec: SSHSpec, session: AgentSessionRecord, text: str) -> None:
     logger = logging.getLogger(__name__)
-    name = _screen_name(session.id)
+    name = _session_name(session.id)
     trimmed = text.rstrip("\r\n")
-    payload = _escape_for_ansic(trimmed)
     cmd = "\n".join(
         [
-            f"screen -S {shlex.quote(name)} -p 0 -X stuff $'{payload}'",
-            f"screen -S {shlex.quote(name)} -p 0 -X stuff $'\\015'",
+            f"tmux send-keys -t {shlex.quote(name)} -l {shlex.quote(trimmed)}",
+            f"tmux send-keys -t {shlex.quote(name)} Enter",
         ]
     )
     logger.info("Sending input to session %s (%d chars)", session.id, len(text))
     result = _run_ssh_script(spec, f"{cmd}\n", timeout=30)
     if result.returncode != 0:
         stderr = _stderr_text(result.stderr).strip()
-        logger.error("Failed to send input to session %s: %s", session.id, stderr or "unknown error")
+        stdout = _stdout_text(result.stdout).strip()
+        logger.error(
+            "Failed to send input to session %s: %s stdout=%s",
+            session.id,
+            stderr or "unknown error",
+            stdout or "none",
+        )
 
 
 def send_interrupt(spec: SSHSpec, session_id: str, count: int = 2) -> None:
     logger = logging.getLogger(__name__)
-    name = _screen_name(session_id)
-    payload = "\\003" * max(count, 1)
-    cmd = f"screen -S {shlex.quote(name)} -X stuff $'{payload}'"
+    name = _session_name(session_id)
+    count = max(count, 1)
+    cmd = " ".join(
+        [f"tmux send-keys -t {shlex.quote(name)} C-c" for _ in range(count)]
+    )
     logger.info("Sending interrupt to session %s (x%d)", session_id, count)
     _run_ssh_script(spec, f"{cmd}\n", timeout=10)
 
 
 def stop_session(spec: SSHSpec, session_id: str, count: int = 2) -> None:
     logger = logging.getLogger(__name__)
-    name = _screen_name(session_id)
+    name = _session_name(session_id)
     send_interrupt(spec, session_id, count=count)
-    quit_cmd = f"screen -S {shlex.quote(name)} -X quit"
-    logger.info("Requesting screen quit for session %s", session_id)
+    quit_cmd = f"tmux kill-session -t {shlex.quote(name)}"
+    logger.info("Requesting tmux kill for session %s", session_id)
     _run_ssh_script(spec, f"{quit_cmd}\n", timeout=10)
 
 
 def is_session_running(spec: SSHSpec, session_id: str) -> bool:
-    name = _screen_name(session_id)
-    cmd = f"screen -ls | grep -F {shlex.quote(name)}"
+    name = _session_name(session_id)
+    cmd = f"tmux has-session -t {shlex.quote(name)}"
     result = _run_ssh(spec, ["bash", "-lc", cmd], timeout=15)
     return result.returncode == 0
 

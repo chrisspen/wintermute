@@ -1786,6 +1786,29 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             "supervisor": _read_pid_info(supervisor_pid_file, supervisor_started_file),
         }
 
+    @app.get("/api/admin/logs")
+    async def api_admin_logs(
+        request: Request,
+        service: str = Query("web"),
+        lines: int = Query(200, ge=1, le=5000),
+    ) -> dict[str, Any]:
+        _require_api_permission(request, "admin", "update")
+        log_dir = os.environ.get("WINTERMUTE_LOG_DIR", os.path.join(repo_root, ".runtime", "logs"))
+        default_web = os.path.join(log_dir, "web.log")
+        default_supervisor = os.path.join(log_dir, "supervisor.log")
+        log_map = {
+            "web": os.environ.get("WINTERMUTE_WEB_LOG_FILE", default_web),
+            "supervisor": os.environ.get("WINTERMUTE_SUPERVISOR_LOG_FILE", default_supervisor),
+        }
+        path = log_map.get(service)
+        if not path:
+            raise HTTPException(status_code=400, detail="Unknown service")
+        if not os.path.exists(path):
+            return {"service": service, "path": path, "lines": []}
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            data = handle.read().splitlines()
+        return {"service": service, "path": path, "lines": data[-lines:]}
+
     @app.get("/api/{model}/{item_id:path}")
     async def api_get(model: str, item_id: str, request: Request) -> dict[str, Any]:
         handlers = _api_model_handlers().get(model)

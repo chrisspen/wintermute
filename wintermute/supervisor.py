@@ -87,7 +87,7 @@ class Supervisor:
         self._ensure_task_sources()
         try:
             while not self._stop_event.is_set():
-                logger.info("Supervisor loop tick.")
+                logger.debug("Supervisor loop tick.")
                 await self._refresh_runtime()
                 await self._poll_sources()
                 self._update_state("polled sources")
@@ -124,13 +124,13 @@ class Supervisor:
             row = rows.get(source.id)
             if not row or not row.enabled:
                 continue
-            logger.info("Polling source %s", source.id)
+            logger.debug("Polling source %s", source.id)
             last_poll = self._last_poll.get(source.id, 0.0)
             if now - last_poll < row.poll_interval_seconds:
                 continue
             self._last_poll[source.id] = now
             drafts = await source.poll({"db": self.db})
-            logger.info("Source %s emitted %d drafts", source.id, len(drafts))
+            logger.debug("Source %s emitted %d drafts", source.id, len(drafts))
             for draft in drafts:
                 inserted = self.db.insert_work_item_if_absent(
                     draft.work_id,
@@ -159,7 +159,7 @@ class Supervisor:
         record = self.db.get_work_item(work_id)
         if not record:
             return
-        logger.info("Running work item %s", work_id)
+        logger.debug("Running work item %s", work_id)
         self._current_work_id = work_id
         self._preempt_event.clear()
         await self._run_work_item(record)
@@ -173,7 +173,7 @@ class Supervisor:
         try:
             source = self._get_source(record.source_id)
             work_item = await source.build_work_item({"db": self.db}, record)
-            logger.info("Work item %s resume start", record.work_id)
+            logger.debug("Work item %s resume start", record.work_id)
 
             async def checkpoint(patch: dict[str, Any]) -> None:
                 new_checkpoint = dict(record.checkpoint)
@@ -188,7 +188,7 @@ class Supervisor:
                 checkpoint=checkpoint,
             )
             await work_item.resume(ctx)
-            logger.info("Work item %s resume completed", record.work_id)
+            logger.debug("Work item %s resume completed", record.work_id)
             if self._preempt_event.is_set():
                 self.db.update_work_item_status(record.work_id, "queued")
                 self.db.record_run_end(run_id, "preempted")
@@ -314,9 +314,16 @@ def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:
 
 
 async def main() -> None:
+    log_level = os.environ.get("WINTERMUTE_LOG_LEVEL", "INFO").upper()
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    log_path = os.environ.get("WINTERMUTE_SUPERVISOR_LOG_FILE")
+    if log_path:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        handlers.append(logging.FileHandler(log_path))
     logging.basicConfig(
-        level=os.environ.get("WINTERMUTE_LOG_LEVEL", "INFO").upper(),
+        level=log_level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
     )
     register(DemoSource())
     register(CommentDispatchSource())

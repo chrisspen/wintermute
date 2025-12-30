@@ -190,6 +190,7 @@ async def _apply_agent_responses(
     responses = ctx.db.list_agent_responses(agent_id=session.agent_id)
     if not responses:
         return
+    match_text = _strip_control_sequences(output)
     for response in responses:
         raw_pattern = response.pattern.strip()
         if not raw_pattern:
@@ -200,7 +201,7 @@ async def _apply_agent_responses(
         matched_all = True
         for pattern in patterns:
             try:
-                if not re.search(pattern, output, flags=re.IGNORECASE | re.MULTILINE):
+                if not re.search(pattern, match_text, flags=re.IGNORECASE | re.MULTILINE):
                     matched_all = False
                     break
             except re.error:
@@ -248,17 +249,19 @@ def _extract_response_blocks(text: str, prefix: Optional[str]) -> list[str]:
     current: list[str] = []
     stripped_prefix = prefix.strip()
     for line in text.splitlines(keepends=True):
-        raw = line.lstrip()
+        raw = line
         plain = _strip_control_sequences(raw).lstrip()
+        if raw.endswith("\n") and not plain.endswith("\n"):
+            plain = f"{plain}\n"
         if plain.startswith(stripped_prefix):
             if current:
                 blocks.append("".join(current).strip())
                 current = []
-            content = raw[len(stripped_prefix):].lstrip()
+            content = plain[len(stripped_prefix):].lstrip()
             current.append(content)
             continue
         if current:
-            current.append(line)
+            current.append(plain)
     if current:
         blocks.append("".join(current).strip())
     return [block for block in blocks if block]

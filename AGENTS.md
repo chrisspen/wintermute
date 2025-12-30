@@ -12,7 +12,7 @@ Foreman is a local, persistent “work supervisor” that runs an async priority
 - **Project**: top-level workspace with Slack channel and linked VM targets.
 - **Ticket**: lightweight work item tracking (title, status, estimate, assigned).
 - **Agent**: CLI agent definition (command + required SSH options).
-- **AgentSession**: persistent SSH+screen session for an agent working on a project VM.
+- **AgentSession**: persistent SSH+tmux session for an agent working on a project VM.
 - **Project VM Mapping**: link between a Project and a VM target with repo mode settings.
 - **GitHub Source**: per-repo config (with token) that polls issues and emits work items.
 - **GitHub Token**: per-user credential used by one or more GitHub sources.
@@ -77,6 +77,7 @@ The web admin console provides:
 - Relaunchers (`relauncher_web.sh`, `relauncher_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
 - Stop scripts (`stop_web.sh`, `stop_supervisor.sh`) request a clean shutdown.
 - PID/status endpoint: `GET /api/admin/pids`.
+- Log tail endpoint: `GET /api/admin/logs?service=web|supervisor&lines=200`.
 - `.codex/token` stores `WINTERMUTE_ADMIN_API_TOKEN=<token>`; strip the prefix when sending the bearer token.
 
 ## Tooling boundaries (safety by construction)
@@ -99,7 +100,7 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - `wintermute/tools/` — tool definitions + permission gating
 - `wintermute/web/` — FastAPI app + UI
 - `wintermute/db.py` — SQLite ORM models/migrations
-- `wintermute/runner.py` — SSH + screen session runner for agent sessions
+- `wintermute/runner.py` — SSH + tmux session runner for agent sessions
 - `tests/` — unit + integration tests with mocked endpoints
 - `alembic/` + `alembic.ini` — SQLAlchemy migrations
 - `setup.sh`, `run_web.sh`, `run_supervisor.sh` — local setup and runners
@@ -126,6 +127,14 @@ When running local tests as an agent, prefer a per-agent venv at `.<agent>/.venv
 Use the agent-specific venv for this environment: `.codex/.venv` (run `./setup.sh --venv-dir .codex/.venv`).
 
 When testing `./run_web.sh` or `./run_supervisor.sh`, they block; run with `PYTHONUNBUFFERED=1` and stop once the “ready” log line appears to avoid waiting on timeouts.
+
+## tmux note
+To make detach consistent with `Ctrl-a` + `d`, add this to `~/.tmux.conf`:
+```
+unbind-key C-b
+set-option -g prefix C-a
+bind-key C-a send-prefix
+```
 
 ## Definition of done for a TaskSource
 A source is “done” when it can: authenticate, poll, emit deterministic WorkItems, checkpoint, recover after restart, and be controlled via the admin console.

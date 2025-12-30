@@ -103,6 +103,16 @@ curl -sS http://127.0.0.1:8000/api/admin/pids \
   -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
 ```
 
+Log tail endpoint (web/supervisor):
+
+```
+curl -sS "http://127.0.0.1:8000/api/admin/logs?service=web&lines=200" \
+  -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
+
+curl -sS "http://127.0.0.1:8000/api/admin/logs?service=supervisor&lines=200" \
+  -H "Authorization: Bearer $WINTERMUTE_ADMIN_API_TOKEN"
+```
+
 Projects, mappings, and sessions
 --------------------------------
 - Create a Project to auto-create a Slack channel (public) for that project.
@@ -117,6 +127,16 @@ start <projectslug> <agentslug>
 ```
 
 Agent output appears in a Slack thread for that session. Replies in the thread are forwarded to the agent.
+
+tmux sessions
+-------------
+Agent sessions run under tmux. To detach reliably with `Ctrl-a` then `d`, add this to `~/.tmux.conf`:
+
+```
+unbind-key C-b
+set-option -g prefix C-a
+bind-key C-a send-prefix
+```
 
 Environment
 -----------
