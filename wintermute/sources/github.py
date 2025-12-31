@@ -13,10 +13,13 @@ from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,
     build_ssh_spec_with_options,
+    configure_git_push_auth,
     ensure_repo,
+    is_codex_command,
     parse_ssh_options,
     prepare_issue_branch,
     send_input,
+    set_codex_trust,
     start_session,
     strip_port_forwards,
 )
@@ -217,6 +220,10 @@ class GitHubIssueWorkItem(WorkItem):
             message = "Repository not configured for this project VM."
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
+        if token_record and project_vm.repo_url:
+            configure_git_push_auth(base_spec, repo_path, project_vm.repo_url, token_record.token)
+        if is_codex_command(agent.command) and agent.trust_level:
+            set_codex_trust(base_spec, repo_path, agent.trust_level)
         try:
             branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
         except Exception as exc:

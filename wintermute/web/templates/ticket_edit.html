@@ -1,16 +1,23 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="panel sticky-panel">
-  <div class="agent-panel">
-    <div class="agent-status">
-      <span class="status-label">Status</span>
-      <span id="agent-status" class="status-value">{% if session_running %}online{% else %}offline{% endif %}</span>
-    </div>
-    <div class="agent-status">
-      <span class="status-label">Location</span>
-      <span id="agent-location" class="status-value {% if not session_running %}muted{% endif %}" data-running="{{ location_label }}">{% if session_running %}{{ location_label }}{% else %}none{% endif %}</span>
-    </div>
+  <div class="panel sticky-panel">
+    <div class="agent-panel">
+      <div class="agent-status">
+        <span class="status-label">Status</span>
+        <span id="agent-status" class="status-value">{% if session_running %}online{% else %}offline{% endif %}</span>
+      </div>
+      <div class="agent-status typing-indicator hidden" id="agent-typing">
+        <span class="status-label">Agent</span>
+        <span class="status-value">
+          <span class="typing-spinner" aria-hidden="true"></span>
+          thinking…
+        </span>
+      </div>
+      <div class="agent-status">
+        <span class="status-label">Location</span>
+        <span id="agent-location" class="status-value {% if not session_running %}muted{% endif %}" data-running="{{ location_label }}">{% if session_running %}{{ location_label }}{% else %}none{% endif %}</span>
+      </div>
     <div class="agent-actions">
       <button type="button" id="agent-start" {% if session_running or not start_ready %}disabled{% endif %}{% if not start_ready %} title="{{ start_reason }}"{% endif %}>Start</button>
       <button type="button" id="agent-stop" class="danger" {% if not session_running %}disabled{% endif %}>Stop</button>
@@ -241,6 +248,7 @@
     const startBtn = document.getElementById("agent-start");
     const stopBtn = document.getElementById("agent-stop");
     const locationEl = document.getElementById("agent-location");
+    const typingEl = document.getElementById("agent-typing");
     const logPathEl = document.getElementById("agent-log-path");
     const logTextEl = document.getElementById("agent-log-text");
     const logCopyBtn = document.getElementById("agent-log-copy");
@@ -305,11 +313,23 @@
         try {
           const payload = JSON.parse(event.data);
           if (payload.type === "comment") {
-          const emptyState = listEl.querySelector("li.muted");
-          if (emptyState && !listEl.querySelector(".comment-entry")) {
-            emptyState.remove();
-          }
+            const emptyState = listEl.querySelector("li.muted");
+            if (emptyState && !listEl.querySelector(".comment-entry")) {
+              emptyState.remove();
+            }
             appendComment(payload.data);
+            if (typingEl) {
+              typingEl.classList.add("hidden");
+            }
+          } else if (payload.type === "typing") {
+            if (typingEl) {
+              const online = (statusEl?.textContent || "").trim() === "online";
+              if (payload.data?.active && online) {
+                typingEl.classList.remove("hidden");
+              } else {
+                typingEl.classList.add("hidden");
+              }
+            }
           }
         } catch (err) {
           console.warn("WS parse error", err);
@@ -328,6 +348,9 @@
       sessionId = newSessionId || "";
       if (statusEl) {
         statusEl.textContent = running ? "online" : "offline";
+      }
+      if (typingEl && !running) {
+        typingEl.classList.add("hidden");
       }
       if (locationEl) {
         if (running) {

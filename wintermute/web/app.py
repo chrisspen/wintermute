@@ -37,12 +37,15 @@ from wintermute.mcp_client import close_mcp_process
 from wintermute.runner import (
     build_ssh_spec,
     build_ssh_spec_with_options,
+    configure_git_push_auth,
     ensure_repo,
+    is_codex_command,
     is_session_running,
     parse_ssh_options,
     prepare_issue_branch,
     prepare_ticket_branch,
     send_input,
+    set_codex_trust,
     start_session,
     stop_session,
     strip_port_forwards,
@@ -1235,6 +1238,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload.get("session_mode") or "tmux",
                     payload.get("required_ssh_options"),
                     payload.get("env_vars"),
+                    payload.get("mcp_config"),
+                    payload.get("trust_level"),
                     payload.get("input_echo_prefix"),
                     payload.get("response_prefix"),
                 ),
@@ -1246,6 +1251,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     session_mode=payload.get("session_mode"),
                     required_ssh_options=payload.get("required_ssh_options"),
                     env_vars=payload.get("env_vars"),
+                    mcp_config=payload.get("mcp_config"),
+                    trust_level=payload.get("trust_level"),
                     input_echo_prefix=payload.get("input_echo_prefix"),
                     response_prefix=payload.get("response_prefix"),
                 ),
@@ -1772,6 +1779,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             repo_path = ensure_repo(base_spec, project_vm, repo_path=repo_resource.path)
             if not repo_path:
                 raise HTTPException(status_code=400, detail="Repository not configured")
+            if source and source.token_id and project_vm.repo_url:
+                token_record = database.get_github_token(source.token_id)
+                if token_record:
+                    configure_git_push_auth(base_spec, repo_path, project_vm.repo_url, token_record.token)
+            if is_codex_command(agent.command) and agent.trust_level:
+                set_codex_trust(base_spec, repo_path, agent.trust_level)
             if issue_number is not None:
                 branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
             else:
@@ -1881,11 +1894,23 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Session environment missing")
         if agent.session_mode == "mcp":
             close_mcp_process(session.id)
-            database.update_session(session.id, status="done")
+            database.update_session(
+                session.id,
+                status="done",
+                awaiting_response=0,
+                last_user_message="",
+                queued_user_messages="[]",
+            )
             database.release_repo_resource_for_session(session.id)
             return {"ok": True, "message": "Session stopped"}
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         stop_session(spec, session.id, count=2)
+        database.update_session(
+            session.id,
+            awaiting_response=0,
+            last_user_message="",
+            queued_user_messages="[]",
+        )
         if not is_session_running(spec, session.id):
             database.update_session(session.id, status="done")
             database.release_repo_resource_for_session(session.id)
@@ -1898,6 +1923,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not session_data or not session_data.get("user"):
             await websocket.close(code=1008)
             return
+        def _recent_activity(iso_value: Optional[str], seconds: int = 45) -> bool:
+            if not iso_value:
+                return False
+            try:
+                ts = datetime.fromisoformat(iso_value)
+            except ValueError:
+                return False
+            now = datetime.now(timezone.utc)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return (now - ts).total_seconds() <= seconds
         last_seen = websocket.query_params.get("since")
         try:
             while True:
@@ -1908,6 +1944,24 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         await websocket.send_json(
                             {"type": "comment", "data": _comment_to_dict(row)}
                         )
+                session = database.get_session_by_ticket(ticket_id)
+                if session and session.status == "running":
+                    last_activity = session.last_output_at or session.prompt_sent_at
+                    active = (
+                        bool(session.awaiting_response)
+                        and bool(session.last_user_message)
+                        and _recent_activity(last_activity)
+                    )
+                    await websocket.send_json(
+                        {
+                            "type": "typing",
+                            "data": {"active": active},
+                        }
+                    )
+                else:
+                    await websocket.send_json(
+                        {"type": "typing", "data": {"active": False}}
+                    )
                 try:
                     await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
                 except asyncio.TimeoutError:
@@ -2496,6 +2550,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         session_mode = str(form.get("session_mode", "tmux")).strip() or "tmux"
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
         env_vars = str(form.get("env_vars", "")).strip() or None
+        mcp_config = str(form.get("mcp_config", "")).strip() or None
+        trust_level = str(form.get("trust_level", "")).strip() or None
         input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
         response_prefix = str(form.get("response_prefix", "")).strip() or None
         return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
@@ -2511,6 +2567,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             session_mode,
             ssh_options,
             env_vars,
+            mcp_config,
+            trust_level,
             input_echo_prefix,
             response_prefix,
         )
@@ -2543,6 +2601,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         session_mode = str(form.get("session_mode", "tmux")).strip() or "tmux"
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
         env_vars = str(form.get("env_vars", "")).strip() or None
+        mcp_config = str(form.get("mcp_config", "")).strip() or None
+        trust_level = str(form.get("trust_level", "")).strip() or None
         input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
         response_prefix = str(form.get("response_prefix", "")).strip() or None
         if not name or not slug or not command:
@@ -2555,6 +2615,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             session_mode=session_mode,
             required_ssh_options=ssh_options,
             env_vars=env_vars,
+            mcp_config=mcp_config,
+            trust_level=trust_level,
             input_echo_prefix=input_echo_prefix,
             response_prefix=response_prefix,
         )

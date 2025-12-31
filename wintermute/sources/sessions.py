@@ -195,12 +195,26 @@ async def _run_mcp_session(
             ctx.db.update_session(session.id, mcp_conversation_id=conversation_id)
         return result
 
+    def _handle_mcp_error(error: Optional[str]) -> bool:
+        if not error:
+            return False
+        lowered = error.lower()
+        if "mcp process" in lowered:
+            logger.warning("MCP process error for session %s: %s", session.id, error)
+            close_mcp_process(session.id)
+            ctx.db.update_session(session.id, status="done", awaiting_response=0)
+            ctx.db.release_repo_resource_for_session(session.id)
+            return True
+        return False
+
     if session.prompt_pending:
         prompt = session.prompt_pending.strip()
         ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
         if prompt:
             logger.info("MCP prompt queued for session %s", session.id)
             result = _send_prompt(prompt)
+            if _handle_mcp_error(result.error):
+                return
             if result.error:
                 logger.warning("MCP prompt error for session %s: %s", session.id, result.error)
             if result.response_text:
@@ -228,6 +242,8 @@ async def _run_mcp_session(
     if not queue:
         if session.awaiting_response:
             poll_result = poll_codex_mcp(session.id, timeout_seconds=5)
+            if _handle_mcp_error(poll_result.error):
+                return
             if poll_result.error:
                 logger.warning("MCP poll error for session %s: %s", session.id, poll_result.error)
             if poll_result.response_text:
@@ -263,6 +279,8 @@ async def _run_mcp_session(
         return
     logger.info("MCP reply queued for session %s", session.id)
     result = _send_prompt(message)
+    if _handle_mcp_error(result.error):
+        return
     if result.error:
         logger.warning("MCP reply error for session %s: %s", session.id, result.error)
     if result.response_text:

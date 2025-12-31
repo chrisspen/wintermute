@@ -221,6 +221,8 @@ class AgentRecord:
     session_mode: str
     required_ssh_options: Optional[str]
     env_vars: Optional[str]
+    mcp_config: Optional[str]
+    trust_level: Optional[str]
     input_echo_prefix: Optional[str]
     response_prefix: Optional[str]
     created_at: str
@@ -481,6 +483,8 @@ class AgentModel(Base):
     session_mode: Mapped[str] = mapped_column(String, nullable=False, default="tmux")
     required_ssh_options: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     env_vars: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    mcp_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trust_level: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     input_echo_prefix: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     response_prefix: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -2180,6 +2184,8 @@ class Database:
                 session_mode=row.session_mode,
                 required_ssh_options=row.required_ssh_options,
                 env_vars=row.env_vars,
+                mcp_config=row.mcp_config,
+                trust_level=row.trust_level,
                 input_echo_prefix=row.input_echo_prefix,
                 response_prefix=row.response_prefix,
                 created_at=row.created_at,
@@ -2273,6 +2279,8 @@ class Database:
         session_mode: str,
         required_ssh_options: Optional[str],
         env_vars: Optional[str],
+        mcp_config: Optional[str],
+        trust_level: Optional[str],
         input_echo_prefix: Optional[str],
         response_prefix: Optional[str],
     ) -> None:
@@ -2287,6 +2295,8 @@ class Database:
                     session_mode=session_mode,
                     required_ssh_options=required_ssh_options,
                     env_vars=env_vars,
+                    mcp_config=mcp_config,
+                    trust_level=trust_level,
                     input_echo_prefix=input_echo_prefix,
                     response_prefix=response_prefix,
                     created_at=now,
@@ -2304,6 +2314,8 @@ class Database:
         session_mode: Optional[str] = None,
         required_ssh_options: Optional[str] = None,
         env_vars: Optional[str] = None,
+        mcp_config: Optional[str] = None,
+        trust_level: Optional[str] = None,
         input_echo_prefix: Optional[str] = None,
         response_prefix: Optional[str] = None,
     ) -> None:
@@ -2323,6 +2335,10 @@ class Database:
                 row.required_ssh_options = required_ssh_options
             if env_vars is not None:
                 row.env_vars = env_vars
+            if mcp_config is not None:
+                row.mcp_config = mcp_config
+            if trust_level is not None:
+                row.trust_level = trust_level
             if input_echo_prefix is not None:
                 row.input_echo_prefix = input_echo_prefix
             if response_prefix is not None:
@@ -2346,6 +2362,8 @@ class Database:
             session_mode=row.session_mode,
             required_ssh_options=row.required_ssh_options,
             env_vars=row.env_vars,
+            mcp_config=row.mcp_config,
+            trust_level=row.trust_level,
             input_echo_prefix=row.input_echo_prefix,
             response_prefix=row.response_prefix,
             created_at=row.created_at,
@@ -2365,6 +2383,8 @@ class Database:
             session_mode=row.session_mode,
             required_ssh_options=row.required_ssh_options,
             env_vars=row.env_vars,
+            mcp_config=row.mcp_config,
+            trust_level=row.trust_level,
             input_echo_prefix=row.input_echo_prefix,
             response_prefix=row.response_prefix,
             created_at=row.created_at,

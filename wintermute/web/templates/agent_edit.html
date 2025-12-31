@@ -34,6 +34,18 @@
           <input type="text" name="env_vars" value="{{ agent.env_vars or '' }}" placeholder="TERM=dumb NO_COLOR=1" />
         </div>
         <div class="field-group">
+          <label>MCP Config Overrides</label>
+          <textarea name="mcp_config" rows="3" placeholder="-c 'sandbox_permissions=[&quot;disk-full-read-access&quot;,&quot;disk-full-write-access&quot;,&quot;network-full-access&quot;]'">{{ agent.mcp_config or '' }}</textarea>
+        </div>
+        <div class="field-group">
+          <label>Trust Level</label>
+          <select name="trust_level">
+            <option value="" {% if not agent.trust_level %}selected{% endif %}>(none)</option>
+            <option value="trusted" {% if agent.trust_level == "trusted" %}selected{% endif %}>trusted</option>
+            <option value="untrusted" {% if agent.trust_level == "untrusted" %}selected{% endif %}>untrusted</option>
+          </select>
+        </div>
+        <div class="field-group">
           <label>Input Echo Prefix</label>
           <input type="text" name="input_echo_prefix" value="{{ agent.input_echo_prefix or '' }}" placeholder="›" />
         </div>

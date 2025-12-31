@@ -136,7 +136,7 @@
         gap: 12px;
       }
       .hidden {
-        display: none;
+        display: none !important;
       }
       .description-edit {
         margin-top: 12px;
@@ -204,6 +204,28 @@
       }
       .agent-warning {
         margin: 6px 0 0;
+      }
+      .typing-indicator {
+        flex: 1;
+        min-width: 200px;
+      }
+      .typing-spinner {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border: 2px solid var(--accent-dark);
+        border-top-color: transparent;
+        border-radius: 50%;
+        margin-right: 6px;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
       }
       .comment-entry {
         padding: 12px 0;

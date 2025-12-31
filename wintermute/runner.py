@@ -9,6 +9,7 @@ import re
 import shlex
 import socket
 import subprocess
+import urllib.parse
 from dataclasses import dataclass
 from typing import Optional
 
@@ -144,6 +145,51 @@ def _log_path(session_id: str) -> str:
     return f"/tmp/wintermute-{session_id}.log"
 
 
+def is_codex_command(command: str) -> bool:
+    if not command:
+        return False
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
+    if not parts:
+        return False
+    return os.path.basename(parts[0]) == "codex"
+
+
+def set_codex_trust(spec: SSHSpec, repo_path: str, trust_level: str) -> None:
+    if not repo_path or not trust_level:
+        return
+    safe_repo = repo_path.replace("'", "'\"'\"'")
+    safe_level = trust_level.replace("'", "'\"'\"'")
+    script = f"""
+set -e
+config="$HOME/.codex/config.toml"
+mkdir -p "$(dirname "$config")"
+if [ ! -f "$config" ]; then
+  : > "$config"
+fi
+tmp="$(mktemp)"
+awk -v target='[projects."{safe_repo}"]' -v level="{safe_level}" '
+  BEGIN {{ skip=0 }}
+  {{
+    if ($0 ~ /^\\[/) {{
+      if (skip) {{ skip=0 }}
+      if ($0 == target) {{ skip=1; next }}
+    }}
+    if (!skip) print $0
+  }}
+  END {{
+    print ""
+    print target
+    print "trust_level = \\"" level "\\""
+  }}
+' "$config" > "$tmp"
+mv "$tmp" "$config"
+"""
+    _run_ssh_script(spec, script, timeout=10)
+
+
 def _stderr_text(value: object) -> str:
     if value is None:
         return ""
@@ -240,6 +286,25 @@ def ensure_repo(
             )
         return repo_path
     return None
+
+
+def configure_git_push_auth(
+    spec: SSHSpec, repo_path: str, repo_url: Optional[str], token: Optional[str]
+) -> None:
+    if not repo_path or not repo_url or not token:
+        return
+    parsed = urllib.parse.urlparse(repo_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return
+    safe_token = token.replace("'", "'\"'\"'")
+    push_netloc = f"x-access-token:{safe_token}@{parsed.netloc}"
+    push_url = urllib.parse.urlunparse(parsed._replace(netloc=push_netloc))
+    script = (
+        "set -e; "
+        f"cd {shlex.quote(repo_path)}; "
+        f"git remote set-url --push origin {shlex.quote(push_url)};"
+    )
+    _run_ssh_script(spec, f"{script}\n", timeout=20)
 
 
 def delete_repo_path(spec: SSHSpec, repo_path: str) -> None:

@@ -22,6 +22,14 @@
         <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
         <label>Environment Variables</label>
         <input type="text" name="env_vars" placeholder="TERM=dumb NO_COLOR=1" />
+        <label>MCP Config Overrides</label>
+        <textarea name="mcp_config" rows="3" placeholder="-c 'sandbox_permissions=[&quot;disk-full-read-access&quot;,&quot;disk-full-write-access&quot;,&quot;network-full-access&quot;]'"></textarea>
+        <label>Trust Level</label>
+        <select name="trust_level">
+          <option value="">(none)</option>
+          <option value="trusted">trusted</option>
+          <option value="untrusted">untrusted</option>
+        </select>
         <label>Input Echo Prefix</label>
         <input type="text" name="input_echo_prefix" placeholder="›" />
         <label>Response Prefix</label>

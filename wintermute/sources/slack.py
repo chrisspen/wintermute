@@ -12,7 +12,7 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
 from wintermute.db import Database
-from wintermute.runner import build_ssh_spec, ensure_repo, send_input, start_session
+from wintermute.runner import build_ssh_spec, ensure_repo, is_codex_command, send_input, set_codex_trust, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 
@@ -187,6 +187,8 @@ class SlackCommandWorkItem(WorkItem):
                 },
             )
             return
+        if is_codex_command(agent.command) and agent.trust_level:
+            set_codex_trust(spec, repo_path, agent.trust_level)
         ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import json
 import logging
+import re
 import shlex
 import socket
 import subprocess
@@ -14,6 +15,11 @@ import selectors
 import threading
 from dataclasses import dataclass
 from typing import Any, Optional
+
+try:
+    import tomllib as toml
+except ImportError:  # pragma: no cover - py<3.11
+    import tomli as toml
 
 from wintermute.db import AgentRecord
 from wintermute.runner import SSHSpec
@@ -46,6 +52,12 @@ def _build_mcp_shell(agent: AgentRecord) -> str:
         if env_vars:
             cmd = f"env {env_vars} {cmd}"
     cmd = f"{cmd} mcp-server"
+    if agent.mcp_config:
+        config = agent.mcp_config.strip()
+        if config:
+            cmd = f"{cmd} {config}"
+            if "network-full-access" in config and "network_access" not in config:
+                cmd = f"{cmd} -c 'network_access=\"enabled\"'"
     wrapped = (
         "source ~/.profile >/dev/null 2>&1; "
         "source ~/.bash_profile >/dev/null 2>&1; "
@@ -57,6 +69,50 @@ def _build_mcp_shell(agent: AgentRecord) -> str:
         "fi"
     )
     return wrapped
+
+
+def _parse_toml_value(raw: str) -> Any:
+    try:
+        parsed = toml.loads(f"value = {raw}")
+        return parsed.get("value")
+    except Exception:
+        return raw
+
+
+def _set_nested_config(overrides: dict[str, Any], key: str, value: Any) -> None:
+    parts = [part for part in key.split(".") if part]
+    current = overrides
+    for part in parts[:-1]:
+        next_node = current.get(part)
+        if not isinstance(next_node, dict):
+            next_node = {}
+            current[part] = next_node
+        current = next_node
+    if parts:
+        current[parts[-1]] = value
+
+
+def _parse_mcp_config_overrides(config: Optional[str]) -> dict[str, Any]:
+    if not config:
+        return {}
+    overrides: dict[str, Any] = {}
+    try:
+        tokens = shlex.split(config)
+    except ValueError:
+        tokens = config.split()
+    idx = 0
+    while idx < len(tokens):
+        token = tokens[idx]
+        if token in {"-c", "--config"} and idx + 1 < len(tokens):
+            key_value = tokens[idx + 1]
+            if "=" in key_value:
+                key, raw_value = key_value.split("=", 1)
+                value = _parse_toml_value(raw_value)
+                _set_nested_config(overrides, key, value)
+            idx += 2
+            continue
+        idx += 1
+    return overrides
 
 
 def _is_local_host(host: str) -> bool:
@@ -468,6 +524,9 @@ def _send_tool_call(
     cwd: str,
     conversation_id: Optional[str],
     stream_timeout_seconds: int,
+    network_access_enabled: bool,
+    config_overrides: Optional[dict[str, Any]],
+    sandbox_mode: str,
     log_path: Optional[str] = None,
 ) -> MCPResult:
     logger = logging.getLogger(__name__)
@@ -479,8 +538,12 @@ def _send_tool_call(
         "prompt": prompt,
         "cwd": cwd,
         "approval-policy": "never",
-        "sandbox": "workspace-write",
+        "sandbox": sandbox_mode,
     }
+    if network_access_enabled:
+        arguments["network_access"] = "enabled"
+    if config_overrides:
+        arguments["config"] = config_overrides
     if conversation_id:
         arguments["conversationId"] = conversation_id
     _send_json(
@@ -593,12 +656,32 @@ def run_codex_mcp(
         return MCPResult(response_text="", conversation_id=conversation_id, error=error)
     mcp.last_used = time.time()
     log_path = _get_mcp_log_path(session_id)
+    config_overrides = _parse_mcp_config_overrides(agent.mcp_config)
+    config_text = (agent.mcp_config or "").lower()
+    sandbox_permissions = config_overrides.get("sandbox_permissions")
+    network_access_override = config_overrides.get("network_access")
+    sandbox_override = config_overrides.get("sandbox")
+    network_access_enabled = bool(
+        (isinstance(network_access_override, str) and network_access_override.lower() == "enabled")
+        or (isinstance(sandbox_permissions, list) and "network-full-access" in sandbox_permissions)
+        or re.search(r"network_access\\s*=\\s*\"?enabled\"?", config_text)
+        or re.search(r"features\\.network\\s*=\\s*true", config_text)
+        or "network-full-access" in config_text
+    )
+    sandbox_mode = "workspace-write"
+    if isinstance(sandbox_override, str) and sandbox_override:
+        sandbox_mode = sandbox_override
+    elif network_access_enabled:
+        sandbox_mode = "danger-full-access"
     result = _send_tool_call(
         mcp,
         prompt=prompt,
         cwd=cwd,
         conversation_id=conversation_id,
         stream_timeout_seconds=timeout_seconds,
+        network_access_enabled=network_access_enabled,
+        config_overrides=config_overrides,
+        sandbox_mode=sandbox_mode,
         log_path=log_path,
     )
     if mcp.proc.stderr:
