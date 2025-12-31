@@ -1,7 +1,7 @@
-# AGENTS.md — Foreman
+# AGENTS.md — Wintermute
 
 ## What this repo is
-Foreman is a local, persistent “work supervisor” that runs an async priority queue (subsumption-style) over multiple task sources (e.g., chat/IM, Jira, GitHub) and uses an LLM only to decide the next step inside a work item. The scheduler—not the model—controls preemption, IO, credentials, and safety boundaries. Foreman speaks the OpenAI-compatible protocol so it can run against Ollama (or any compatible server) without code changes.
+Wintermute is a local, persistent “work supervisor” that runs an async priority queue (subsumption-style) over multiple task sources (e.g., chat/IM, Jira, GitHub) and uses an LLM only to decide the next step inside a work item. The scheduler—not the model—controls preemption, IO, credentials, and safety boundaries. Wintermute speaks the OpenAI-compatible protocol so it can run against Ollama (or any compatible server) without code changes.
 
 ## Core concepts
 - **TaskSource**: a pluggable watcher that periodically emits work.
@@ -12,8 +12,9 @@ Foreman is a local, persistent “work supervisor” that runs an async priority
 - **Project**: top-level workspace with Slack channel and linked VM targets.
 - **Ticket**: lightweight work item tracking (title, status, estimate, assigned).
 - **Agent**: CLI agent definition (command + required SSH options).
-- **AgentSession**: persistent SSH+tmux session for an agent working on a project VM.
+- **AgentSession**: persistent agent session (tmux or MCP) for a project VM.
 - **Project VM Mapping**: link between a Project and a VM target with repo mode settings.
+- **Repo Resource**: reusable repo checkout path tied to a project/VM/session (clone mode pool).
 - **GitHub Source**: per-repo config (with token) that polls issues and emits work items.
 - **GitHub Token**: per-user credential used by one or more GitHub sources.
 - **API Token**: scoped credential for REST access with per-model CRUD permissions.
@@ -69,6 +70,8 @@ The web admin console provides:
 - Projects, Tickets, VM targets, Agents, and Project VM mappings.
 - Slack channel per project; Slack command `start <projectslug> <agentslug>` to launch sessions.
 - Project VM mapping edit page with repo mode/path/url controls.
+- Repo resource pool (clone mode) with per-project `max_repo_resources` and daily cleanup for unused clones (default 30 days).
+- Repo resource cleanup age is configured via `WINTERMUTE_REPO_RESOURCE_TTL_DAYS` (default 30).
 - GitHub token storage and GitHub source configuration (multiple repos, optional auto-start).
 - GitHub session output: `PUBLIC:` lines become comments pending approval; `NOTE:` lines stay internal.
 - Approved public comments are auto-dispatched to GitHub by the comment dispatch source.
@@ -87,7 +90,7 @@ The web admin console provides:
 - Human override always wins: admin UI can pause supervisor, cancel items, or change priorities immediately.
 
 ## Model/provider support
-Foreman uses the OpenAI-compatible Chat Completions API:
+Wintermute uses the OpenAI-compatible Chat Completions API:
 - Default: `base_url=http://localhost:11434/v1` (Ollama), `api_key=ollama`
 - Models are configurable per TaskSource or globally (e.g., fast model for triage, stronger model for coding).
 - OpenWebUI-compatible API is supported via `WINTERMUTE_BASE_URL` + `WINTERMUTE_API_KEY`.
@@ -101,6 +104,7 @@ Foreman uses the OpenAI-compatible Chat Completions API:
 - `wintermute/web/` — FastAPI app + UI
 - `wintermute/db.py` — SQLite ORM models/migrations
 - `wintermute/runner.py` — SSH + tmux session runner for agent sessions
+- `wintermute/mcp_client.py` — MCP stdio client for Codex sessions
 - `tests/` — unit + integration tests with mocked endpoints
 - `alembic/` + `alembic.ini` — SQLAlchemy migrations
 - `setup.sh`, `run_web.sh`, `run_supervisor.sh` — local setup and runners

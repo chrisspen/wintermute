@@ -1,15 +1,17 @@
-"""SQLite persistence for Foreman using SQLAlchemy ORM."""
+"""SQLite persistence for Wintermute using SQLAlchemy ORM."""
 
 from __future__ import annotations
 
 import json
+import re
+import uuid
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Generator, Optional
 
-from sqlalchemy import Integer, String, Text, create_engine, func, inspect, select
+from sqlalchemy import Integer, String, Text, create_engine, func, inspect, select, or_
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -102,6 +104,8 @@ class ProjectRecord:
     name: str
     slug: str
     slack_channel_id: Optional[str]
+    prompt_template: Optional[str]
+    max_repo_resources: int
     created_at: str
     updated_at: str
 
@@ -171,6 +175,21 @@ class CommentRecord:
 
 
 @dataclass(frozen=True)
+class RepoResourceRecord:
+    id: str
+    project_id: str
+    project_vm_id: str
+    repo_mode: str
+    path: str
+    status: str
+    session_id: Optional[str]
+    agent_id: Optional[str]
+    last_used_at: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class VMTargetRecord:
     id: str
     name: str
@@ -199,6 +218,7 @@ class AgentRecord:
     name: str
     slug: str
     command: str
+    session_mode: str
     required_ssh_options: Optional[str]
     env_vars: Optional[str]
     input_echo_prefix: Optional[str]
@@ -217,6 +237,7 @@ class AgentSessionRecord:
     status: str
     repo_path: str
     thread_ts: Optional[str]
+    mcp_conversation_id: Optional[str]
     last_output: Optional[str]
     last_output_offset: int
     output_buffer: Optional[str]
@@ -224,6 +245,10 @@ class AgentSessionRecord:
     prompt_pending: Optional[str]
     prompt_sent_at: Optional[str]
     last_output_at: Optional[str]
+    awaiting_response: int
+    last_user_message: Optional[str]
+    queued_user_messages: Optional[str]
+    awaiting_response_offset: int
     created_at: str
     updated_at: str
 
@@ -331,6 +356,8 @@ class ProjectModel(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     slack_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    prompt_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    max_repo_resources: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -370,6 +397,22 @@ class CommentModel(Base):
     approved: Mapped[int] = mapped_column(Integer, nullable=False)
     sent: Mapped[int] = mapped_column(Integer, nullable=False)
     sent_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class RepoResourceModel(Base):
+    __tablename__ = "repo_resources"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    project_id: Mapped[str] = mapped_column(String, nullable=False)
+    project_vm_id: Mapped[str] = mapped_column(String, nullable=False)
+    repo_mode: Mapped[str] = mapped_column(String, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    last_used_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -435,6 +478,7 @@ class AgentModel(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     command: Mapped[str] = mapped_column(String, nullable=False)
+    session_mode: Mapped[str] = mapped_column(String, nullable=False, default="tmux")
     required_ssh_options: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     env_vars: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     input_echo_prefix: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -454,6 +498,7 @@ class AgentSessionModel(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     repo_path: Mapped[str] = mapped_column(String, nullable=False)
     thread_ts: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    mcp_conversation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_output_offset: Mapped[int] = mapped_column(Integer, nullable=False)
     output_buffer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -461,6 +506,10 @@ class AgentSessionModel(Base):
     prompt_pending: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     prompt_sent_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_output_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    awaiting_response: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_user_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    queued_user_messages: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    awaiting_response_offset: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -1039,6 +1088,8 @@ class Database:
                 name=row.name,
                 slug=row.slug,
                 slack_channel_id=row.slack_channel_id,
+                prompt_template=row.prompt_template,
+                max_repo_resources=row.max_repo_resources,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -1055,6 +1106,8 @@ class Database:
             name=row.name,
             slug=row.slug,
             slack_channel_id=row.slack_channel_id,
+            prompt_template=row.prompt_template,
+            max_repo_resources=row.max_repo_resources,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1069,6 +1122,8 @@ class Database:
             name=row.name,
             slug=row.slug,
             slack_channel_id=row.slack_channel_id,
+            prompt_template=row.prompt_template,
+            max_repo_resources=row.max_repo_resources,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1079,6 +1134,8 @@ class Database:
         name: str,
         slug: str,
         slack_channel_id: Optional[str],
+        prompt_template: Optional[str] = None,
+        max_repo_resources: int = 3,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1088,6 +1145,8 @@ class Database:
                     name=name,
                     slug=slug,
                     slack_channel_id=slack_channel_id,
+                    prompt_template=prompt_template,
+                    max_repo_resources=max_repo_resources,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1100,6 +1159,8 @@ class Database:
         name: Optional[str] = None,
         slug: Optional[str] = None,
         slack_channel_id: Optional[str] = None,
+        prompt_template: Optional[str] = None,
+        max_repo_resources: Optional[int] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(ProjectModel, project_id)
@@ -1111,12 +1172,19 @@ class Database:
                 row.slug = slug
             if slack_channel_id is not None:
                 row.slack_channel_id = slack_channel_id
+            if prompt_template is not None:
+                row.prompt_template = prompt_template
+            if max_repo_resources is not None:
+                row.max_repo_resources = max_repo_resources
             row.updated_at = utc_now()
 
     def delete_project(self, project_id: str) -> None:
         with self.session() as session:
             session.query(AgentSessionModel).filter(
                 AgentSessionModel.project_id == project_id
+            ).delete()
+            session.query(RepoResourceModel).filter(
+                RepoResourceModel.project_id == project_id
             ).delete()
             session.query(ProjectVMModel).filter(
                 ProjectVMModel.project_id == project_id
@@ -1142,6 +1210,243 @@ class Database:
             )
             for row in rows
         ]
+
+    def list_repo_resources(self) -> list[RepoResourceRecord]:
+        with self.session() as session:
+            rows = session.execute(
+                select(RepoResourceModel).order_by(RepoResourceModel.updated_at.desc())
+            ).scalars().all()
+        return [
+            RepoResourceRecord(
+                id=row.id,
+                project_id=row.project_id,
+                project_vm_id=row.project_vm_id,
+                repo_mode=row.repo_mode,
+                path=row.path,
+                status=row.status,
+                session_id=row.session_id,
+                agent_id=row.agent_id,
+                last_used_at=row.last_used_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_repo_resource(self, resource_id: str) -> Optional[RepoResourceRecord]:
+        with self.session() as session:
+            row = session.get(RepoResourceModel, resource_id)
+        if not row:
+            return None
+        return RepoResourceRecord(
+            id=row.id,
+            project_id=row.project_id,
+            project_vm_id=row.project_vm_id,
+            repo_mode=row.repo_mode,
+            path=row.path,
+            status=row.status,
+            session_id=row.session_id,
+            agent_id=row.agent_id,
+            last_used_at=row.last_used_at,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def acquire_repo_resource(
+        self,
+        *,
+        project: ProjectRecord,
+        project_vm: ProjectVMRecord,
+        session_id: str,
+        agent_id: Optional[str],
+    ) -> tuple[Optional[RepoResourceRecord], Optional[str]]:
+        now = utc_now()
+        with self.session() as session:
+            rows = session.execute(
+                select(RepoResourceModel)
+                .where(RepoResourceModel.project_vm_id == project_vm.id)
+                .order_by(RepoResourceModel.last_used_at.asc().nullsfirst(), RepoResourceModel.created_at.asc())
+            ).scalars().all()
+            for row in rows:
+                if row.status != "in_use" or not row.session_id:
+                    continue
+                session_row = session.get(AgentSessionModel, row.session_id)
+                if not session_row or session_row.status != "running":
+                    row.status = "available"
+                    row.session_id = None
+                    row.agent_id = None
+                    row.last_used_at = now
+                    row.updated_at = now
+            if project_vm.repo_mode == "mirror":
+                if not project_vm.repo_path:
+                    return None, "mirror path not configured"
+                existing = next((row for row in rows if row.path == project_vm.repo_path), None)
+                if existing:
+                    if existing.status == "in_use":
+                        return None, "mirror repo already in use"
+                    existing.status = "in_use"
+                    existing.session_id = session_id
+                    existing.agent_id = agent_id
+                    existing.last_used_at = now
+                    existing.updated_at = now
+                    session.flush()
+                    return self.get_repo_resource(existing.id), None
+                resource_id = str(uuid.uuid4())
+                session.add(
+                    RepoResourceModel(
+                        id=resource_id,
+                        project_id=project.id,
+                        project_vm_id=project_vm.id,
+                        repo_mode=project_vm.repo_mode,
+                        path=project_vm.repo_path,
+                        status="in_use",
+                        session_id=session_id,
+                        agent_id=agent_id,
+                        last_used_at=now,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                session.flush()
+                return self.get_repo_resource(resource_id), None
+
+            available = [row for row in rows if row.status != "in_use"]
+            if available:
+                row = available[0]
+                row.status = "in_use"
+                row.session_id = session_id
+                row.agent_id = agent_id
+                row.last_used_at = now
+                row.updated_at = now
+                session.flush()
+                return self.get_repo_resource(row.id), None
+            if len(rows) >= max(project.max_repo_resources, 1):
+                return None, "repo resource limit reached"
+            if not project_vm.repo_path:
+                return None, "repo path not configured"
+            safe_suffix = re.sub(r"[^a-zA-Z0-9]+", "-", session_id.strip().lower()).strip("-")
+            if not safe_suffix:
+                safe_suffix = "session"
+            path = f"{project_vm.repo_path}-{safe_suffix}"
+            resource_id = str(uuid.uuid4())
+            session.add(
+                RepoResourceModel(
+                    id=resource_id,
+                    project_id=project.id,
+                    project_vm_id=project_vm.id,
+                    repo_mode=project_vm.repo_mode,
+                    path=path,
+                    status="in_use",
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    last_used_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.flush()
+            return self.get_repo_resource(resource_id), None
+
+    def release_repo_resource_for_session(self, session_id: str) -> None:
+        now = utc_now()
+        with self.session() as session:
+            row = session.execute(
+                select(RepoResourceModel).where(RepoResourceModel.session_id == session_id)
+            ).scalar_one_or_none()
+            if not row:
+                return
+            row.status = "available"
+            row.session_id = None
+            row.agent_id = None
+            row.last_used_at = now
+            row.updated_at = now
+
+    def list_repo_resources_for_cleanup(self, cutoff: str) -> list[RepoResourceRecord]:
+        with self.session() as session:
+            rows = session.execute(
+                select(RepoResourceModel)
+                .where(RepoResourceModel.status == "available")
+                .where(RepoResourceModel.repo_mode == "clone")
+                .where(
+                    or_(
+                        RepoResourceModel.last_used_at.is_(None),
+                        RepoResourceModel.last_used_at <= cutoff,
+                    )
+                )
+            ).scalars().all()
+        return [
+            RepoResourceRecord(
+                id=row.id,
+                project_id=row.project_id,
+                project_vm_id=row.project_vm_id,
+                repo_mode=row.repo_mode,
+                path=row.path,
+                status=row.status,
+                session_id=row.session_id,
+                agent_id=row.agent_id,
+                last_used_at=row.last_used_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def delete_repo_resource(self, resource_id: str) -> None:
+        with self.session() as session:
+            session.query(RepoResourceModel).filter(RepoResourceModel.id == resource_id).delete()
+
+    def insert_repo_resource(
+        self,
+        resource_id: str,
+        project_id: str,
+        project_vm_id: str,
+        repo_mode: str,
+        path: str,
+        status: str,
+        *,
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                RepoResourceModel(
+                    id=resource_id,
+                    project_id=project_id,
+                    project_vm_id=project_vm_id,
+                    repo_mode=repo_mode,
+                    path=path,
+                    status=status,
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    last_used_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_repo_resource(
+        self,
+        resource_id: str,
+        *,
+        status: Optional[str] = None,
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        last_used_at: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(RepoResourceModel, resource_id)
+            if not row:
+                return
+            if status is not None:
+                row.status = status
+            if session_id is not None:
+                row.session_id = session_id
+            if agent_id is not None:
+                row.agent_id = agent_id
+            if last_used_at is not None:
+                row.last_used_at = last_used_at
+            row.updated_at = utc_now()
 
     def get_latest_github_token_update(self) -> str:
         with self.session() as session:
@@ -1822,6 +2127,9 @@ class Database:
 
     def delete_project_vm(self, project_vm_id: str) -> None:
         with self.session() as session:
+            session.query(RepoResourceModel).filter(
+                RepoResourceModel.project_vm_id == project_vm_id
+            ).delete()
             session.query(ProjectVMModel).filter(ProjectVMModel.id == project_vm_id).delete()
 
     def get_project_vm(self, project_vm_id: str) -> Optional[ProjectVMRecord]:
@@ -1869,6 +2177,7 @@ class Database:
                 name=row.name,
                 slug=row.slug,
                 command=row.command,
+                session_mode=row.session_mode,
                 required_ssh_options=row.required_ssh_options,
                 env_vars=row.env_vars,
                 input_echo_prefix=row.input_echo_prefix,
@@ -1961,6 +2270,7 @@ class Database:
         name: str,
         slug: str,
         command: str,
+        session_mode: str,
         required_ssh_options: Optional[str],
         env_vars: Optional[str],
         input_echo_prefix: Optional[str],
@@ -1974,6 +2284,7 @@ class Database:
                     name=name,
                     slug=slug,
                     command=command,
+                    session_mode=session_mode,
                     required_ssh_options=required_ssh_options,
                     env_vars=env_vars,
                     input_echo_prefix=input_echo_prefix,
@@ -1990,6 +2301,7 @@ class Database:
         name: Optional[str] = None,
         slug: Optional[str] = None,
         command: Optional[str] = None,
+        session_mode: Optional[str] = None,
         required_ssh_options: Optional[str] = None,
         env_vars: Optional[str] = None,
         input_echo_prefix: Optional[str] = None,
@@ -2005,6 +2317,8 @@ class Database:
                 row.slug = slug
             if command is not None:
                 row.command = command
+            if session_mode is not None:
+                row.session_mode = session_mode
             if required_ssh_options is not None:
                 row.required_ssh_options = required_ssh_options
             if env_vars is not None:
@@ -2029,6 +2343,7 @@ class Database:
             name=row.name,
             slug=row.slug,
             command=row.command,
+            session_mode=row.session_mode,
             required_ssh_options=row.required_ssh_options,
             env_vars=row.env_vars,
             input_echo_prefix=row.input_echo_prefix,
@@ -2047,6 +2362,7 @@ class Database:
             name=row.name,
             slug=row.slug,
             command=row.command,
+            session_mode=row.session_mode,
             required_ssh_options=row.required_ssh_options,
             env_vars=row.env_vars,
             input_echo_prefix=row.input_echo_prefix,
@@ -2075,6 +2391,7 @@ class Database:
                 status=row.status,
                 repo_path=row.repo_path,
                 thread_ts=row.thread_ts,
+                mcp_conversation_id=row.mcp_conversation_id,
                 last_output=row.last_output,
                 last_output_offset=row.last_output_offset,
                 output_buffer=row.output_buffer,
@@ -2082,6 +2399,10 @@ class Database:
                 prompt_pending=row.prompt_pending,
                 prompt_sent_at=row.prompt_sent_at,
                 last_output_at=row.last_output_at,
+                awaiting_response=row.awaiting_response,
+                last_user_message=row.last_user_message,
+                queued_user_messages=row.queued_user_messages,
+                awaiting_response_offset=row.awaiting_response_offset,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -2110,6 +2431,7 @@ class Database:
             status=row.status,
             repo_path=row.repo_path,
             thread_ts=row.thread_ts,
+            mcp_conversation_id=row.mcp_conversation_id,
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
             output_buffer=row.output_buffer,
@@ -2117,6 +2439,10 @@ class Database:
             prompt_pending=row.prompt_pending,
             prompt_sent_at=row.prompt_sent_at,
             last_output_at=row.last_output_at,
+            awaiting_response=row.awaiting_response,
+            last_user_message=row.last_user_message,
+            queued_user_messages=row.queued_user_messages,
+            awaiting_response_offset=row.awaiting_response_offset,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -2131,6 +2457,7 @@ class Database:
         status: str,
         repo_path: str,
         thread_ts: Optional[str],
+        mcp_conversation_id: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -2144,6 +2471,7 @@ class Database:
                     status=status,
                     repo_path=repo_path,
                     thread_ts=thread_ts,
+                    mcp_conversation_id=mcp_conversation_id,
                     last_output=None,
                     last_output_offset=0,
                     output_buffer=None,
@@ -2151,6 +2479,10 @@ class Database:
                     prompt_pending=None,
                     prompt_sent_at=None,
                     last_output_at=None,
+                    awaiting_response=0,
+                    last_user_message=None,
+                    queued_user_messages=None,
+                    awaiting_response_offset=0,
                     created_at=now,
                     updated_at=now,
                 )
@@ -2162,6 +2494,7 @@ class Database:
         *,
         status: Optional[str] = None,
         thread_ts: Optional[str] = None,
+        mcp_conversation_id: Optional[str] = None,
         last_output: Optional[str] = None,
         last_output_offset: Optional[int] = None,
         output_buffer: Optional[str] = None,
@@ -2169,6 +2502,10 @@ class Database:
         prompt_pending: Optional[str] = None,
         prompt_sent_at: Optional[str] = None,
         last_output_at: Optional[str] = None,
+        awaiting_response: Optional[int] = None,
+        last_user_message: Optional[str] = None,
+        queued_user_messages: Optional[str] = None,
+        awaiting_response_offset: Optional[int] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentSessionModel, session_id)
@@ -2178,6 +2515,8 @@ class Database:
                 row.status = status
             if thread_ts is not None:
                 row.thread_ts = thread_ts
+            if mcp_conversation_id is not None:
+                row.mcp_conversation_id = mcp_conversation_id
             if last_output is not None:
                 row.last_output = last_output
             if last_output_offset is not None:
@@ -2192,6 +2531,14 @@ class Database:
                 row.prompt_sent_at = prompt_sent_at
             if last_output_at is not None:
                 row.last_output_at = last_output_at
+            if awaiting_response is not None:
+                row.awaiting_response = awaiting_response
+            if last_user_message is not None or last_user_message == "":
+                row.last_user_message = last_user_message
+            if queued_user_messages is not None or queued_user_messages == "":
+                row.queued_user_messages = queued_user_messages
+            if awaiting_response_offset is not None:
+                row.awaiting_response_offset = awaiting_response_offset
             row.updated_at = utc_now()
 
     def delete_session(self, session_id: str) -> None:
@@ -2217,6 +2564,7 @@ class Database:
             status=row.status,
             repo_path=row.repo_path,
             thread_ts=row.thread_ts,
+            mcp_conversation_id=row.mcp_conversation_id,
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
             output_buffer=row.output_buffer,
@@ -2224,6 +2572,10 @@ class Database:
             prompt_pending=row.prompt_pending,
             prompt_sent_at=row.prompt_sent_at,
             last_output_at=row.last_output_at,
+            awaiting_response=row.awaiting_response,
+            last_user_message=row.last_user_message,
+            queued_user_messages=row.queued_user_messages,
+            awaiting_response_offset=row.awaiting_response_offset,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -2242,6 +2594,7 @@ class Database:
             status=row.status,
             repo_path=row.repo_path,
             thread_ts=row.thread_ts,
+            mcp_conversation_id=row.mcp_conversation_id,
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
             output_buffer=row.output_buffer,
@@ -2249,6 +2602,10 @@ class Database:
             prompt_pending=row.prompt_pending,
             prompt_sent_at=row.prompt_sent_at,
             last_output_at=row.last_output_at,
+            awaiting_response=row.awaiting_response,
+            last_user_message=row.last_user_message,
+            queued_user_messages=row.queued_user_messages,
+            awaiting_response_offset=row.awaiting_response_offset,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

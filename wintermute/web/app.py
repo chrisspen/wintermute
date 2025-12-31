@@ -32,6 +32,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from slack_sdk.web.client import WebClient
 
 from wintermute.db import Database, utc_now
+from wintermute.prompts import DEFAULT_PROJECT_PROMPT_TEMPLATE, render_prompt_template
+from wintermute.mcp_client import close_mcp_process
 from wintermute.runner import (
     build_ssh_spec,
     build_ssh_spec_with_options,
@@ -85,6 +87,7 @@ API_PERMISSION_MODELS = [
     {"key": "github_tokens", "label": "GitHub Tokens"},
     {"key": "project_vms", "label": "Project VM Mappings"},
     {"key": "projects", "label": "Projects"},
+    {"key": "repo_resources", "label": "Repo Resources"},
     {"key": "sessions", "label": "Agent Sessions"},
     {"key": "supervisor_state", "label": "Supervisor State"},
     {"key": "task_sources", "label": "Task Sources"},
@@ -267,6 +270,9 @@ def _ticket_prompt(
     internal_notes: Optional[str],
     repo_path: str,
     branch_name: str,
+    project_name: str,
+    project_slug: str,
+    prompt_template: Optional[str],
 ) -> str:
     lines = [
         "You are a coding agent working on the following ticket.",
@@ -289,7 +295,22 @@ def _ticket_prompt(
             "If you need clarification, ask your questions clearly.",
         ]
     )
-    return "\n".join(lines)
+    default_prompt = "\n".join(lines)
+    context = {
+        "project_name": project_name,
+        "project_slug": project_slug,
+        "repo_path": repo_path,
+        "branch_name": branch_name,
+        "title": title,
+        "description": description,
+        "url": source_url or "",
+        "internal_notes": internal_notes or "",
+        "issue_number": "",
+        "owner": "",
+        "repo": "",
+        "comments": "",
+    }
+    return render_prompt_template(prompt_template, default_prompt, context)
 
 
 def _slack_client(database: Database) -> WebClient:
@@ -413,7 +434,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             CommentDispatchSource.poll_interval_seconds,
             config={},
         )
-    app = FastAPI(title="Foreman Admin")
+    app = FastAPI(title="Wintermute Admin")
     base_dir = os.path.dirname(__file__)
     repo_root = os.path.abspath(os.path.join(base_dir, os.pardir, os.pardir))
     static_css_path = os.path.join(base_dir, "static", "style.css")
@@ -483,9 +504,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             lambda match: match.group(0) if match.group(0).endswith("m") else "",
             raw,
         )
-        raw = re.sub(r"\[[0-9;?<>]*[A-Za-z]", "", raw)
-        raw = re.sub(r"\[[0-9;?<>]*[\\\"]", "", raw)
-        raw = re.sub(r"\][0-9;?<>]*[\\\"]", "", raw)
+        raw = re.sub(r"\[[0-9][0-9;?<>]*[A-Za-z]", "", raw)
+        raw = re.sub(r"\[[0-9][0-9;?<>]*[\\\"]", "", raw)
+        raw = re.sub(r"\][0-9][0-9;?<>]*[\\\"]", "", raw)
+        raw = re.sub(r"\[(?:;)*[A-Za-z]", "", raw)
+        raw = re.sub(r"\[(?:;)*[\\\"]", "", raw)
+        raw = re.sub(r"\](?:;)*[\\\"]", "", raw)
         raw = re.sub(r"(?m)^M{3,}$", "", raw)
         raw = re.sub(r"M{5,}", "", raw)
         try:
@@ -538,7 +562,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def _ensure_agent_response(agent_id: str, pattern: str, response: str) -> None:
         existing = database.list_agent_responses(agent_id=agent_id)
         for item in existing:
-            if item.pattern.strip() == pattern.strip() and item.response.strip() == response.strip():
+            if item.pattern.strip() == pattern.strip():
+                if item.response.strip() != response.strip():
+                    database.update_agent_response(item.id, response=response, pattern=pattern)
                 return
         database.insert_agent_response(str(uuid.uuid4()), agent_id, pattern, response)
 
@@ -1083,12 +1109,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload["name"],
                     payload.get("slug") or _slugify(payload["name"]),
                     payload.get("slack_channel_id"),
+                    payload.get("prompt_template"),
+                    payload.get("max_repo_resources", 3),
                 ),
                 "update": lambda item_id, payload: database.update_project(
                     item_id,
                     name=payload.get("name"),
                     slug=payload.get("slug"),
                     slack_channel_id=payload.get("slack_channel_id"),
+                    prompt_template=payload.get("prompt_template"),
+                    max_repo_resources=payload.get("max_repo_resources"),
                 ),
                 "delete": database.delete_project,
             },
@@ -1118,6 +1148,29 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     sent_at=payload.get("sent_at"),
                 ),
                 "delete": database.delete_comment,
+            },
+            "repo_resources": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_repo_resources()],
+                "get": database.get_repo_resource,
+                "required": ["project_id", "project_vm_id", "repo_mode", "path", "status"],
+                "create": lambda payload: database.insert_repo_resource(
+                    payload.get("id") or str(uuid.uuid4()),
+                    payload["project_id"],
+                    payload["project_vm_id"],
+                    payload["repo_mode"],
+                    payload["path"],
+                    payload["status"],
+                    session_id=payload.get("session_id"),
+                    agent_id=payload.get("agent_id"),
+                ),
+                "update": lambda item_id, payload: database.update_repo_resource(
+                    item_id,
+                    status=payload.get("status"),
+                    session_id=payload.get("session_id"),
+                    agent_id=payload.get("agent_id"),
+                    last_used_at=payload.get("last_used_at"),
+                ),
+                "delete": database.delete_repo_resource,
             },
             "tickets": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_tickets()],
@@ -1179,6 +1232,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload["name"],
                     payload.get("slug") or _slugify(payload["name"]),
                     payload["command"],
+                    payload.get("session_mode") or "tmux",
                     payload.get("required_ssh_options"),
                     payload.get("env_vars"),
                     payload.get("input_echo_prefix"),
@@ -1189,6 +1243,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     name=payload.get("name"),
                     slug=payload.get("slug"),
                     command=payload.get("command"),
+                    session_mode=payload.get("session_mode"),
                     required_ssh_options=payload.get("required_ssh_options"),
                     env_vars=payload.get("env_vars"),
                     input_echo_prefix=payload.get("input_echo_prefix"),
@@ -1249,11 +1304,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload.get("status") or "running",
                     payload["repo_path"],
                     payload.get("thread_ts"),
+                    payload.get("mcp_conversation_id"),
                 ),
                 "update": lambda item_id, payload: database.update_session(
                     item_id,
                     status=payload.get("status"),
                     thread_ts=payload.get("thread_ts"),
+                    mcp_conversation_id=payload.get("mcp_conversation_id"),
                     last_output=payload.get("last_output"),
                     last_output_offset=payload.get("last_output_offset"),
                     output_buffer=payload.get("output_buffer"),
@@ -1585,38 +1642,75 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             approved=approved,
         )
         if session and session.status == "running":
-            project_vm = database.get_project_vm(session.project_vm_id)
             agent = database.get_agent(session.agent_id)
-            vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
-            if agent and vm:
-                spec = build_ssh_spec(vm, agent.required_ssh_options)
-                send_input(spec, session, body)
+            message = body
+            if agent and agent.response_prefix:
+                message = (
+                    f"{body}\n\n"
+                    f"Please reply with lines starting with '{agent.response_prefix}'."
+                )
+            raw_queue = session.queued_user_messages or "[]"
+            try:
+                queue = json.loads(raw_queue)
+                if not isinstance(queue, list):
+                    queue = []
+            except json.JSONDecodeError:
+                queue = []
+            queue.append(message)
+            database.update_session(
+                session.id,
+                queued_user_messages=json.dumps(queue),
+            )
         return {"ok": True, "comment": _comment_to_dict(database.get_comment(comment_id))}
 
     @app.get("/api/tickets/{ticket_id}/session-status")
     async def api_ticket_session_status(
-        ticket_id: str, user: str = Depends(_require_login)
+        ticket_id: str, request: Request
     ) -> dict[str, Any]:
+        _require_login_or_api(request, "sessions", "read")
         session = database.get_session_by_ticket(ticket_id)
         if not session:
-            return {"running": False, "session_id": None, "location": None}
+            return {"running": False, "session_id": None, "location": None, "repo_path": None}
         if session.status != "running":
-            return {"running": False, "session_id": session.id, "location": None}
+            return {"running": False, "session_id": session.id, "location": None, "repo_path": session.repo_path}
         project_vm = database.get_project_vm(session.project_vm_id)
         agent = database.get_agent(session.agent_id)
         vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
         if not (project_vm and agent and vm):
-            return {"running": False, "session_id": session.id, "location": None}
+            return {
+                "running": False,
+                "session_id": session.id,
+                "location": None,
+                "repo_path": session.repo_path,
+            }
+        if agent.session_mode == "mcp":
+            return {
+                "running": True,
+                "session_id": session.id,
+                "location": vm.name,
+                "repo_path": session.repo_path,
+            }
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         if not is_session_running(spec, session.id):
             database.update_session(session.id, status="done")
-            return {"running": False, "session_id": session.id, "location": None}
-        return {"running": True, "session_id": session.id, "location": vm.name}
+            return {
+                "running": False,
+                "session_id": session.id,
+                "location": None,
+                "repo_path": session.repo_path,
+            }
+        return {
+            "running": True,
+            "session_id": session.id,
+            "location": vm.name,
+            "repo_path": session.repo_path,
+        }
 
     @app.post("/api/tickets/{ticket_id}/start-session")
     async def api_ticket_start_session(
-        ticket_id: str, user: str = Depends(_require_login)
+        ticket_id: str, request: Request
     ) -> dict[str, Any]:
+        user, _token_record = _require_login_or_api(request, "sessions", "create")
         ticket = database.get_ticket(ticket_id)
         if not ticket:
             raise HTTPException(status_code=404, detail="Ticket not found")
@@ -1639,6 +1733,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 ]
             )
             _ensure_agent_response(agent_id, approval_pattern, "1")
+            command_pattern = "\n".join(
+                [
+                    r"run this command",
+                    r"yes",
+                    r"forever",
+                ]
+            )
+            _ensure_agent_response(agent_id, command_pattern, "1")
         if source and ticket.project_id != source.project_id:
             database.update_ticket(ticket_id, project_id=source.project_id)
             ticket = database.get_ticket(ticket_id) or ticket
@@ -1651,20 +1753,32 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not vm:
             raise HTTPException(status_code=400, detail="VM target missing")
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
-        base_spec = build_ssh_spec_with_options(vm, base_options)
-        session_spec = build_ssh_spec(vm, agent.required_ssh_options)
-        repo_path = ensure_repo(base_spec, project_vm)
-        if not repo_path:
-            raise HTTPException(status_code=400, detail="Repository not configured")
-        if issue_number is not None:
-            branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
-        else:
-            branch_name = prepare_ticket_branch(base_spec, repo_path, ticket_id)
         if issue_number is not None:
             session_id = f"{project.slug}-{agent.slug}-issue-{issue_number}-{int(time.time())}"
         else:
             short_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")[:10]
             session_id = f"{project.slug}-{agent.slug}-ticket-{short_id}-{int(time.time())}"
+        base_spec = build_ssh_spec_with_options(vm, base_options)
+        session_spec = build_ssh_spec(vm, agent.required_ssh_options)
+        repo_resource, resource_error = database.acquire_repo_resource(
+            project=project,
+            project_vm=project_vm,
+            session_id=session_id,
+            agent_id=agent.id,
+        )
+        if not repo_resource:
+            raise HTTPException(status_code=400, detail=resource_error or "Repo resource unavailable")
+        try:
+            repo_path = ensure_repo(base_spec, project_vm, repo_path=repo_resource.path)
+            if not repo_path:
+                raise HTTPException(status_code=400, detail="Repository not configured")
+            if issue_number is not None:
+                branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
+            else:
+                branch_name = prepare_ticket_branch(base_spec, repo_path, ticket_id)
+        except Exception as exc:
+            database.release_repo_resource_for_session(session_id)
+            raise
         thread_ts = None
         if project.slack_channel_id:
             try:
@@ -1689,7 +1803,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             repo_path=repo_path,
             thread_ts=thread_ts,
         )
-        start_session(session_spec, session_id, agent, repo_path)
+        if agent.session_mode != "mcp":
+            start_session(session_spec, session_id, agent, repo_path)
         if issue_number is not None and source:
             token_record = database.get_github_token(source.token_id) if source.token_id else None
             comments: list[dict[str, Any]] = []
@@ -1709,6 +1824,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 comments=comments,
                 internal_notes=ticket.internal_notes,
                 branch_name=branch_name,
+                repo_path=repo_path,
+                project_name=project.name,
+                project_slug=project.slug,
+                prompt_template=project.prompt_template,
             )
         else:
             prompt = _ticket_prompt(
@@ -1718,16 +1837,38 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 internal_notes=ticket.internal_notes,
                 repo_path=repo_path,
                 branch_name=branch_name,
+                project_name=project.name,
+                project_slug=project.slug,
+                prompt_template=project.prompt_template,
             )
         session = database.get_session(session_id)
         if session:
             database.update_session(session_id, prompt_pending=prompt)
-        return {"ok": True, "session_id": session_id, "location": vm.name}
+            database.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=ticket_id,
+                session_id=session_id,
+                project_id=project.id,
+                agent_id=agent.id,
+                author=user or "api",
+                source_id=source_id,
+                issue_number=issue_number,
+                body=prompt,
+                public=False,
+                approved=True,
+            )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "location": vm.name,
+            "repo_path": repo_path,
+        }
 
     @app.post("/api/sessions/{session_id}/stop")
     async def api_session_stop(
-        session_id: str, request: Request, user: str = Depends(_require_login)
+        session_id: str, request: Request
     ) -> dict[str, Any]:
+        _require_login_or_api(request, "sessions", "update")
         session = database.get_session(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -1738,10 +1879,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
         if not (project_vm and agent and vm):
             raise HTTPException(status_code=400, detail="Session environment missing")
+        if agent.session_mode == "mcp":
+            close_mcp_process(session.id)
+            database.update_session(session.id, status="done")
+            database.release_repo_resource_for_session(session.id)
+            return {"ok": True, "message": "Session stopped"}
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         stop_session(spec, session.id, count=2)
         if not is_session_running(spec, session.id):
             database.update_session(session.id, status="done")
+            database.release_repo_resource_for_session(session.id)
         return {"ok": True, "message": "Stop signal sent"}
 
     @app.websocket("/ws/tickets/{ticket_id}")
@@ -1861,6 +2008,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slug = slug_raw or f"proj-{_slugify(name)}"
         channel_name = slug
         channel_id = None
+        prompt_template = str(form.get("prompt_template", "")).strip() or None
+        max_repo_raw = str(form.get("max_repo_resources", "")).strip()
+        try:
+            max_repo_resources = int(max_repo_raw) if max_repo_raw else 3
+        except ValueError:
+            max_repo_resources = 3
         channel_id_raw = str(form.get("slack_channel_id", "")).strip()
         if channel_id_raw:
             channel_id = channel_id_raw
@@ -1912,7 +2065,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 text="Channel created. Please /join to receive updates.",
             )
         project_id = str(uuid.uuid4())
-        database.insert_project(project_id, name, slug, channel_id)
+        database.insert_project(project_id, name, slug, channel_id, prompt_template, max_repo_resources)
         _update_slack_channel_filter(database)
         return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
 
@@ -1929,6 +2082,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "active_nav": "projects",
                 "growl_message": None,
                 "project": project,
+                "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
             },
         )
 
@@ -1941,9 +2095,22 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         name = str(form.get("name", "")).strip()
         slug = str(form.get("slug", "")).strip()
         channel_id = str(form.get("slack_channel_id", "")).strip() or None
+        prompt_template = str(form.get("prompt_template", "")).strip() or None
+        max_repo_raw = str(form.get("max_repo_resources", "")).strip()
+        try:
+            max_repo_resources = int(max_repo_raw) if max_repo_raw else project.max_repo_resources
+        except ValueError:
+            max_repo_resources = project.max_repo_resources
         if not name or not slug:
             raise HTTPException(status_code=400, detail="Missing name or slug")
-        database.update_project(project_id, name=name, slug=slug, slack_channel_id=channel_id)
+        database.update_project(
+            project_id,
+            name=name,
+            slug=slug,
+            slack_channel_id=channel_id,
+            prompt_template=prompt_template,
+            max_repo_resources=max_repo_resources,
+        )
         _update_slack_channel_filter(database)
         return RedirectResponse("/ui/projects?saved=project_updated", status_code=303)
 
@@ -2060,7 +2227,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         source.repo,
                         issue_number,
                     )
-        comment_rows = database.list_comments(ticket_id=ticket_id)
+        comment_rows = list(reversed(database.list_comments(ticket_id=ticket_id)))
         comments = [
             {
                 **_comment_to_dict(row),
@@ -2068,7 +2235,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             }
             for row in comment_rows
         ]
-        last_comment_ts = comment_rows[0].created_at if comment_rows else None
+        last_comment_ts = comment_rows[-1].created_at if comment_rows else None
         return _render_template(
             request,
             "ticket_edit.html",
@@ -2094,6 +2261,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "github_comments_fetched_at": ticket.github_comments_fetched_at,
                 "session_running": session_running,
                 "session_id": session.id if session else None,
+                "session_repo_path": session.repo_path if session else None,
                 "source_record": source_record,
             },
         )
@@ -2207,6 +2375,70 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.delete_comment(comment_id)
         return RedirectResponse("/ui/comments?saved=comment_deleted", status_code=303)
 
+    @app.get("/ui/repo-resources")
+    def repo_resources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        resources = database.list_repo_resources()
+        project_lookup = {row.id: row.name for row in database.list_projects()}
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "repo_resources.html",
+            {
+                "title": "Repo Resources",
+                "active_nav": "repo_resources",
+                "growl_message": growl_message,
+                "repo_resources": resources,
+                "project_lookup": project_lookup,
+            },
+        )
+
+    @app.get("/ui/repo-resources/{resource_id}/edit")
+    def repo_resource_edit_ui(resource_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        resource = database.get_repo_resource(resource_id)
+        if not resource:
+            raise HTTPException(status_code=404, detail="Repo resource not found")
+        projects = database.list_projects()
+        mappings = database.list_project_vms()
+        project_lookup = {row.id: row.name for row in projects}
+        mapping_lookup = {
+            row.id: f"{project_lookup.get(row.project_id, row.project_id)} → {row.vm_target_id}"
+            for row in mappings
+        }
+        return _render_template(
+            request,
+            "repo_resource_edit.html",
+            {
+                "title": "Repo Resource",
+                "active_nav": "repo_resources",
+                "growl_message": _growl_message(request.query_params.get("saved")),
+                "resource": resource,
+                "project_lookup": project_lookup,
+                "mapping_lookup": mapping_lookup,
+            },
+        )
+
+    @app.post("/repo-resources/{resource_id}")
+    async def repo_resource_update(resource_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        status = str(form.get("status", "")).strip() or None
+        session_id = str(form.get("session_id", "")).strip() or None
+        agent_id = str(form.get("agent_id", "")).strip() or None
+        database.update_repo_resource(
+            resource_id,
+            status=status,
+            session_id=session_id,
+            agent_id=agent_id,
+            last_used_at=utc_now(),
+        )
+        return RedirectResponse(
+            f"/ui/repo-resources/{resource_id}/edit?saved=repo_resource_updated", status_code=303
+        )
+
+    @app.post("/repo-resources/{resource_id}/delete")
+    async def repo_resource_delete(resource_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_repo_resource(resource_id)
+        return RedirectResponse("/ui/repo-resources?saved=repo_resource_deleted", status_code=303)
+
     @app.post("/vms")
     async def create_vm(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
@@ -2261,6 +2493,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         name = str(form.get("name", "")).strip()
         slug = str(form.get("slug", "")).strip()
         command = str(form.get("command", "")).strip()
+        session_mode = str(form.get("session_mode", "tmux")).strip() or "tmux"
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
         env_vars = str(form.get("env_vars", "")).strip() or None
         input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
@@ -2275,6 +2508,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             name,
             slug,
             command,
+            session_mode,
             ssh_options,
             env_vars,
             input_echo_prefix,
@@ -2306,6 +2540,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         name = str(form.get("name", "")).strip()
         slug = str(form.get("slug", "")).strip()
         command = str(form.get("command", "")).strip()
+        session_mode = str(form.get("session_mode", "tmux")).strip() or "tmux"
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
         env_vars = str(form.get("env_vars", "")).strip() or None
         input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
@@ -2317,6 +2552,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             name=name,
             slug=slug,
             command=command,
+            session_mode=session_mode,
             required_ssh_options=ssh_options,
             env_vars=env_vars,
             input_echo_prefix=input_echo_prefix,
@@ -2662,6 +2898,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "active_nav": "projects",
                 "growl_message": None,
                 "return_to": return_to,
+                "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
             },
         )
 

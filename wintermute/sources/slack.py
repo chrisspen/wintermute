@@ -116,19 +116,20 @@ class SlackCommandWorkItem(WorkItem):
                 },
             )
             return
-        existing = ctx.db.list_sessions(project_id=project.id, status="running")
-        for session in existing:
-            if session.project_vm_id == project_vm.id:
-                logger.info("Slack start blocked: session already running for project %s", project_slug)
-                await ctx.tools.call(
-                    "slack_post_message",
-                    {
-                        "channel": self.message.channel,
-                        "thread_ts": self.message.ts,
-                        "text": "A session is already running for this project/VM.",
-                    },
-                )
-                return
+        if project_vm.repo_mode == "mirror":
+            existing = ctx.db.list_sessions(project_id=project.id, status="running")
+            for session in existing:
+                if session.project_vm_id == project_vm.id:
+                    logger.info("Slack start blocked: session already running for project %s", project_slug)
+                    await ctx.tools.call(
+                        "slack_post_message",
+                        {
+                            "channel": self.message.channel,
+                            "thread_ts": self.message.ts,
+                            "text": "A session is already running for this project/VM.",
+                        },
+                    )
+                    return
         vm = ctx.db.get_vm_target(project_vm.vm_target_id)
         if not vm:
             logger.info("Slack start failed: VM target missing for project %s", project_slug)
@@ -143,9 +144,27 @@ class SlackCommandWorkItem(WorkItem):
             return
 
         spec = build_ssh_spec(vm, agent.required_ssh_options)
+        session_id = f"{project_slug}-{agent_slug}-{self.message.ts.replace('.', '')}"
+        repo_resource, resource_error = ctx.db.acquire_repo_resource(
+            project=project,
+            project_vm=project_vm,
+            session_id=session_id,
+            agent_id=agent.id,
+        )
+        if not repo_resource:
+            await ctx.tools.call(
+                "slack_post_message",
+                {
+                    "channel": self.message.channel,
+                    "thread_ts": self.message.ts,
+                    "text": resource_error or "Repo resource unavailable.",
+                },
+            )
+            return
         try:
-            repo_path = ensure_repo(spec, project_vm)
+            repo_path = ensure_repo(spec, project_vm, repo_path=repo_resource.path)
         except Exception as exc:
+            ctx.db.release_repo_resource_for_session(session_id)
             logger.info("Slack start failed: repo setup error %s", exc)
             await ctx.tools.call(
                 "slack_post_message",
@@ -157,6 +176,7 @@ class SlackCommandWorkItem(WorkItem):
             )
             return
         if not repo_path:
+            ctx.db.release_repo_resource_for_session(session_id)
             logger.info("Slack start failed: repo not configured for project %s", project_slug)
             await ctx.tools.call(
                 "slack_post_message",
@@ -167,8 +187,6 @@ class SlackCommandWorkItem(WorkItem):
                 },
             )
             return
-
-        session_id = f"{project_slug}-{agent_slug}-{self.message.ts.replace('.', '')}"
         ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,

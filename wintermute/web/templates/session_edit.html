@@ -13,6 +13,7 @@
       <p><strong>Ticket:</strong> {{ session.ticket_id or 'none' }}</p>
       <p><strong>Repo Path:</strong> {{ session.repo_path }}</p>
       <p><strong>Thread TS:</strong> {{ session.thread_ts or 'none' }}</p>
+      <p><strong>MCP Conversation:</strong> {{ session.mcp_conversation_id or 'none' }}</p>
       <p><strong>Created:</strong> {{ session.created_at }}</p>
       <p><strong>Updated:</strong> {{ session.updated_at }}</p>
       <form method="post" action="/sessions/{{ session.id }}/edit">

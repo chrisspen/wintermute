@@ -13,6 +13,11 @@
         <input type="text" name="slug" placeholder="proj-name" />
         <label>Slack Channel ID (optional)</label>
         <input type="text" name="slack_channel_id" placeholder="C0123456789" />
+        <label>Max Repo Resources</label>
+        <input type="number" name="max_repo_resources" min="1" value="3" />
+        <label>Prompt Template (optional)</label>
+        <textarea name="prompt_template" rows="10">{{ default_prompt_template }}</textarea>
+        <p class="muted">Use placeholders like {project_name}, {repo_path}, {branch_name}, {issue_number}, {title}, {description}, {comments}, {internal_notes}.</p>
         <button type="submit">Create Project</button>
       </form>
     </div>

@@ -1,5 +1,5 @@
-Wintermute (Foreman)
-===================
+Wintermute
+==========
 
 Local, persistent work supervisor with deterministic scheduling, preemption, and an LLM executor
 for next-action decisions.
@@ -120,6 +120,10 @@ Projects, mappings, and sessions
 - Attach a VM to the project with a repo mode:
   - `mirror`: use an existing host repo path mounted into the VM at the same path.
   - `clone`: git clone from a remote URL into the VM.
+- Clone-mode repos are managed as repo resources:
+  - Each project has a `max_repo_resources` limit (default 3).
+  - Resources are reused when available; mirror mode enforces a single active resource.
+  - Unused clone resources are cleaned daily after 30 days (set `WINTERMUTE_REPO_RESOURCE_TTL_DAYS`).
 - In the project Slack channel, start a session with:
 
 ```
@@ -128,9 +132,18 @@ start <projectslug> <agentslug>
 
 Agent output appears in a Slack thread for that session. Replies in the thread are forwarded to the agent.
 
+Session modes
+-------------
+Agents support two session modes:
+- `tmux`: runs the agent inside tmux on the VM (attachable for live debugging).
+- `mcp`: runs the agent via `codex mcp-server` (stdio MCP transport) and stores the conversation id
+  on the session.
+
+For MCP mode, ensure the Codex CLI on the VM supports `mcp-server`.
+
 tmux sessions
 -------------
-Agent sessions run under tmux. To detach reliably with `Ctrl-a` then `d`, add this to `~/.tmux.conf`:
+tmux-mode sessions run under tmux. To detach reliably with `Ctrl-a` then `d`, add this to `~/.tmux.conf`:
 
 ```
 unbind-key C-b
@@ -146,6 +159,7 @@ Environment
 - `WINTERMUTE_BASE_URL` (OpenWebUI-compatible API base, e.g. `https://openwebui.chrisspen.com/api`)
 - `WINTERMUTE_API_KEY` (API key for the model server)
 - `WINTERMUTE_WEB_SECRET` (session secret for the admin UI)
+- `WINTERMUTE_REPO_RESOURCE_TTL_DAYS` (days before unused clone resources are cleaned, default 30)
 
 Migrations
 ----------

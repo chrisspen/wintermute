@@ -19,6 +19,13 @@
           <input type="text" name="command" value="{{ agent.command }}" required />
         </div>
         <div class="field-group">
+          <label>Session Mode</label>
+          <select name="session_mode">
+            <option value="tmux" {% if agent.session_mode == "tmux" %}selected{% endif %}>tmux</option>
+            <option value="mcp" {% if agent.session_mode == "mcp" %}selected{% endif %}>mcp</option>
+          </select>
+        </div>
+        <div class="field-group">
           <label>Required SSH Options</label>
           <input type="text" name="required_ssh_options" value="{{ agent.required_ssh_options or '' }}" />
         </div>

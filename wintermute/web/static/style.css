@@ -165,6 +165,27 @@
         font-size: 12px;
         line-height: 1;
       }
+      .panel-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .icon-button {
+        border: 1px solid var(--edge);
+        background: #fffaf0;
+        color: var(--accent-dark);
+        border-radius: 999px;
+        width: 32px;
+        height: 32px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .icon-button:hover {
+        background: #f2e7d7;
+      }
       .perm-panel {
         margin-top: 16px;
       }
@@ -449,6 +470,45 @@
         font-size: 13px;
         line-height: 1.4;
         white-space: pre-wrap;
+      }
+      .debug-command {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .debug-command + .debug-command {
+        margin-top: 10px;
+      }
+      .debug-command .code-block {
+        flex: 1;
+      }
+      .debug-code {
+        white-space: nowrap;
+      }
+      .code-block-copy {
+        position: relative;
+        padding-right: 46px;
+      }
+      .copy-icon {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 28px;
+        height: 28px;
+        border: 1px solid rgba(246, 239, 230, 0.25);
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        color: #f6efe6;
+      }
+      .copy-icon i {
+        font-size: 14px;
+      }
+      .copy-icon:hover {
+        background: rgba(0, 0, 0, 0.35);
       }
       .perm-table th {
         font-size: 12px;

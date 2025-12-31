@@ -60,7 +60,7 @@ def _build_messages(state: dict[str, Any], observation: dict[str, Any], tool_sch
         {
             "role": "system",
             "content": (
-                "You are the Foreman executor. Respond with a single JSON object for the next action. "
+                "You are the Wintermute executor. Respond with a single JSON object for the next action. "
                 "Allowed types: yield, tool, update, done, escalate. No extra text."
             ),
         },

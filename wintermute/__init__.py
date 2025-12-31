@@ -1,4 +1,4 @@
-"""Foreman core package."""
+"""Wintermute core package."""
 
 __all__ = [
     "__version__",

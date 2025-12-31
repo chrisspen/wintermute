@@ -7,11 +7,22 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 import logging
 import re
+import json
+import os
 
 import uuid
 
 from wintermute.db import Database, AgentSessionRecord, utc_now
-from wintermute.runner import build_ssh_spec, send_input, is_session_running, read_output
+from wintermute.mcp_client import close_mcp_process, poll_codex_mcp, run_codex_mcp
+from wintermute.runner import (
+    build_ssh_spec,
+    build_ssh_spec_with_options,
+    is_session_running,
+    parse_ssh_options,
+    read_output,
+    send_input,
+    strip_port_forwards,
+)
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 
@@ -27,17 +38,38 @@ class SessionWorkItem(WorkItem):
         session = ctx.db.get_session(self.session_id)
         if not session:
             return
-        if session.status != "running":
-            return
         project = ctx.db.get_project(session.project_id)
         project_vm = ctx.db.get_project_vm(session.project_vm_id)
         agent = ctx.db.get_agent(session.agent_id)
         vm = ctx.db.get_vm_target(project_vm.vm_target_id) if project_vm else None
         if not (project and project_vm and agent and vm):
             return
+        if agent.session_mode == "mcp":
+            await _run_mcp_session(ctx, session, project, agent, project_vm, vm)
+            return
+        if session.status != "running":
+            ctx.db.release_repo_resource_for_session(session.id)
+            if session.output_buffer:
+                cleaned_buffer = _strip_echo_lines(session.output_buffer, agent.input_echo_prefix)
+                await _emit_output(ctx, session, project, agent, cleaned_buffer, force_comment=True)
+                ctx.db.update_session(
+                    session.id,
+                    output_buffer="",
+                    output_buffer_updated_at=utc_now(),
+                )
+            return
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         if not is_session_running(spec, session.id):
+            if session.output_buffer:
+                cleaned_buffer = _strip_echo_lines(session.output_buffer, agent.input_echo_prefix)
+                await _emit_output(ctx, session, project, agent, cleaned_buffer, force_comment=True)
+                ctx.db.update_session(
+                    session.id,
+                    output_buffer="",
+                    output_buffer_updated_at=utc_now(),
+                )
             ctx.db.update_session(session.id, status="done")
+            ctx.db.release_repo_resource_for_session(session.id)
             if project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
                 await ctx.tools.call(
                     "slack_post_message",
@@ -53,28 +85,200 @@ class SessionWorkItem(WorkItem):
         buffer_updated_at = session.output_buffer_updated_at
         if output:
             logger.info("Session %s produced %d bytes", session.id, len(output))
+            combined = buffer_text + output
             ctx.db.update_session(
                 session.id,
                 last_output=output,
                 last_output_offset=new_offset,
-                output_buffer=buffer_text + output,
+                output_buffer=combined,
                 output_buffer_updated_at=utc_now(),
                 last_output_at=utc_now(),
             )
-            await _maybe_send_prompt(ctx, session, spec, buffer_text + output)
+            if session.awaiting_response and len(combined) >= 4000:
+                response_window = _slice_response_window(session, combined)
+                cleaned_buffer = _strip_echo_lines(response_window, agent.input_echo_prefix)
+                stored = await _emit_output(
+                    ctx,
+                    session,
+                    project,
+                    agent,
+                    cleaned_buffer,
+                    force_comment=True,
+                )
+                await _apply_agent_responses(
+                    ctx,
+                    session,
+                    cleaned_buffer,
+                    sender=lambda text: send_input(spec, session, text),
+                )
+                await _handle_session_markers(ctx, session, cleaned_buffer)
+                if stored:
+                    ctx.db.update_session(
+                        session.id,
+                        awaiting_response=0,
+                        last_user_message="",
+                        awaiting_response_offset=0,
+                    )
+                ctx.db.update_session(
+                    session.id,
+                    output_buffer="",
+                    output_buffer_updated_at=utc_now(),
+                )
+            else:
+                await _maybe_send_prompt(ctx, session, spec, combined)
             return
         if buffer_text and _should_flush_buffer(buffer_updated_at, seconds=4):
-            cleaned_buffer = _strip_echo_lines(buffer_text, agent.input_echo_prefix)
-            await _emit_output(ctx, session, project, agent, cleaned_buffer)
-            await _apply_agent_responses(ctx, session, spec, cleaned_buffer)
+            response_window = _slice_response_window(session, buffer_text)
+            cleaned_buffer = _strip_echo_lines(response_window, agent.input_echo_prefix)
+            stored = await _emit_output(
+                ctx,
+                session,
+                project,
+                agent,
+                cleaned_buffer,
+                force_comment=bool(session.awaiting_response),
+            )
+            await _apply_agent_responses(
+                ctx,
+                session,
+                cleaned_buffer,
+                sender=lambda text: send_input(spec, session, text),
+            )
             await _handle_session_markers(ctx, session, cleaned_buffer)
+            if session.awaiting_response and stored:
+                ctx.db.update_session(
+                    session.id,
+                    awaiting_response=0,
+                    last_user_message="",
+                    awaiting_response_offset=0,
+                )
             ctx.db.update_session(
                 session.id,
                 output_buffer="",
                 output_buffer_updated_at=utc_now(),
             )
         await _maybe_send_prompt(ctx, session, spec, buffer_text)
+        await _maybe_send_queued_input(ctx, session, agent, spec)
         return
+
+
+async def _run_mcp_session(
+    ctx: WorkItemContext,
+    session: AgentSessionRecord,
+    project: Any,
+    agent: Any,
+    project_vm: Any,
+    vm: Any,
+) -> None:
+    logger = logging.getLogger(__name__)
+    keepalive_seconds = int(os.environ.get("WINTERMUTE_MCP_KEEPALIVE_SECONDS", "600"))
+    if session.status != "running":
+        close_mcp_process(session.id)
+        ctx.db.release_repo_resource_for_session(session.id)
+        return
+    base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
+    spec = build_ssh_spec_with_options(vm, base_options)
+    conversation_id = session.mcp_conversation_id
+
+    def _send_prompt(prompt: str) -> Any:
+        nonlocal conversation_id
+        result = run_codex_mcp(
+            spec,
+            agent,
+            session_id=session.id,
+            prompt=prompt,
+            cwd=session.repo_path,
+            conversation_id=conversation_id,
+        )
+        if result.conversation_id and result.conversation_id != conversation_id:
+            conversation_id = result.conversation_id
+            ctx.db.update_session(session.id, mcp_conversation_id=conversation_id)
+        return result
+
+    if session.prompt_pending:
+        prompt = session.prompt_pending.strip()
+        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
+        if prompt:
+            logger.info("MCP prompt queued for session %s", session.id)
+            result = _send_prompt(prompt)
+            if result.error:
+                logger.warning("MCP prompt error for session %s: %s", session.id, result.error)
+            if result.response_text:
+                logger.info("MCP prompt response received for session %s", session.id)
+                await _emit_output(ctx, session, project, agent, result.response_text, force_comment=True)
+                await _handle_session_markers(ctx, session, result.response_text)
+                await _apply_agent_responses(
+                    ctx,
+                    session,
+                    result.response_text,
+                    sender=lambda text: _send_prompt(text),
+                )
+                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+            else:
+                logger.info("MCP prompt returned no response for session %s", session.id)
+                ctx.db.update_session(session.id, awaiting_response=1)
+
+    raw_queue = session.queued_user_messages or "[]"
+    try:
+        queue = json.loads(raw_queue)
+        if not isinstance(queue, list):
+            queue = []
+    except json.JSONDecodeError:
+        queue = []
+    if not queue:
+        if session.awaiting_response:
+            poll_result = poll_codex_mcp(session.id, timeout_seconds=5)
+            if poll_result.error:
+                logger.warning("MCP poll error for session %s: %s", session.id, poll_result.error)
+            if poll_result.response_text:
+                logger.info("MCP poll response received for session %s", session.id)
+                await _emit_output(ctx, session, project, agent, poll_result.response_text, force_comment=True)
+                await _handle_session_markers(ctx, session, poll_result.response_text)
+                await _apply_agent_responses(
+                    ctx,
+                    session,
+                    poll_result.response_text,
+                    sender=lambda text: _send_prompt(text),
+                )
+                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+        else:
+            last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
+            if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
+                logger.info("MCP keepalive for session %s", session.id)
+                keepalive_text = (
+                    "[keepalive] Reply with a single '.' and nothing else."
+                )
+                keepalive_result = _send_prompt(keepalive_text)
+                if keepalive_result.error or not keepalive_result.response_text:
+                    logger.warning("MCP keepalive failed for session %s", session.id)
+                    close_mcp_process(session.id)
+                    ctx.db.update_session(session.id, status="done", awaiting_response=0)
+                    ctx.db.release_repo_resource_for_session(session.id)
+                else:
+                    ctx.db.update_session(session.id, last_output_at=utc_now())
+        return
+    message = str(queue.pop(0))
+    ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
+    if not message.strip():
+        return
+    logger.info("MCP reply queued for session %s", session.id)
+    result = _send_prompt(message)
+    if result.error:
+        logger.warning("MCP reply error for session %s: %s", session.id, result.error)
+    if result.response_text:
+        logger.info("MCP reply response received for session %s", session.id)
+        await _emit_output(ctx, session, project, agent, result.response_text, force_comment=True)
+        await _handle_session_markers(ctx, session, result.response_text)
+        await _apply_agent_responses(
+            ctx,
+            session,
+            result.response_text,
+            sender=lambda text: _send_prompt(text),
+        )
+        ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+    else:
+        logger.info("MCP reply returned no response for session %s", session.id)
+        ctx.db.update_session(session.id, awaiting_response=1)
 
 
 async def _handle_session_markers(
@@ -185,7 +389,10 @@ def _store_output_comments(
 
 
 async def _apply_agent_responses(
-    ctx: WorkItemContext, session: AgentSessionRecord, spec: Any, output: str
+    ctx: WorkItemContext,
+    session: AgentSessionRecord,
+    output: str,
+    sender: Optional[callable] = None,
 ) -> None:
     responses = ctx.db.list_agent_responses(agent_id=session.agent_id)
     if not responses:
@@ -211,22 +418,8 @@ async def _apply_agent_responses(
             text = response.response.strip()
             if not text:
                 continue
-            agent = ctx.db.get_agent(session.agent_id)
-            author = agent.name if agent else None
-            ctx.db.insert_comment(
-                comment_id=str(uuid.uuid4()),
-                ticket_id=session.ticket_id,
-                session_id=session.id,
-                project_id=session.project_id,
-                agent_id=session.agent_id,
-                author=author,
-                source_id=_parse_github_source_id(session.ticket_id),
-                issue_number=_parse_github_issue_number(session.ticket_id),
-                body=f"[auto-response] {text}",
-                public=False,
-                approved=False,
-            )
-            send_input(spec, session, text)
+            if sender:
+                sender(text)
 
 
 
@@ -253,11 +446,12 @@ def _extract_response_blocks(text: str, prefix: Optional[str]) -> list[str]:
         plain = _strip_control_sequences(raw).lstrip()
         if raw.endswith("\n") and not plain.endswith("\n"):
             plain = f"{plain}\n"
-        if plain.startswith(stripped_prefix):
+        match = plain.find(stripped_prefix) if stripped_prefix else -1
+        if match != -1:
             if current:
                 blocks.append("".join(current).strip())
                 current = []
-            content = plain[len(stripped_prefix):].lstrip()
+            content = plain[match + len(stripped_prefix):].lstrip()
             current.append(content)
             continue
         if current:
@@ -272,9 +466,12 @@ def _strip_control_sequences(text: str) -> str:
     cleaned = re.sub(r"[\x00-\x08\x0b-\x1f\x7f]", "", cleaned)
     cleaned = re.sub(r"\x1b\][^\x07]*(?:\x07|\x1b\\)", "", cleaned)
     cleaned = re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", cleaned)
-    cleaned = re.sub(r"\[[0-9;?<>]*[A-Za-z]", "", cleaned)
-    cleaned = re.sub(r"\[[0-9;?<>]*[\\\"]", "", cleaned)
-    cleaned = re.sub(r"\][0-9;?<>]*[\\\"]", "", cleaned)
+    cleaned = re.sub(r"\[[0-9][0-9;?<>]*[A-Za-z]", "", cleaned)
+    cleaned = re.sub(r"\[[0-9][0-9;?<>]*[\\\"]", "", cleaned)
+    cleaned = re.sub(r"\][0-9][0-9;?<>]*[\\\"]", "", cleaned)
+    cleaned = re.sub(r"\[(?:;)*[A-Za-z]", "", cleaned)
+    cleaned = re.sub(r"\[(?:;)*[\\\"]", "", cleaned)
+    cleaned = re.sub(r"\](?:;)*[\\\"]", "", cleaned)
     return cleaned
 
 
@@ -288,6 +485,21 @@ def _strip_echo_lines(text: str, prefix: Optional[str]) -> str:
             continue
         kept.append(line)
     return "".join(kept)
+
+
+def _slice_response_window(session: AgentSessionRecord, text: str) -> str:
+    if not session.awaiting_response_offset:
+        return text
+    encoded = text.encode("utf-8", errors="ignore")
+    buffer_start = session.last_output_offset - len(encoded)
+    if buffer_start < 0:
+        buffer_start = 0
+    if session.awaiting_response_offset <= buffer_start:
+        return text
+    skip = session.awaiting_response_offset - buffer_start
+    if skip >= len(encoded):
+        return ""
+    return encoded[skip:].decode("utf-8", errors="ignore")
 
 
 def _should_flush_buffer(updated_at: Optional[str], seconds: int) -> bool:
@@ -307,13 +519,21 @@ async def _emit_output(
     project: Any,
     agent: Any,
     text: str,
-) -> None:
+    *,
+    force_comment: bool = False,
+) -> bool:
     prefix = f"[{agent.slug}] "
     cleaned = _strip_echo_lines(text, agent.input_echo_prefix)
     blocks = _extract_response_blocks(cleaned, agent.response_prefix)
     comment_chunks: list[str] = []
     for block in blocks:
         comment_chunks.extend(_chunk_text(block, 3000))
+    if force_comment and not comment_chunks:
+        sanitized = _strip_control_sequences(cleaned)
+        if session.last_user_message:
+            sanitized = sanitized.replace(session.last_user_message, "").strip()
+        if sanitized and len(sanitized) >= 5 and re.search(r"[A-Za-z]", sanitized):
+            comment_chunks = _chunk_text(sanitized, 3000)
     if project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
         for chunk in _chunk_text(cleaned, 3000):
             await ctx.tools.call(
@@ -325,6 +545,7 @@ async def _emit_output(
                 },
             )
     _store_output_comments(ctx, session, agent, comment_chunks)
+    return bool(comment_chunks)
 
 
 async def _maybe_send_prompt(
@@ -349,6 +570,38 @@ async def _maybe_send_prompt(
         session.id,
         prompt_pending="",
         prompt_sent_at=utc_now(),
+    )
+
+
+async def _maybe_send_queued_input(
+    ctx: WorkItemContext,
+    session: AgentSessionRecord,
+    agent: Any,
+    spec: Any,
+) -> None:
+    if session.awaiting_response:
+        return
+    if session.prompt_pending:
+        return
+    raw_queue = session.queued_user_messages or "[]"
+    try:
+        queue = json.loads(raw_queue)
+        if not isinstance(queue, list):
+            queue = []
+    except json.JSONDecodeError:
+        queue = []
+    if not queue:
+        return
+    message = str(queue.pop(0))
+    if agent and agent.response_prefix and agent.response_prefix not in message:
+        message = f"{message}\n\nPlease reply with lines starting with '{agent.response_prefix}'."
+    send_input(spec, session, message)
+    ctx.db.update_session(
+        session.id,
+        queued_user_messages=json.dumps(queue),
+        awaiting_response=1,
+        last_user_message=message,
+        awaiting_response_offset=session.last_output_offset,
     )
 
 

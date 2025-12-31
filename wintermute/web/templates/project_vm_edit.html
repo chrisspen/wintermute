@@ -38,6 +38,7 @@
         <div class="field-group">
           <label>Repo Path</label>
           <input type="text" name="repo_path" value="{{ mapping.repo_path or '' }}" />
+          <p class="muted">Clone mode uses per-session paths like {repo_path}-{session_id}.</p>
         </div>
         <div class="field-group">
           <label>Repo URL (clone mode)</label>

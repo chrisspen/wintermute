@@ -13,6 +13,11 @@
         <input type="text" name="slug" required />
         <label>Command</label>
         <input type="text" name="command" required />
+        <label>Session Mode</label>
+        <select name="session_mode">
+          <option value="tmux" selected>tmux</option>
+          <option value="mcp">mcp</option>
+        </select>
         <label>Required SSH Options</label>
         <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
         <label>Environment Variables</label>

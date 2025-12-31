@@ -160,23 +160,42 @@ def _stdout_text(value: object) -> str:
     return str(value)
 
 
-def ensure_repo(spec: SSHSpec, project_vm: ProjectVMRecord) -> Optional[str]:
+def _session_repo_path(project_vm: ProjectVMRecord, session_id: Optional[str]) -> Optional[str]:
+    if not project_vm.repo_path:
+        return None
+    if project_vm.repo_mode != "clone":
+        return project_vm.repo_path
+    if not session_id:
+        return project_vm.repo_path
+    safe_suffix = re.sub(r"[^a-zA-Z0-9]+", "-", session_id.strip().lower()).strip("-")
+    if not safe_suffix:
+        return project_vm.repo_path
+    return f"{project_vm.repo_path}-{safe_suffix}"
+
+
+def ensure_repo(
+    spec: SSHSpec,
+    project_vm: ProjectVMRecord,
+    session_id: Optional[str] = None,
+    repo_path: Optional[str] = None,
+) -> Optional[str]:
     logger = logging.getLogger(__name__)
+    repo_path = repo_path or _session_repo_path(project_vm, session_id)
     if project_vm.repo_mode == "mirror":
-        if not project_vm.repo_path:
+        if not repo_path:
             return None
-        check_cmd = f"test -d {shlex.quote(project_vm.repo_path)}"
+        check_cmd = f"test -d {shlex.quote(repo_path)}"
         result = _run_ssh(spec, ["bash", "-lc", check_cmd], timeout=20)
         if result.returncode != 0:
-            raise RuntimeError(f"Mirror path not found on VM: {project_vm.repo_path}")
-        return project_vm.repo_path
+            raise RuntimeError(f"Mirror path not found on VM: {repo_path}")
+        return repo_path
     if project_vm.repo_mode == "clone":
-        if not project_vm.repo_path or not project_vm.repo_url:
+        if not repo_path or not project_vm.repo_url:
             return None
-        parent_dir = os.path.dirname(project_vm.repo_path)
+        parent_dir = os.path.dirname(repo_path)
         logger.info(
             "Ensuring repo clone path=%s parent=%s url=%s",
-            project_vm.repo_path,
+            repo_path,
             parent_dir,
             project_vm.repo_url,
         )
@@ -193,10 +212,18 @@ def ensure_repo(spec: SSHSpec, project_vm: ProjectVMRecord) -> Optional[str]:
             if stdout:
                 detail = f"{detail} stdout={stdout}"
             raise RuntimeError(
-                f"{detail} (code={result.returncode} repo_path={project_vm.repo_path} parent={parent_dir} cmd={mkdir_cmd})"
+                f"{detail} (code={result.returncode} repo_path={repo_path} parent={parent_dir} cmd={mkdir_cmd})"
             )
-        clone_cmd = "if [ ! -d {path} ]; then git clone {url} {path}; fi".format(
-            path=shlex.quote(project_vm.repo_path),
+        clone_cmd = (
+            "if [ -d {path}/.git ]; then "
+            "  cd {path}; git fetch origin --prune; "
+            "elif [ -d {path} ]; then "
+            "  echo 'Repo path exists but is not a git repo' >&2; exit 2; "
+            "else "
+            "  git clone {url} {path}; "
+            "fi"
+        ).format(
+            path=shlex.quote(repo_path),
             url=shlex.quote(project_vm.repo_url),
         )
         logger.info("Repo clone command: %s", clone_cmd)
@@ -209,10 +236,27 @@ def ensure_repo(spec: SSHSpec, project_vm: ProjectVMRecord) -> Optional[str]:
             if stdout:
                 detail = f"{detail} stdout={stdout}"
             raise RuntimeError(
-                f"{detail} (code={result.returncode} repo_path={project_vm.repo_path} parent={parent_dir} cmd={clone_cmd})"
+                f"{detail} (code={result.returncode} repo_path={repo_path} parent={parent_dir} cmd={clone_cmd})"
             )
-        return project_vm.repo_path
+        return repo_path
     return None
+
+
+def delete_repo_path(spec: SSHSpec, repo_path: str) -> None:
+    if not repo_path or repo_path.strip() in {"/", "."}:
+        raise ValueError("Refusing to delete unsafe repo path")
+    cleaned = repo_path.strip()
+    if len(cleaned) < 4:
+        raise ValueError("Refusing to delete short repo path")
+    cmd = f"rm -rf {shlex.quote(cleaned)}"
+    result = _run_ssh_script(spec, f"{cmd}\n", timeout=120)
+    if result.returncode != 0:
+        stderr = _stderr_text(result.stderr).strip()
+        stdout = _stdout_text(result.stdout).strip()
+        detail = stderr or "Repo delete failed"
+        if stdout:
+            detail = f"{detail} stdout={stdout}"
+        raise RuntimeError(detail)
 
 
 def prepare_issue_branch(spec: SSHSpec, repo_path: str, issue_number: int) -> str:
@@ -322,7 +366,8 @@ def send_input(spec: SSHSpec, session: AgentSessionRecord, text: str) -> None:
     cmd = "\n".join(
         [
             f"tmux send-keys -t {shlex.quote(name)} -l {shlex.quote(trimmed)}",
-            f"tmux send-keys -t {shlex.quote(name)} Enter",
+            f"tmux send-keys -t {shlex.quote(name)} C-m",
+            f"tmux send-keys -t {shlex.quote(name)} C-j",
         ]
     )
     logger.info("Sending input to session %s (%d chars)", session.id, len(text))

@@ -12,7 +12,7 @@
       <ul>
         {% for agent in agents %}
         <li>
-          <a href="/ui/agents/{{ agent.id }}/edit">{{ agent.name }}</a> ({{ agent.slug }})
+          <a href="/ui/agents/{{ agent.id }}/edit">{{ agent.name }}</a> ({{ agent.slug }}) - {{ agent.session_mode }}
         </li>
         {% else %}
         <li class="muted">No agents yet</li>

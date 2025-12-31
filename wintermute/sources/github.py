@@ -9,6 +9,7 @@ from typing import Any, Optional
 import aiohttp
 
 from wintermute.db import Database
+from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,
     build_ssh_spec_with_options,
@@ -37,14 +38,22 @@ async def _fetch_issue_comments(
         "User-Agent": "wintermute",
     }
     url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    comments: list[dict[str, Any]] = []
+    page = 1
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params={"per_page": 100}) as response:
-            payload = await response.json()
-            if response.status >= 400:
-                return []
-            if isinstance(payload, list):
-                return payload
-            return []
+        while True:
+            async with session.get(
+                url, headers=headers, params={"per_page": 100, "page": page}
+            ) as response:
+                payload = await response.json()
+                if response.status >= 400:
+                    return []
+                if not isinstance(payload, list):
+                    return comments
+                comments.extend(payload)
+                if len(payload) < 100:
+                    return comments
+                page += 1
 
 
 def _tool_schema(ctx: WorkItemContext) -> list[dict[str, Any]]:
@@ -158,24 +167,15 @@ class GitHubIssueWorkItem(WorkItem):
         if ctx.db.get_session_by_ticket(ticket_id):
             logger.info("Session already exists for ticket %s", ticket_id)
             return
-        running = ctx.db.list_sessions(project_id=project.id, status="running")
-        for session in running:
-            if session.project_vm_id == project_vm.id:
-                logger.info("Project session already running for %s", project.id)
-                raise WorkItemBlocked("Project session already running", delay_seconds=60)
+        if project_vm.repo_mode == "mirror":
+            running = ctx.db.list_sessions(project_id=project.id, status="running")
+            for session in running:
+                if session.project_vm_id == project_vm.id:
+                    logger.info("Project session already running for %s", project.id)
+                    raise WorkItemBlocked("Project session already running", delay_seconds=60)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         base_spec = build_ssh_spec_with_options(vm, base_options)
-        try:
-            repo_path = ensure_repo(base_spec, project_vm)
-        except Exception as exc:
-            message = f"Repo setup failed: {exc}"
-            await self._notify(ctx, project.slack_channel_id, message)
-            raise WorkItemBlocked(message, delay_seconds=60) from exc
-        if not repo_path:
-            message = "Repository not configured for this project VM."
-            await self._notify(ctx, project.slack_channel_id, message)
-            raise WorkItemBlocked(message, delay_seconds=300)
         token_record = ctx.db.get_github_token(source.token_id) if source.token_id else None
         comments: list[dict[str, Any]] = []
         if token_record:
@@ -195,6 +195,35 @@ class GitHubIssueWorkItem(WorkItem):
             f"{title_line}\n{issue_url}\nStarting agent session...",
         )
         session_id = f"{project.slug}-{agent.slug}-issue-{issue_number}"
+        repo_resource, resource_error = ctx.db.acquire_repo_resource(
+            project=project,
+            project_vm=project_vm,
+            session_id=session_id,
+            agent_id=agent.id,
+        )
+        if not repo_resource:
+            message = resource_error or "Repo resource unavailable"
+            await self._notify(ctx, project.slack_channel_id, message)
+            raise WorkItemBlocked(message, delay_seconds=300)
+        try:
+            repo_path = ensure_repo(base_spec, project_vm, repo_path=repo_resource.path)
+        except Exception as exc:
+            ctx.db.release_repo_resource_for_session(session_id)
+            message = f"Repo setup failed: {exc}"
+            await self._notify(ctx, project.slack_channel_id, message)
+            raise WorkItemBlocked(message, delay_seconds=60) from exc
+        if not repo_path:
+            ctx.db.release_repo_resource_for_session(session_id)
+            message = "Repository not configured for this project VM."
+            await self._notify(ctx, project.slack_channel_id, message)
+            raise WorkItemBlocked(message, delay_seconds=300)
+        try:
+            branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
+        except Exception as exc:
+            ctx.db.release_repo_resource_for_session(session_id)
+            message = f"Branch prep failed: {exc}"
+            await self._notify(ctx, project.slack_channel_id, message)
+            raise WorkItemBlocked(message, delay_seconds=60) from exc
         ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,
@@ -206,13 +235,8 @@ class GitHubIssueWorkItem(WorkItem):
             thread_ts=thread_ts,
         )
         logger.info("Started session %s for issue %s", session_id, issue_number)
-        try:
-            branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
-        except Exception as exc:
-            message = f"Branch prep failed: {exc}"
-            await self._notify(ctx, project.slack_channel_id, message)
-            raise WorkItemBlocked(message, delay_seconds=60) from exc
-        start_session(session_spec, session_id, agent, repo_path)
+        if agent.session_mode != "mcp":
+            start_session(session_spec, session_id, agent, repo_path)
         session = ctx.db.get_session(session_id)
         if session:
             internal_notes = None
@@ -225,6 +249,10 @@ class GitHubIssueWorkItem(WorkItem):
                 comments=comments,
                 internal_notes=internal_notes,
                 branch_name=branch_name,
+                repo_path=repo_path,
+                project_name=project.name,
+                project_slug=project.slug,
+                prompt_template=project.prompt_template,
             )
             ctx.db.update_session(session_id, prompt_pending=prompt)
         if thread_ts:
@@ -261,6 +289,10 @@ def _issue_prompt(
     comments: list[dict[str, Any]],
     internal_notes: Optional[str],
     branch_name: str,
+    repo_path: str,
+    project_name: str,
+    project_slug: str,
+    prompt_template: Optional[str],
 ) -> str:
     issue_number = issue.get("issue_number")
     title = issue.get("title") or ""
@@ -276,7 +308,7 @@ def _issue_prompt(
             formatted.append(f"- {author} ({created_at}):\n{text}")
         comments_text = "\n".join(formatted)
     notes_text = internal_notes or ""
-    return (
+    default_prompt = (
         "You are working on a GitHub issue.\n"
         f"Repo: {owner}/{repo}\n"
         f"Issue #{issue_number}: {title}\n"
@@ -296,6 +328,21 @@ def _issue_prompt(
         "Internal notes:\n"
         f"{notes_text or 'No internal notes yet.'}\n"
     )
+    context = {
+        "project_name": project_name,
+        "project_slug": project_slug,
+        "owner": owner,
+        "repo": repo,
+        "repo_path": repo_path,
+        "issue_number": str(issue_number or ""),
+        "title": title,
+        "url": url,
+        "description": body,
+        "comments": comments_text or "",
+        "internal_notes": notes_text or "",
+        "branch_name": branch_name,
+    }
+    return render_prompt_template(prompt_template, default_prompt, context)
 
 
 class GitHubIssuesSource(TaskSource):

@@ -142,6 +142,27 @@
           <button type="button" class="danger" data-confirm data-confirm-message="Delete this ticket? This cannot be undone.">Delete Ticket</button>
         </form>
       </div>
+      <div class="debug-panel">
+        <h4>Debug</h4>
+        <div class="debug-command">
+          <div class="code-block code-block-copy debug-code" id="agent-log-path">
+            <span class="muted">Runtime log</span>
+            <span id="agent-log-text">tail -f .runtime/logs/mcp_{{ session_id or 'SESSION_ID' }}.log</span>
+            <button type="button" class="copy-icon" id="agent-log-copy" title="Copy log command" aria-label="Copy log command">
+              <i class="fa-regular fa-copy" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        <div class="debug-command">
+          <div class="code-block code-block-copy debug-code">
+            <span class="muted">Repo resource</span>
+            <span id="agent-repo-path">{{ session_repo_path or 'none' }}</span>
+            <button type="button" class="copy-icon" id="agent-repo-copy" title="Copy repo path" aria-label="Copy repo path">
+              <i class="fa-regular fa-copy" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="grid section-gap">
@@ -183,7 +204,9 @@
       <div class="panel-title-row">
         <h3>GitHub Comments</h3>
         {% if is_github_ticket %}
-        <button type="button" class="btn-secondary small" id="github-refresh">Refresh</button>
+        <button type="button" class="icon-button" id="github-refresh" title="refresh" aria-label="refresh">
+          <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+        </button>
         {% endif %}
       </div>
       {% if github_comments_fetched_at %}
@@ -218,6 +241,11 @@
     const startBtn = document.getElementById("agent-start");
     const stopBtn = document.getElementById("agent-stop");
     const locationEl = document.getElementById("agent-location");
+    const logPathEl = document.getElementById("agent-log-path");
+    const logTextEl = document.getElementById("agent-log-text");
+    const logCopyBtn = document.getElementById("agent-log-copy");
+    const repoPathEl = document.getElementById("agent-repo-path");
+    const repoCopyBtn = document.getElementById("agent-repo-copy");
     const ticketId = "{{ ticket.id }}";
     const descEditButton = document.getElementById("desc-edit");
     const descView = document.getElementById("desc-view");
@@ -296,7 +324,7 @@
       connect();
     }
 
-    const updateStatus = (running, newSessionId, location) => {
+    const updateStatus = (running, newSessionId, location, repoPath) => {
       sessionId = newSessionId || "";
       if (statusEl) {
         statusEl.textContent = running ? "online" : "offline";
@@ -316,6 +344,13 @@
       if (stopBtn) {
         stopBtn.disabled = !running;
       }
+      if (logTextEl) {
+        const value = sessionId || "SESSION_ID";
+        logTextEl.textContent = `tail -f .runtime/logs/mcp_${value}.log`;
+      }
+      if (repoPathEl) {
+        repoPathEl.textContent = repoPath || "none";
+      }
     };
 
     const refreshStatus = async () => {
@@ -323,7 +358,7 @@
         const response = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/session-status`);
         if (!response.ok) return;
         const payload = await response.json();
-        updateStatus(payload.running, payload.session_id, payload.location);
+        updateStatus(payload.running, payload.session_id, payload.location, payload.repo_path);
       } catch (err) {
         console.warn("Status refresh failed", err);
       }
@@ -364,6 +399,29 @@
       });
     }
 
+    if (logCopyBtn && logTextEl) {
+      logCopyBtn.addEventListener("click", async () => {
+        const text = (logTextEl.textContent || "").trim();
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (err) {
+          window.prompt("Copy log command:", text);
+        }
+      });
+    }
+    if (repoCopyBtn && repoPathEl) {
+      repoCopyBtn.addEventListener("click", async () => {
+        const text = (repoPathEl.textContent || "").trim();
+        if (!text || text === "none") return;
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (err) {
+          window.prompt("Copy repo path:", text);
+        }
+      });
+    }
+
     if (stopBtn) {
       stopBtn.addEventListener("click", async () => {
         stopBtn.disabled = true;
@@ -395,7 +453,7 @@
           return;
         }
         const payload = await response.json();
-        updateStatus(true, payload.session_id, payload.location);
+        updateStatus(true, payload.session_id, payload.location, payload.repo_path);
       });
     }
 

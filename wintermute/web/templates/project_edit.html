@@ -18,6 +18,15 @@
           <label>Slack Channel ID</label>
           <input type="text" name="slack_channel_id" value="{{ project.slack_channel_id or '' }}" />
         </div>
+        <div class="field-group">
+          <label>Max Repo Resources</label>
+          <input type="number" name="max_repo_resources" min="1" value="{{ project.max_repo_resources }}" />
+        </div>
+        <div class="field-group">
+          <label>Prompt Template</label>
+          <textarea name="prompt_template" rows="10">{{ project.prompt_template if project.prompt_template and project.prompt_template | trim else default_prompt_template }}</textarea>
+          <p class="muted">Use placeholders like {project_name}, {repo_path}, {branch_name}, {issue_number}, {title}, {description}, {comments}, {internal_notes}.</p>
+        </div>
         <button type="submit">Save Project</button>
       </form>
       <div class="divider"></div>

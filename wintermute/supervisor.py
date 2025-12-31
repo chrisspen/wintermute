@@ -8,7 +8,7 @@ import os
 import traceback
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Optional
 
 from wintermute import __version__
@@ -27,6 +27,7 @@ from wintermute.sources.slack import (
 from wintermute.sources.sessions import SessionSource
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
+from wintermute.runner import build_ssh_spec, delete_repo_path
 from wintermute.tools.fs import ReadFileTool
 from wintermute.tools.github import (
     GitHubCommentIssueTool,
@@ -73,6 +74,7 @@ class Supervisor:
         self._last_poll: dict[str, float] = {}
         self._tools_version: tuple[str, str] = ("", "")
         self._slack_signature: tuple[Optional[str], Optional[str]] = (None, None)
+        self._last_repo_cleanup: float = 0.0
 
     def status(self) -> SupervisorStatus:
         return SupervisorStatus(
@@ -93,6 +95,7 @@ class Supervisor:
                 self._update_state("polled sources")
                 await self._refresh_queue()
                 self._update_state("refreshed queue")
+                await self._cleanup_repo_resources()
                 if not self._current_work_id:
                     await self._run_next()
                 self._update_state("idle")
@@ -270,6 +273,31 @@ class Supervisor:
             queue_depth=len(self._queue),
         )
 
+    async def _cleanup_repo_resources(self) -> None:
+        now = datetime.now(timezone.utc).timestamp()
+        if self._last_repo_cleanup and now - self._last_repo_cleanup < 86400:
+            return
+        self._last_repo_cleanup = now
+        ttl_days = int(os.environ.get("WINTERMUTE_REPO_RESOURCE_TTL_DAYS", "30"))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=ttl_days)
+        resources = self.db.list_repo_resources_for_cleanup(cutoff.isoformat())
+        if not resources:
+            return
+        for resource in resources:
+            project_vm = self.db.get_project_vm(resource.project_vm_id)
+            vm = self.db.get_vm_target(project_vm.vm_target_id) if project_vm else None
+            if not (project_vm and vm):
+                logger.info("Repo cleanup dropping stale resource %s", resource.id)
+                self.db.delete_repo_resource(resource.id)
+                continue
+            spec = build_ssh_spec(vm, "")
+            try:
+                delete_repo_path(spec, resource.path)
+            except Exception as exc:
+                logger.warning("Repo cleanup failed for %s: %s", resource.path, exc)
+                continue
+            self.db.delete_repo_resource(resource.id)
+
     async def _refresh_runtime(self) -> None:
         version = (
             self.db.get_latest_credential_update(),
@@ -334,7 +362,7 @@ async def main() -> None:
     executor = Executor()
     tools = build_default_tools(db)
     supervisor = Supervisor(db=db, sources=all_sources(), executor=executor, tools=tools)
-    print(f"Foreman supervisor v{__version__} starting...")
+    print(f"Wintermute supervisor v{__version__} starting...")
     print("Supervisor ready. Polling sources and processing tasks.")
     await supervisor.run()
 
