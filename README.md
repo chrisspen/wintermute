@@ -34,13 +34,20 @@ Open `http://127.0.0.1:8000` and complete the initial admin setup.
 
 Relaunchers and restarts
 ------------------------
-Use the relaunchers for long-running sessions so restarts are clean and automatic.
+Use the relauncher run scripts for long-running sessions so restarts are clean and automatic.
 
 Start relaunchers:
 
 ```
-./relauncher_web.sh
-./relauncher_supervisor.sh
+./run_web.sh
+./run_supervisor.sh
+```
+
+For one-off runs without relaunch, use:
+
+```
+./_run_web.sh
+./_run_supervisor.sh
 ```
 
 Stop relaunchers (and running processes):

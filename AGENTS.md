@@ -77,7 +77,8 @@ The web admin console provides:
 - Approved public comments are auto-dispatched to GitHub by the comment dispatch source.
 - API tokens with CRUD permissions and optional env export (`WINTERMUTE_ADMIN_API_TOKEN`).
 - Admin API endpoints can restart web/supervisor (requires Admin update permission).
-- Relaunchers (`relauncher_web.sh`, `relauncher_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
+- Relaunchers (`run_web.sh`, `run_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
+- Direct runners (`_run_web.sh`, `_run_supervisor.sh`) run once without relaunch.
 - Stop scripts (`stop_web.sh`, `stop_supervisor.sh`) request a clean shutdown.
 - PID/status endpoint: `GET /api/admin/pids`.
 - Log tail endpoint: `GET /api/admin/logs?service=web|supervisor&lines=200`.
@@ -107,7 +108,7 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 - `wintermute/mcp_client.py` — MCP stdio client for Codex sessions
 - `tests/` — unit + integration tests with mocked endpoints
 - `alembic/` + `alembic.ini` — SQLAlchemy migrations
-- `setup.sh`, `run_web.sh`, `run_supervisor.sh` — local setup and runners
+- `setup.sh`, `run_web.sh`, `run_supervisor.sh`, `_run_web.sh`, `_run_supervisor.sh` — local setup and runners
 
 ## Development norms
 - Keep the scheduler deterministic and testable: no hidden global state.
@@ -130,7 +131,7 @@ Then run:
 When running local tests as an agent, prefer a per-agent venv at `.<agent>/.venv` (use `./setup.sh --agent-name <agent>` or `./setup.sh --venv-dir .<agent>/.venv`). At runtime, set `WINTERMUTE_AGENT_NAME=<agent>` or `WINTERMUTE_VENV=.<agent>/.venv`.
 Use the agent-specific venv for this environment: `.codex/.venv` (run `./setup.sh --venv-dir .codex/.venv`).
 
-When testing `./run_web.sh` or `./run_supervisor.sh`, they block; run with `PYTHONUNBUFFERED=1` and stop once the “ready” log line appears to avoid waiting on timeouts.
+When testing `./_run_web.sh` or `./_run_supervisor.sh`, they block; run with `PYTHONUNBUFFERED=1` and stop once the “ready” log line appears to avoid waiting on timeouts.
 
 ## tmux note
 To make detach consistent with `Ctrl-a` + `d`, add this to `~/.tmux.conf`:
