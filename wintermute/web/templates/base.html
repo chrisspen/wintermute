@@ -338,5 +338,108 @@
         applyTheme(savedTheme);
       })();
     </script>
+    <script>
+      (function () {
+        var modal = document.querySelector('[data-column-picker]');
+        var openButton = document.querySelector('[data-column-picker-open]');
+        if (!modal || !openButton) {
+          return;
+        }
+        var form = modal.querySelector('[data-column-picker-form]');
+        var availableSelect = modal.querySelector('[data-column-picker-available]');
+        var selectedSelect = modal.querySelector('[data-column-picker-selected]');
+        var addButton = modal.querySelector('[data-column-picker-add]');
+        var removeButton = modal.querySelector('[data-column-picker-remove]');
+        var cancelButtons = modal.querySelectorAll('[data-column-picker-cancel]');
+        var hiddenField = modal.querySelector('[data-column-picker-field]');
+
+        if (!form || !availableSelect || !selectedSelect || !addButton || !removeButton || !hiddenField) {
+          return;
+        }
+
+        function snapshot(selectEl) {
+          return Array.prototype.map.call(selectEl.options, function (option) {
+            return { value: option.value, text: option.text };
+          });
+        }
+
+        function rebuild(selectEl, options) {
+          selectEl.innerHTML = '';
+          options.forEach(function (option) {
+            var node = document.createElement('option');
+            node.value = option.value;
+            node.text = option.text;
+            selectEl.appendChild(node);
+          });
+        }
+
+        function moveSelected(source, target) {
+          var moved = [];
+          Array.prototype.forEach.call(source.selectedOptions, function (option) {
+            moved.push({ value: option.value, text: option.text });
+          });
+          moved.forEach(function (option) {
+            for (var i = source.options.length - 1; i >= 0; i -= 1) {
+              if (source.options[i].value === option.value) {
+                source.remove(i);
+              }
+            }
+            var node = document.createElement('option');
+            node.value = option.value;
+            node.text = option.text;
+            target.appendChild(node);
+          });
+        }
+
+        var initialAvailable = snapshot(availableSelect);
+        var initialSelected = snapshot(selectedSelect);
+
+        function resetPicker() {
+          rebuild(availableSelect, initialAvailable);
+          rebuild(selectedSelect, initialSelected);
+        }
+
+        function setOpen(isOpen) {
+          if (isOpen) {
+            modal.classList.add('open');
+          } else {
+            modal.classList.remove('open');
+          }
+        }
+
+        openButton.addEventListener('click', function () {
+          setOpen(true);
+        });
+
+        addButton.addEventListener('click', function () {
+          moveSelected(availableSelect, selectedSelect);
+        });
+
+        removeButton.addEventListener('click', function () {
+          moveSelected(selectedSelect, availableSelect);
+        });
+
+        cancelButtons.forEach(function (button) {
+          button.addEventListener('click', function () {
+            resetPicker();
+            setOpen(false);
+          });
+        });
+
+        modal.addEventListener('click', function (event) {
+          if (event.target === modal) {
+            resetPicker();
+            setOpen(false);
+          }
+        });
+
+        form.addEventListener('submit', function () {
+          var values = Array.prototype.map.call(selectedSelect.options, function (option) {
+            return option.value;
+          });
+          hiddenField.value = JSON.stringify(values);
+        });
+      })();
+    </script>
   </body>
 </html>

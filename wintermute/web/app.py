@@ -101,6 +101,82 @@ API_PERMISSION_MODELS = [
 ]
 API_PERMISSION_ACTIONS = ["create", "read", "update", "delete"]
 
+LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
+    "tickets": {
+        "default": ["title", "project_id", "status"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "title", "label": "Ticket"},
+            {"key": "project_id", "label": "Project"},
+            {"key": "agent_id", "label": "Agent"},
+            {"key": "assigned_to", "label": "Assignee"},
+            {"key": "estimate", "label": "Estimate"},
+            {"key": "status", "label": "Status"},
+            {"key": "source_url", "label": "Source"},
+            {"key": "description", "label": "Description"},
+            {"key": "internal_notes", "label": "Internal Notes"},
+            {"key": "github_comments_json", "label": "GitHub Comments"},
+            {"key": "github_comments_fetched_at", "label": "GitHub Cached At"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "projects": {
+        "default": ["name", "slug", "slack_channel_id"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "name", "label": "Project"},
+            {"key": "slug", "label": "Slug"},
+            {"key": "slack_channel_id", "label": "Slack Channel"},
+            {"key": "max_repo_resources", "label": "Max Repo Resources"},
+            {"key": "prompt_template", "label": "Prompt Template"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "vms": {
+        "default": ["name", "host", "user"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "name", "label": "VM"},
+            {"key": "host", "label": "Host"},
+            {"key": "user", "label": "User"},
+            {"key": "port", "label": "Port"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "agents": {
+        "default": ["name", "slug", "session_mode"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "name", "label": "Agent"},
+            {"key": "slug", "label": "Slug"},
+            {"key": "session_mode", "label": "Session Mode"},
+            {"key": "command", "label": "Command"},
+            {"key": "required_ssh_options", "label": "SSH Options"},
+            {"key": "env_vars", "label": "Env Vars"},
+            {"key": "mcp_config", "label": "MCP Config"},
+            {"key": "trust_level", "label": "Trust Level"},
+            {"key": "input_echo_prefix", "label": "Input Echo Prefix"},
+            {"key": "response_prefix", "label": "Response Prefix"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "api_tokens": {
+        "default": ["name", "permissions", "created_at"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "name", "label": "Token Name"},
+            {"key": "token", "label": "Token", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "permissions", "label": "Permissions"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+}
+
 
 def _hash_password(password: str, salt: bytes) -> str:
     derived = hashlib.scrypt(
@@ -241,6 +317,239 @@ def _parse_labels(raw: str) -> list[str]:
         if cleaned:
             labels.append(cleaned)
     return labels
+
+
+def _display_value(value: Any) -> str:
+    if value is None or value == "":
+        return "n/a"
+    return str(value)
+
+
+def _truncate_text(value: Optional[str], limit: int = 80) -> str:
+    text = _display_value(value)
+    if text == "n/a":
+        return text
+    if len(text) <= limit:
+        return text
+    if limit <= 3:
+        return text[:limit]
+    return text[: limit - 3] + "..."
+
+
+def _format_timestamp(value: Optional[str]) -> str:
+    if not value:
+        return "n/a"
+    cleaned = value.replace("T", " ")
+    if "." in cleaned:
+        cleaned = cleaned.split(".", 1)[0]
+    return cleaned
+
+
+def _mask_token(value: Optional[str]) -> str:
+    if not value:
+        return "n/a"
+    if len(value) <= 12:
+        return value
+    return f"{value[:4]}...{value[-4:]}"
+
+
+def _format_permissions(permissions: dict[str, dict[str, bool]]) -> str:
+    if not permissions:
+        return "n/a"
+    models = [key for key, actions in permissions.items() if any(actions.values())]
+    if not models:
+        return "n/a"
+    models.sort()
+    return _truncate_text(", ".join(models), 60)
+
+
+def _format_github_comments(raw: Optional[str]) -> str:
+    if not raw:
+        return "n/a"
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return "cached"
+    if isinstance(payload, list):
+        return f"{len(payload)} comments"
+    return "cached"
+
+
+def _format_url(value: Optional[str], limit: int = 48) -> str:
+    if not value:
+        return "n/a"
+    trimmed = value.replace("https://", "").replace("http://", "")
+    return _truncate_text(trimmed, limit)
+
+
+def _resolve_table_columns(
+    database: Database, user: str, model: str, available_keys: list[str], default_keys: list[str]
+) -> list[str]:
+    selected: list[str] = []
+    user_record = database.get_user(user)
+    if user_record:
+        pref = database.get_column_preferences(user_record.id, model)
+        if pref:
+            selected = [key for key in pref.columns if key in available_keys]
+    if not selected:
+        selected = [key for key in default_keys if key in available_keys]
+    if not selected and available_keys:
+        selected = [available_keys[0]]
+    return selected
+
+
+def _safe_return_to(request: Request, fallback: str) -> str:
+    return_to = request.url.path
+    if request.url.query:
+        return_to = f"{return_to}?{request.url.query}"
+    if not return_to.startswith("/ui"):
+        return fallback
+    return return_to
+
+
+def _build_ticket_rows(
+    tickets: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for ticket in tickets:
+        project_name = project_lookup.get(ticket.project_id, ticket.project_id)
+        agent_name = agent_lookup.get(ticket.agent_id, ticket.agent_id) if ticket.agent_id else None
+        cells = {
+            "id": {"text": _display_value(ticket.id)},
+            "title": {"text": _display_value(ticket.title), "href": f"/ui/tickets/{ticket.id}/edit"},
+            "project_id": {
+                "text": _display_value(project_name),
+                "href": f"/ui/projects/{ticket.project_id}/edit" if ticket.project_id else None,
+            },
+            "agent_id": {
+                "text": _display_value(agent_name),
+                "href": f"/ui/agents/{ticket.agent_id}/edit" if ticket.agent_id else None,
+            },
+            "assigned_to": {"text": _display_value(ticket.assigned_to)},
+            "estimate": {"text": _display_value(ticket.estimate)},
+            "status": {"text": _display_value(ticket.status)},
+            "source_url": {
+                "text": _format_url(ticket.source_url),
+                "href": ticket.source_url,
+                "external": True,
+            },
+            "description": {"text": _truncate_text(ticket.description, 80)},
+            "internal_notes": {"text": _truncate_text(ticket.internal_notes, 80)},
+            "github_comments_json": {"text": _format_github_comments(ticket.github_comments_json)},
+            "github_comments_fetched_at": {"text": _format_timestamp(ticket.github_comments_fetched_at)},
+            "created_at": {"text": _format_timestamp(ticket.created_at)},
+            "updated_at": {"text": _format_timestamp(ticket.updated_at)},
+        }
+        rows.append({"id": ticket.id, "cells": cells})
+    return rows
+
+
+def _build_project_rows(projects: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for project in projects:
+        cells = {
+            "id": {"text": _display_value(project.id)},
+            "name": {"text": _display_value(project.name), "href": f"/ui/projects/{project.id}/edit"},
+            "slug": {"text": _display_value(project.slug)},
+            "slack_channel_id": {"text": _display_value(project.slack_channel_id)},
+            "max_repo_resources": {"text": _display_value(project.max_repo_resources)},
+            "prompt_template": {"text": _truncate_text(project.prompt_template, 80)},
+            "created_at": {"text": _format_timestamp(project.created_at)},
+            "updated_at": {"text": _format_timestamp(project.updated_at)},
+        }
+        rows.append({"id": project.id, "cells": cells})
+    return rows
+
+
+def _build_vm_rows(vm_targets: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for vm in vm_targets:
+        cells = {
+            "id": {"text": _display_value(vm.id)},
+            "name": {"text": _display_value(vm.name), "href": f"/ui/vms/{vm.id}/edit"},
+            "host": {"text": _display_value(vm.host)},
+            "user": {"text": _display_value(vm.user)},
+            "port": {"text": _display_value(vm.port)},
+            "created_at": {"text": _format_timestamp(vm.created_at)},
+            "updated_at": {"text": _format_timestamp(vm.updated_at)},
+        }
+        rows.append({"id": vm.id, "cells": cells})
+    return rows
+
+
+def _build_agent_rows(agents: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for agent in agents:
+        cells = {
+            "id": {"text": _display_value(agent.id)},
+            "name": {"text": _display_value(agent.name), "href": f"/ui/agents/{agent.id}/edit"},
+            "slug": {"text": _display_value(agent.slug)},
+            "session_mode": {"text": _display_value(agent.session_mode)},
+            "command": {"text": _truncate_text(agent.command, 80)},
+            "required_ssh_options": {"text": _truncate_text(agent.required_ssh_options, 80)},
+            "env_vars": {"text": _truncate_text(agent.env_vars, 80)},
+            "mcp_config": {"text": _truncate_text(agent.mcp_config, 80)},
+            "trust_level": {"text": _display_value(agent.trust_level)},
+            "input_echo_prefix": {"text": _truncate_text(agent.input_echo_prefix, 80)},
+            "response_prefix": {"text": _truncate_text(agent.response_prefix, 80)},
+            "created_at": {"text": _format_timestamp(agent.created_at)},
+            "updated_at": {"text": _format_timestamp(agent.updated_at)},
+        }
+        rows.append({"id": agent.id, "cells": cells})
+    return rows
+
+
+def _build_api_token_rows(api_tokens: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for token in api_tokens:
+        cells = {
+            "id": {"text": _display_value(token.id)},
+            "name": {"text": _display_value(token.name), "href": f"/ui/api-tokens/{token.id}/edit"},
+            "token": {"text": _mask_token(token.token)},
+            "permissions": {"text": _format_permissions(token.permissions)},
+            "created_at": {"text": _format_timestamp(token.created_at)},
+            "updated_at": {"text": _format_timestamp(token.updated_at)},
+        }
+        rows.append({"id": token.id, "cells": cells})
+    return rows
+
+
+def _build_table_context(
+    *,
+    database: Database,
+    request: Request,
+    user: str,
+    model: str,
+    title: str,
+    description: Optional[str],
+    create_label: Optional[str],
+    create_url: Optional[str],
+    rows: list[dict[str, Any]],
+    empty_message: str,
+) -> dict[str, Any]:
+    config = LIST_TABLE_CONFIGS.get(model)
+    if not config:
+        raise HTTPException(status_code=400, detail="Unknown table model")
+    columns = config["columns"]
+    available_keys = [column["key"] for column in columns]
+    selected = _resolve_table_columns(database, user, model, available_keys, config["default"])
+    return {
+        "table_model": model,
+        "table_title": title,
+        "table_description": description,
+        "table_columns": columns,
+        "table_columns_meta": {column["key"]: column for column in columns},
+        "table_columns_lookup": {column["key"]: column["label"] for column in columns},
+        "table_selected_columns": selected,
+        "table_rows": rows,
+        "table_create_label": create_label,
+        "table_create_url": create_url,
+        "table_empty_message": empty_message,
+        "table_return_to": _safe_return_to(request, f"/ui/{model}"),
+        "table_search_action": request.url.path,
+        "table_search_query": request.query_params.get("q", "").strip(),
+        "table_search_placeholder": "Search",
+    }
 
 
 async def _fetch_github_user(token: str) -> tuple[str, str]:
@@ -398,6 +707,7 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "agent_response_created": "Agent response created",
         "agent_response_updated": "Agent response updated",
         "agent_response_deleted": "Agent response deleted",
+        "columns_updated": "Column selection saved",
     }
     if not saved:
         return None
@@ -983,6 +1293,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def api_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         tokens = database.list_api_tokens()
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="api_tokens",
+            title="API Tokens",
+            description="Manage issued API credentials.",
+            create_label="Add API Token",
+            create_url="/ui/api-tokens/create?return_to=/ui/api-tokens",
+            rows=_build_api_token_rows(tokens),
+            empty_message="No API tokens yet.",
+        )
         return _render_template(
             request,
             "api_tokens.html",
@@ -990,7 +1312,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "API Tokens",
                 "active_nav": "api_tokens",
                 "growl_message": growl_message,
-                "api_tokens": tokens,
+                **table_context,
             },
         )
 
@@ -2936,6 +3258,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def projects_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="projects",
+            title="Projects",
+            description="All configured projects and defaults.",
+            create_label="Create Project",
+            create_url="/ui/projects/create?return_to=/ui/projects",
+            rows=_build_project_rows(projects),
+            empty_message="No projects yet.",
+        )
         return _render_template(
             request,
             "projects.html",
@@ -2943,7 +3277,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Projects",
                 "active_nav": "projects",
                 "growl_message": growl_message,
-                "projects": projects,
+                **table_context,
             },
         )
 
@@ -2968,6 +3302,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def vms_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         vm_targets = database.list_vm_targets()
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="vms",
+            title="VM Targets",
+            description="Compute targets available for sessions.",
+            create_label="Add VM",
+            create_url="/ui/vms/create?return_to=/ui/vms",
+            rows=_build_vm_rows(vm_targets),
+            empty_message="No VM targets yet.",
+        )
         return _render_template(
             request,
             "vms.html",
@@ -2975,7 +3321,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "VM Targets",
                 "active_nav": "vms",
                 "growl_message": growl_message,
-                "vm_targets": vm_targets,
+                **table_context,
             },
         )
 
@@ -2999,6 +3345,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def agents_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         agents = database.list_agents()
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="agents",
+            title="Agents",
+            description="Agent profiles and execution settings.",
+            create_label="Add Agent",
+            create_url="/ui/agents/create?return_to=/ui/agents",
+            rows=_build_agent_rows(agents),
+            empty_message="No agents yet.",
+        )
         return _render_template(
             request,
             "agents.html",
@@ -3006,7 +3364,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Agents",
                 "active_nav": "agents",
                 "growl_message": growl_message,
-                "agents": agents,
+                **table_context,
             },
         )
 
@@ -3390,7 +3748,23 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     @app.get("/ui/tickets")
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         tickets = database.list_tickets()
+        projects = database.list_projects()
+        agents = database.list_agents()
+        project_lookup = {project.id: project.name for project in projects}
+        agent_lookup = {agent.id: agent.name for agent in agents}
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="tickets",
+            title="Tickets",
+            description=None,
+            create_label="Create Ticket",
+            create_url="/ui/tickets/create?return_to=/ui/tickets",
+            rows=_build_ticket_rows(tickets, project_lookup, agent_lookup),
+            empty_message="No tickets yet.",
+        )
         return _render_template(
             request,
             "tickets.html",
@@ -3398,7 +3772,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Tickets",
                 "active_nav": "tickets",
                 "growl_message": growl_message,
-                "tickets": tickets,
+                **table_context,
             },
         )
 
@@ -3422,4 +3796,38 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "return_to": return_to,
             },
         )
+
+    @app.post("/ui/column-preferences")
+    async def update_column_preferences(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        model = str(form.get("model", "")).strip()
+        config = LIST_TABLE_CONFIGS.get(model)
+        if not config:
+            raise HTTPException(status_code=400, detail="Unknown model for column preferences")
+        return_to = str(form.get("return_to", f"/ui/{model}")).strip() or f"/ui/{model}"
+        if not return_to.startswith("/ui"):
+            return_to = f"/ui/{model}"
+        columns_raw = str(form.get("columns", "")).strip()
+        columns: list[str] = []
+        if columns_raw:
+            try:
+                parsed = json.loads(columns_raw)
+            except json.JSONDecodeError:
+                parsed = []
+            if isinstance(parsed, list):
+                columns = [str(item).strip() for item in parsed if str(item).strip()]
+            elif isinstance(parsed, str):
+                columns = [item.strip() for item in parsed.split(",") if item.strip()]
+        available_keys = [column["key"] for column in config["columns"]]
+        columns = [key for key in columns if key in available_keys]
+        if not columns:
+            columns = [key for key in config["default"] if key in available_keys]
+        user_record = database.get_user(user)
+        if not user_record:
+            raise HTTPException(status_code=400, detail="User not found")
+        database.upsert_column_preferences(user_record.id, model, columns)
+        separator = "&" if "?" in return_to else "?"
+        return RedirectResponse(f"{return_to}{separator}saved=columns_updated", status_code=303)
     return app

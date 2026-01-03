@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Generator, Optional
 
-from sqlalchemy import Integer, String, Text, create_engine, func, inspect, select, or_
+from sqlalchemy import Integer, String, Text, UniqueConstraint, create_engine, func, inspect, select, or_
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -76,6 +76,16 @@ class UserRecord:
     password_hash: str
     salt: str
     created_at: str
+
+
+@dataclass(frozen=True)
+class ColumnPreferenceRecord:
+    id: str
+    user_id: str
+    model: str
+    columns: list[str]
+    created_at: str
+    updated_at: str
 
 
 @dataclass(frozen=True)
@@ -327,6 +337,18 @@ class UserModel(Base):
     password_hash: Mapped[str] = mapped_column(String, nullable=False)
     salt: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ColumnPreferenceModel(Base):
+    __tablename__ = "ui_column_preferences"
+    __table_args__ = (UniqueConstraint("user_id", "model", name="uq_ui_column_preferences_user_model"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False)
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    columns_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class ApiTokenModel(Base):
@@ -993,6 +1015,53 @@ class Database:
     def delete_user(self, user_id: str) -> None:
         with self.session() as session:
             session.query(UserModel).filter(UserModel.id == user_id).delete()
+
+    def get_column_preferences(self, user_id: str, model: str) -> Optional[ColumnPreferenceRecord]:
+        with self.session() as session:
+            row = session.execute(
+                select(ColumnPreferenceModel).where(
+                    ColumnPreferenceModel.user_id == user_id,
+                    ColumnPreferenceModel.model == model,
+                )
+            ).scalar_one_or_none()
+        if not row:
+            return None
+        columns = json_loads(row.columns_json)
+        if not isinstance(columns, list):
+            columns = []
+        return ColumnPreferenceRecord(
+            id=row.id,
+            user_id=row.user_id,
+            model=row.model,
+            columns=[str(item) for item in columns if item],
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def upsert_column_preferences(self, user_id: str, model: str, columns: list[str]) -> None:
+        now = utc_now()
+        payload = json_dumps(columns)
+        with self.session() as session:
+            row = session.execute(
+                select(ColumnPreferenceModel).where(
+                    ColumnPreferenceModel.user_id == user_id,
+                    ColumnPreferenceModel.model == model,
+                )
+            ).scalar_one_or_none()
+            if row:
+                row.columns_json = payload
+                row.updated_at = now
+            else:
+                session.add(
+                    ColumnPreferenceModel(
+                        id=str(uuid.uuid4()),
+                        user_id=user_id,
+                        model=model,
+                        columns_json=payload,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
 
     def list_api_tokens(self) -> list[ApiTokenRecord]:
         with self.session() as session:
