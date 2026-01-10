@@ -147,9 +147,24 @@ A source is “done” when it can: authenticate, poll, emit deterministic WorkI
 ## License & contributions
 Contributions should add tests for scheduling behavior (preemption, de-dupe, retries) and must not expand tool authority without explicit admin configuration and documentation updates.
 
+## Session Reload (IMPORTANT)
+At session start, read these files to restore context:
+```bash
+cat .<agent_name>/STATE.txt
+cat .<agent_name>/DECISIONS.txt
+cat .<agent_name>/TODO.txt
+cat .<agent_name>/CONTEXT.txt
+```
+
+.<agent_name>/
+├── STATE.md        # current goals, constraints, known issues
+├── DECISIONS.md    # why things were done a certain way
+├── TODO.md         # pending tasks
+└── CONTEXT.md      # compressed narrative summary
+
 ## Logging
 
-Log all your actions in .<agent>/log.txt.
+Log all your actions in .<agent_name>/log.txt.
 
 A log entry will be in the format of "<datetime>,<description>"
 
