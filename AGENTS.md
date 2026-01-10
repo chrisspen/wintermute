@@ -148,12 +148,12 @@ A source is “done” when it can: authenticate, poll, emit deterministic WorkI
 Contributions should add tests for scheduling behavior (preemption, de-dupe, retries) and must not expand tool authority without explicit admin configuration and documentation updates.
 
 ## Session Reload (IMPORTANT)
-At session start, read these files to restore context:
+At session start, read these files to restore context. Before shutdown, update each file so the next session can resume cleanly:
 ```bash
-cat .<agent_name>/STATE.txt
-cat .<agent_name>/DECISIONS.txt
-cat .<agent_name>/TODO.txt
-cat .<agent_name>/CONTEXT.txt
+cat .<agent_name>/STATE.md
+cat .<agent_name>/DECISIONS.md
+cat .<agent_name>/TODO.md
+cat .<agent_name>/CONTEXT.md
 ```
 
 .<agent_name>/
