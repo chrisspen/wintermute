@@ -1,6 +1,8 @@
 Wintermute
 ==========
 
+[![Tests](https://github.com/chrisspen/wintermute/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/chrisspen/wintermute/actions/workflows/tests.yml)
+
 Local, persistent work supervisor with deterministic scheduling, preemption, and an LLM executor
 for next-action decisions.
 

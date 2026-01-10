@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import logging
 from typing import Any, Optional
 
@@ -81,13 +82,17 @@ class GitHubIssueWorkItem(WorkItem):
             await self._auto_start(ctx, source)
             return
         logger.info("GitHub work item %s using LLM decision path", self.work_id)
-        await self._llm_decide(ctx)
+        agent = ctx.db.get_agent(source.agent_id) if source and source.agent_id else None
+        await self._llm_decide(ctx, agent)
 
-    async def _llm_decide(self, ctx: WorkItemContext) -> None:
+    async def _llm_decide(self, ctx: WorkItemContext, agent: Any) -> None:
         decision = ctx.executor.decide_next_action(
             state=dict(self.checkpoint),
             observation={"issue": dict(self.checkpoint)},
             tool_schema=_tool_schema(ctx),
+            base_url=agent.llm_base_url if agent else None,
+            api_key=agent.llm_api_key if agent else None,
+            model=agent.llm_model if agent else None,
         )
         if decision.type == "tool":
             result = await ctx.tools.call(decision.payload["name"], decision.payload["args"])
@@ -395,22 +400,29 @@ def _issue_prompt(
 
 class GitHubIssuesSource(TaskSource):
     id = "github_issues"
-    enabled = False
+    enabled = True
     base_priority = 60
-    poll_interval_seconds = 60
+    poll_interval_seconds = 10  # Check frequently; per-source intervals control actual polling
+
+    def __init__(self) -> None:
+        self._last_poll: dict[str, float] = {}
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
         db: Database = ctx["db"]
-        source = db.get_task_source(self.id)
-        if not source or not source.enabled:
-            return []
         logger = logging.getLogger(__name__)
         drafts: list[WorkItemDraft] = []
-        sources = [row for row in db.list_github_sources() if row.enabled]
-        logger.info("GitHub poller checking %d sources", len(sources))
+        sources = db.list_github_sources()
+        now = datetime.now(timezone.utc).timestamp()
         for repo_source in sources:
+            if not repo_source.enabled:
+                continue
             if not repo_source.token_id:
                 continue
+            # Check per-source poll interval
+            last_poll = self._last_poll.get(repo_source.id, 0.0)
+            if now - last_poll < repo_source.poll_interval_seconds:
+                continue
+            self._last_poll[repo_source.id] = now
             token_record = db.get_github_token(repo_source.token_id)
             if not token_record:
                 continue
@@ -436,7 +448,7 @@ class GitHubIssuesSource(TaskSource):
                 drafts.append(
                     WorkItemDraft(
                         work_id=work_id,
-                        priority=source.base_priority,
+                        priority=self.base_priority,
                         source_id=self.id,
                         checkpoint={
                             "github_source_id": repo_source.id,

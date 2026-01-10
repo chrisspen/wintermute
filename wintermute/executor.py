@@ -104,20 +104,37 @@ class Executor:
         state: dict[str, Any],
         observation: dict[str, Any],
         tool_schema: Iterable[dict[str, Any]],
+        *,
+        base_url: Optional[str] = None,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
     ) -> Decision:
+        """Make an LLM decision about the next action.
+
+        Args:
+            state: Current work item state
+            observation: Current observation data
+            tool_schema: Available tools schema
+            base_url: Override LLM API base URL (uses Agent's llm_base_url)
+            api_key: Override LLM API key (uses Agent's llm_api_key)
+            model: Override LLM model (uses Agent's llm_model)
+        """
         logger = logging.getLogger(__name__)
-        logger.info("Executor call model=%s base_url=%s", self.model, self.base_url)
+        effective_base_url = base_url or self.base_url
+        effective_api_key = api_key or self.api_key
+        effective_model = model or self.model
+        logger.info("Executor call model=%s base_url=%s", effective_model, effective_base_url)
         messages = _build_messages(state, observation, list(tool_schema))
         payload = {
-            "model": self.model,
+            "model": effective_model,
             "messages": messages,
             "temperature": 0,
             "response_format": {"type": "json_object"},
         }
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
+            f"{effective_base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
-            headers=_default_headers(self.api_key),
+            headers=_default_headers(effective_api_key),
             method="POST",
         )
         try:

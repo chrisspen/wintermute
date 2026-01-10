@@ -72,6 +72,10 @@
           <input type="checkbox" name="auto_start" {% if source.auto_start %}checked{% endif %} />
           <label>Auto-start agent sessions for issues</label>
         </div>
+        <div class="field-group">
+          <label>Poll Interval (seconds)</label>
+          <input type="number" name="poll_interval_seconds" min="10" value="{{ source.poll_interval_seconds }}" />
+        </div>
         <button type="submit">Save Issue Source</button>
       </form>
       <form method="post" action="/issue-sources/{{ source.id }}/delete">

@@ -187,6 +187,129 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
         ],
     },
+    "comments": {
+        "default": ["body", "project_id", "public", "approved", "sent"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "body", "label": "Comment"},
+            {"key": "ticket_id", "label": "Ticket"},
+            {"key": "session_id", "label": "Session"},
+            {"key": "project_id", "label": "Project"},
+            {"key": "agent_id", "label": "Agent"},
+            {"key": "author", "label": "Author"},
+            {"key": "source_id", "label": "Source"},
+            {"key": "issue_number", "label": "Issue #"},
+            {"key": "public", "label": "Public"},
+            {"key": "approved", "label": "Approved"},
+            {"key": "sent", "label": "Sent"},
+            {"key": "sent_at", "label": "Sent At", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "remote_tokens": {
+        "default": ["provider", "note", "user_login"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "provider", "label": "Provider"},
+            {"key": "note", "label": "Note"},
+            {"key": "token", "label": "Token", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "user_id", "label": "User ID"},
+            {"key": "user_login", "label": "User Login"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "issue_sources": {
+        "default": ["provider", "project_id", "repo", "enabled", "poll_interval_seconds"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "provider", "label": "Provider"},
+            {"key": "project_id", "label": "Project"},
+            {"key": "repo", "label": "Repo"},
+            {"key": "token_id", "label": "Token"},
+            {"key": "agent_id", "label": "Agent"},
+            {"key": "state", "label": "State"},
+            {"key": "labels", "label": "Labels"},
+            {"key": "enabled", "label": "Enabled"},
+            {"key": "auto_start", "label": "Auto Start"},
+            {"key": "poll_interval_seconds", "label": "Poll Interval"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "agent_responses": {
+        "default": ["agent_id", "pattern", "response"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "agent_id", "label": "Agent"},
+            {"key": "pattern", "label": "Pattern"},
+            {"key": "response", "label": "Response"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "project_vms": {
+        "default": ["project_id", "vm_target_id", "repo_mode"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "project_id", "label": "Project"},
+            {"key": "vm_target_id", "label": "VM Target"},
+            {"key": "repo_mode", "label": "Repo Mode"},
+            {"key": "repo_path", "label": "Repo Path"},
+            {"key": "repo_url", "label": "Repo URL"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "repo_resources": {
+        "default": ["path", "project_id", "status"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "path", "label": "Path"},
+            {"key": "project_id", "label": "Project"},
+            {"key": "project_vm_id", "label": "Mapping"},
+            {"key": "repo_mode", "label": "Repo Mode"},
+            {"key": "status", "label": "Status"},
+            {"key": "session_id", "label": "Session"},
+            {"key": "agent_id", "label": "Agent"},
+            {"key": "last_used_at", "label": "Last Used", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "work_items": {
+        "default": ["work_id", "source_id", "status", "priority"],
+        "columns": [
+            {"key": "work_id", "label": "Work ID"},
+            {"key": "source_id", "label": "Source"},
+            {"key": "priority", "label": "Priority"},
+            {"key": "status", "label": "Status"},
+            {"key": "attempts", "label": "Attempts"},
+            {"key": "run_after", "label": "Run After", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "last_error", "label": "Last Error"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "sessions": {
+        "default": ["id", "project_id", "agent_id", "status"],
+        "columns": [
+            {"key": "id", "label": "Session ID"},
+            {"key": "project_id", "label": "Project"},
+            {"key": "project_vm_id", "label": "Mapping"},
+            {"key": "agent_id", "label": "Agent"},
+            {"key": "ticket_id", "label": "Ticket"},
+            {"key": "status", "label": "Status"},
+            {"key": "repo_path", "label": "Repo Path"},
+            {"key": "thread_ts", "label": "Thread"},
+            {"key": "mcp_conversation_id", "label": "MCP Conv ID"},
+            {"key": "claude_session_id", "label": "Claude Session"},
+            {"key": "last_output_at", "label": "Last Output", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
 }
 
 
@@ -550,6 +673,187 @@ def _build_api_token_rows(api_tokens: list[Any]) -> list[dict[str, Any]]:
             "updated_at": {"text": _format_timestamp(token.updated_at)},
         }
         rows.append({"id": token.id, "cells": cells})
+    return rows
+
+
+def _build_comment_rows(
+    comments: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for comment in comments:
+        project_name = project_lookup.get(comment.project_id, comment.project_id) if comment.project_id else None
+        agent_name = agent_lookup.get(comment.agent_id, comment.agent_id) if comment.agent_id else None
+        cells = {
+            "id": {"text": _display_value(comment.id)},
+            "body": {"text": _truncate_text(comment.body, 80), "href": f"/ui/comments/{comment.id}/edit"},
+            "ticket_id": {"text": _display_value(comment.ticket_id)},
+            "session_id": {"text": _display_value(comment.session_id)},
+            "project_id": {"text": _display_value(project_name)},
+            "agent_id": {"text": _display_value(agent_name)},
+            "author": {"text": _display_value(comment.author)},
+            "source_id": {"text": _display_value(comment.source_id)},
+            "issue_number": {"text": _display_value(comment.issue_number)},
+            "public": {"text": "yes" if comment.public else "no"},
+            "approved": {"text": "yes" if comment.approved else "no"},
+            "sent": {"text": "yes" if comment.sent else "no"},
+            "sent_at": {"text": _format_timestamp(comment.sent_at)},
+            "created_at": {"text": _format_timestamp(comment.created_at)},
+            "updated_at": {"text": _format_timestamp(comment.updated_at)},
+        }
+        rows.append({"id": comment.id, "cells": cells})
+    return rows
+
+
+def _build_remote_token_rows(tokens: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for token in tokens:
+        cells = {
+            "id": {"text": _display_value(token.id)},
+            "provider": {"text": _display_value(token.provider)},
+            "note": {"text": _display_value(token.note), "href": f"/ui/remote-tokens/{token.id}/edit"},
+            "token": {"text": _mask_token(token.token)},
+            "user_id": {"text": _display_value(token.user_id)},
+            "user_login": {"text": _display_value(token.user_login)},
+            "created_at": {"text": _format_timestamp(token.created_at)},
+            "updated_at": {"text": _format_timestamp(token.updated_at)},
+        }
+        rows.append({"id": token.id, "cells": cells})
+    return rows
+
+
+def _build_issue_source_rows(
+    sources: list[Any],
+    project_lookup: dict[str, str],
+    token_lookup: dict[str, str],
+    agent_lookup: dict[str, str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for source in sources:
+        project_name = project_lookup.get(source.project_id, source.project_id) if source.project_id else None
+        token_name = token_lookup.get(source.token_id, source.token_id) if source.token_id else None
+        agent_name = agent_lookup.get(source.agent_id, source.agent_id) if source.agent_id else None
+        cells = {
+            "id": {"text": _display_value(source.id)},
+            "provider": {"text": _display_value(source.provider)},
+            "project_id": {"text": _display_value(project_name)},
+            "repo": {"text": _display_value(source.repo), "href": f"/ui/issue-sources/{source.id}/edit"},
+            "token_id": {"text": _display_value(token_name)},
+            "agent_id": {"text": _display_value(agent_name)},
+            "state": {"text": _display_value(source.state)},
+            "labels": {"text": ", ".join(source.labels) if source.labels else "n/a"},
+            "enabled": {"text": "yes" if source.enabled else "no"},
+            "auto_start": {"text": "yes" if source.auto_start else "no"},
+            "poll_interval_seconds": {"text": f"{source.poll_interval_seconds}s"},
+            "created_at": {"text": _format_timestamp(source.created_at)},
+            "updated_at": {"text": _format_timestamp(source.updated_at)},
+        }
+        rows.append({"id": source.id, "cells": cells})
+    return rows
+
+
+def _build_agent_response_rows(
+    responses: list[Any], agent_lookup: dict[str, str]
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for response in responses:
+        agent_name = agent_lookup.get(response.agent_id, response.agent_id) if response.agent_id else None
+        cells = {
+            "id": {"text": _display_value(response.id)},
+            "agent_id": {"text": _display_value(agent_name)},
+            "pattern": {"text": _display_value(response.pattern), "href": f"/ui/agent-responses/{response.id}/edit"},
+            "response": {"text": _truncate_text(response.response, 80)},
+            "created_at": {"text": _format_timestamp(response.created_at)},
+            "updated_at": {"text": _format_timestamp(response.updated_at)},
+        }
+        rows.append({"id": response.id, "cells": cells})
+    return rows
+
+
+def _build_project_vm_rows(
+    project_vms: list[Any], project_lookup: dict[str, str], vm_lookup: dict[str, str]
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for mapping in project_vms:
+        project_name = project_lookup.get(mapping.project_id, mapping.project_id) if mapping.project_id else None
+        vm_name = vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id) if mapping.vm_target_id else None
+        cells = {
+            "id": {"text": _display_value(mapping.id)},
+            "project_id": {"text": _display_value(project_name), "href": f"/ui/project-vms/{mapping.id}/edit"},
+            "vm_target_id": {"text": _display_value(vm_name)},
+            "repo_mode": {"text": _display_value(mapping.repo_mode)},
+            "repo_path": {"text": _display_value(mapping.repo_path)},
+            "repo_url": {"text": _format_url(mapping.repo_url)},
+            "created_at": {"text": _format_timestamp(mapping.created_at)},
+            "updated_at": {"text": _format_timestamp(mapping.updated_at)},
+        }
+        rows.append({"id": mapping.id, "cells": cells})
+    return rows
+
+
+def _build_repo_resource_rows(
+    resources: list[Any], project_lookup: dict[str, str]
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for resource in resources:
+        project_name = project_lookup.get(resource.project_id, resource.project_id) if resource.project_id else None
+        cells = {
+            "id": {"text": _display_value(resource.id)},
+            "path": {"text": _display_value(resource.path), "href": f"/ui/repo-resources/{resource.id}/edit"},
+            "project_id": {"text": _display_value(project_name)},
+            "project_vm_id": {"text": _display_value(resource.project_vm_id)},
+            "repo_mode": {"text": _display_value(resource.repo_mode)},
+            "status": {"text": _display_value(resource.status)},
+            "session_id": {"text": _display_value(resource.session_id)},
+            "agent_id": {"text": _display_value(resource.agent_id)},
+            "last_used_at": {"text": _format_timestamp(resource.last_used_at)},
+            "created_at": {"text": _format_timestamp(resource.created_at)},
+            "updated_at": {"text": _format_timestamp(resource.updated_at)},
+        }
+        rows.append({"id": resource.id, "cells": cells})
+    return rows
+
+
+def _build_work_item_rows(work_items: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in work_items:
+        cells = {
+            "work_id": {"text": _display_value(item.work_id), "href": f"/ui/work-items/{item.work_id}"},
+            "source_id": {"text": _display_value(item.source_id)},
+            "priority": {"text": _display_value(item.priority)},
+            "status": {"text": _display_value(item.status)},
+            "attempts": {"text": _display_value(item.attempts)},
+            "run_after": {"text": _format_timestamp(item.run_after)},
+            "last_error": {"text": _truncate_text(item.last_error, 80)},
+            "created_at": {"text": _format_timestamp(item.created_at)},
+            "updated_at": {"text": _format_timestamp(item.updated_at)},
+        }
+        rows.append({"id": item.work_id, "cells": cells})
+    return rows
+
+
+def _build_session_rows(
+    sessions: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for session in sessions:
+        project_name = project_lookup.get(session.project_id, session.project_id) if session.project_id else None
+        agent_name = agent_lookup.get(session.agent_id, session.agent_id) if session.agent_id else None
+        cells = {
+            "id": {"text": _display_value(session.id), "href": f"/ui/sessions/{session.id}"},
+            "project_id": {"text": _display_value(project_name)},
+            "project_vm_id": {"text": _display_value(session.project_vm_id)},
+            "agent_id": {"text": _display_value(agent_name)},
+            "ticket_id": {"text": _display_value(session.ticket_id)},
+            "status": {"text": _display_value(session.status)},
+            "repo_path": {"text": _display_value(session.repo_path)},
+            "thread_ts": {"text": _display_value(session.thread_ts)},
+            "mcp_conversation_id": {"text": _display_value(session.mcp_conversation_id)},
+            "claude_session_id": {"text": _display_value(session.claude_session_id)},
+            "last_output_at": {"text": _format_timestamp(session.last_output_at)},
+            "created_at": {"text": _format_timestamp(session.created_at)},
+            "updated_at": {"text": _format_timestamp(session.updated_at)},
+        }
+        rows.append({"id": session.id, "cells": cells})
     return rows
 
 
@@ -1459,6 +1763,73 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     ) -> RedirectResponse:
         database.delete_gitlab_token(token_id)
         return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_deleted", status_code=303)
+
+    # --- Unified Remote Token POST routes ---
+
+    @app.post("/remote-tokens")
+    async def create_remote_token(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        provider = str(form.get("provider", "github")).strip()
+        token = str(form.get("token", "")).strip()
+        note = str(form.get("note", "")).strip() or None
+        if not token:
+            raise HTTPException(status_code=400, detail="Token is required")
+        if provider == "github":
+            user_id, login = await _fetch_github_user(token)
+        elif provider == "gitlab":
+            user_id, login = await _fetch_gitlab_user(token)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid provider")
+        database.insert_remote_token(
+            token_id=str(uuid.uuid4()),
+            provider=provider,
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=login,
+        )
+        return_to = str(form.get("return_to", "/ui/remote-tokens")).strip() or "/ui/remote-tokens"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/remote-tokens"
+        return RedirectResponse(f"{return_to}?saved=remote_token_created", status_code=303)
+
+    @app.post("/remote-tokens/{token_id}/edit")
+    async def update_remote_token(
+        token_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        provider = str(form.get("provider", "")).strip()
+        token = str(form.get("token", "")).strip()
+        note = str(form.get("note", "")).strip() or None
+        existing = database.get_remote_token(token_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Remote token not found")
+        user_id = existing.user_id
+        user_login = existing.user_login
+        effective_provider = provider or existing.provider
+        if token:
+            if effective_provider == "github":
+                user_id, user_login = await _fetch_github_user(token)
+            elif effective_provider == "gitlab":
+                user_id, user_login = await _fetch_gitlab_user(token)
+        database.update_remote_token(
+            token_id,
+            provider=provider or None,
+            token=token or None,
+            note=note,
+            user_id=user_id,
+            user_login=user_login,
+        )
+        return RedirectResponse("/ui/remote-tokens?saved=remote_token_updated", status_code=303)
+
+    @app.post("/remote-tokens/{token_id}/delete")
+    async def delete_remote_token(
+        token_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_remote_token(token_id)
+        return RedirectResponse("/ui/remote-tokens?saved=remote_token_deleted", status_code=303)
 
     @app.get("/ui/api-tokens")
     def api_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -3048,7 +3419,20 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         growl_message = _growl_message(request.query_params.get("saved"))
         projects = database.list_projects()
         agents = database.list_agents()
-        users = database.list_users()
+        project_lookup = {project.id: project.name for project in projects}
+        agent_lookup = {agent.id: agent.name for agent in agents}
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="comments",
+            title="Comments",
+            description="All captured agent comments.",
+            create_label=None,
+            create_url=None,
+            rows=_build_comment_rows(comments, project_lookup, agent_lookup),
+            empty_message="No comments yet.",
+        )
         return _render_template(
             request,
             "comments.html",
@@ -3056,9 +3440,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Comments",
                 "active_nav": "comments",
                 "growl_message": growl_message,
-                "comments": comments,
-                "project_lookup": {project.id: project.name for project in projects},
-                "agent_lookup": {agent.id: agent.name for agent in agents},
+                **table_context,
             },
         )
 
@@ -3112,6 +3494,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         resources = database.list_repo_resources()
         project_lookup = {row.id: row.name for row in database.list_projects()}
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="repo_resources",
+            title="Repo Resources",
+            description="Auto-managed repo working trees by project/VM.",
+            create_label=None,
+            create_url=None,
+            rows=_build_repo_resource_rows(resources, project_lookup),
+            empty_message="No repo resources yet.",
+        )
         return _render_template(
             request,
             "repo_resources.html",
@@ -3119,8 +3513,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Repo Resources",
                 "active_nav": "repo_resources",
                 "growl_message": growl_message,
-                "repo_resources": resources,
-                "project_lookup": project_lookup,
+                **table_context,
             },
         )
 
@@ -3232,6 +3625,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         trust_level = str(form.get("trust_level", "")).strip() or None
         input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
         response_prefix = str(form.get("response_prefix", "")).strip() or None
+        llm_base_url = str(form.get("llm_base_url", "")).strip() or None
+        llm_api_key = str(form.get("llm_api_key", "")).strip() or None
+        llm_model = str(form.get("llm_model", "")).strip() or None
         return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
@@ -3249,6 +3645,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             trust_level,
             input_echo_prefix,
             response_prefix,
+            llm_base_url=llm_base_url,
+            llm_api_key=llm_api_key,
+            llm_model=llm_model,
         )
         return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
 
@@ -3283,6 +3682,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         trust_level = str(form.get("trust_level", "")).strip() or None
         input_echo_prefix = str(form.get("input_echo_prefix", "")).strip() or None
         response_prefix = str(form.get("response_prefix", "")).strip() or None
+        llm_base_url = str(form.get("llm_base_url", "")).strip() or None
+        llm_api_key = str(form.get("llm_api_key", "")).strip() or None
+        llm_model = str(form.get("llm_model", "")).strip() or None
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
         database.update_agent(
@@ -3297,6 +3699,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             trust_level=trust_level,
             input_echo_prefix=input_echo_prefix,
             response_prefix=response_prefix,
+            llm_base_url=llm_base_url,
+            llm_api_key=llm_api_key,
+            llm_model=llm_model,
         )
         return RedirectResponse("/ui/agents?saved=agent_updated", status_code=303)
 
@@ -3383,6 +3788,20 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def sessions_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         sessions = database.list_sessions()
         growl_message = _growl_message(request.query_params.get("saved"))
+        project_lookup = {project.id: project.name for project in database.list_projects()}
+        agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="sessions",
+            title="Sessions",
+            description="All agent sessions.",
+            create_label=None,
+            create_url=None,
+            rows=_build_session_rows(sessions, project_lookup, agent_lookup),
+            empty_message="No sessions yet.",
+        )
         return _render_template(
             request,
             "sessions.html",
@@ -3390,7 +3809,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Sessions",
                 "active_nav": "sessions",
                 "growl_message": growl_message,
-                "sessions": sessions,
+                **table_context,
             },
         )
 
@@ -3589,6 +4008,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         status_filter = request.query_params.get("status")
         work_items = database.list_work_items(status=status_filter) if status_filter else database.list_work_items()
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="work_items",
+            title="Work Items",
+            description="All work items across sources.",
+            create_label=None,
+            create_url=None,
+            rows=_build_work_item_rows(work_items),
+            empty_message="No work items yet.",
+        )
         return _render_template(
             request,
             "work_items.html",
@@ -3596,7 +4027,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Work Items",
                 "active_nav": "work_items",
                 "growl_message": growl_message,
-                "work_items": work_items,
+                **table_context,
             },
         )
 
@@ -3753,6 +4184,19 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         responses = database.list_agent_responses()
         growl_message = _growl_message(request.query_params.get("saved"))
         agents = database.list_agents()
+        agent_lookup = {agent.id: agent.name for agent in agents}
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="agent_responses",
+            title="Agent Responses",
+            description="Automatic response rules for agent patterns.",
+            create_label="Add Response Rule",
+            create_url="/ui/agent-responses/create?return_to=/ui/agent-responses",
+            rows=_build_agent_response_rows(responses, agent_lookup),
+            empty_message="No response rules yet.",
+        )
         return _render_template(
             request,
             "agent_responses.html",
@@ -3760,8 +4204,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Agent Responses",
                 "active_nav": "agent_responses",
                 "growl_message": growl_message,
-                "responses": responses,
-                "agent_lookup": {agent.id: agent.name for agent in agents},
+                **table_context,
             },
         )
 
@@ -3814,6 +4257,20 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def project_vms_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         project_vms = database.list_project_vms()
         growl_message = _growl_message(request.query_params.get("saved"))
+        project_lookup = {project.id: project.name for project in database.list_projects()}
+        vm_lookup = {vm.id: vm.name for vm in database.list_vm_targets()}
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="project_vms",
+            title="Project VM Mappings",
+            description="Map projects to VM targets with repo configuration.",
+            create_label="Attach VM",
+            create_url="/ui/project-vms/create?return_to=/ui/project-vms",
+            rows=_build_project_vm_rows(project_vms, project_lookup, vm_lookup),
+            empty_message="No mappings yet.",
+        )
         return _render_template(
             request,
             "project_vms.html",
@@ -3821,9 +4278,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Mappings",
                 "active_nav": "mappings",
                 "growl_message": growl_message,
-                "project_vms": project_vms,
-                "project_lookup": {project.id: project.name for project in database.list_projects()},
-                "vm_lookup": {vm.id: vm.name for vm in database.list_vm_targets()},
+                **table_context,
             },
         )
 
@@ -3856,101 +4311,87 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def gitlab_sources_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         return RedirectResponse("/ui/issue-sources", status_code=302)
 
+    # Legacy token routes - redirect to unified remote tokens
     @app.get("/ui/github-tokens")
-    def github_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        tokens = database.list_github_tokens()
-        legacy_token = database.get_credential_by_name(GITHUB_PROVIDER, GITHUB_TOKEN_NAME)
-        legacy_user_id = database.get_credential_by_name(GITHUB_PROVIDER, "user_id")
-        legacy_user_login = database.get_credential_by_name(GITHUB_PROVIDER, "user_login")
-        growl_message = _growl_message(request.query_params.get("saved"))
-        return _render_template(
-            request,
-            "github_tokens.html",
-            {
-                "title": "GitHub Tokens",
-                "active_nav": "github_tokens",
-                "growl_message": growl_message,
-                "tokens": tokens,
-                "legacy_token": bool(legacy_token),
-                "legacy_user_id": legacy_user_id.reference if legacy_user_id else "",
-                "legacy_user_login": legacy_user_login.reference if legacy_user_login else "",
-            },
-        )
+    def github_tokens_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/remote-tokens", status_code=302)
 
     @app.get("/ui/github-tokens/create")
-    def github_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        return_to = request.query_params.get("return_to", "/ui/github-tokens")
-        if not return_to.startswith("/ui"):
-            return_to = "/ui/github-tokens"
-        return _render_template(
-            request,
-            "github_token_create.html",
-            {
-                "title": "Add GitHub Token",
-                "active_nav": "github_tokens",
-                "growl_message": None,
-                "return_to": return_to,
-            },
-        )
+    def github_tokens_create_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/remote-tokens/create", status_code=302)
 
     @app.get("/ui/github-tokens/{token_id}/edit")
-    def github_tokens_edit_ui(token_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
-        token = database.get_github_token(token_id)
-        if not token:
-            raise HTTPException(status_code=404, detail="GitHub token not found")
-        return _render_template(
-            request,
-            "github_token_edit.html",
-            {
-                "title": "Edit GitHub Token",
-                "active_nav": "github_tokens",
-                "growl_message": None,
-                "token": token,
-            },
-        )
+    def github_tokens_edit_ui_redirect(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse(f"/ui/remote-tokens/{token_id}/edit", status_code=302)
 
     @app.get("/ui/gitlab-tokens")
-    def gitlab_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        tokens = database.list_gitlab_tokens()
+    def gitlab_tokens_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/remote-tokens", status_code=302)
+
+    @app.get("/ui/gitlab-tokens/create")
+    def gitlab_tokens_create_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/remote-tokens/create", status_code=302)
+
+    @app.get("/ui/gitlab-tokens/{token_id}/edit")
+    def gitlab_tokens_edit_ui_redirect(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse(f"/ui/remote-tokens/{token_id}/edit", status_code=302)
+
+    # --- Unified Remote Tokens UI ---
+
+    @app.get("/ui/remote-tokens")
+    def remote_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        tokens = database.list_remote_tokens()
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="remote_tokens",
+            title="Remote Tokens",
+            description="API tokens for GitHub, GitLab, and other providers.",
+            create_label="Add Remote Token",
+            create_url="/ui/remote-tokens/create?return_to=/ui/remote-tokens",
+            rows=_build_remote_token_rows(tokens),
+            empty_message="No remote tokens yet.",
+        )
         return _render_template(
             request,
-            "gitlab_tokens.html",
+            "remote_tokens.html",
             {
-                "title": "GitLab Tokens",
-                "active_nav": "gitlab_tokens",
+                "title": "Remote Tokens",
+                "active_nav": "remote_tokens",
                 "growl_message": growl_message,
-                "tokens": tokens,
+                **table_context,
             },
         )
 
-    @app.get("/ui/gitlab-tokens/create")
-    def gitlab_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        return_to = request.query_params.get("return_to", "/ui/gitlab-tokens")
+    @app.get("/ui/remote-tokens/create")
+    def remote_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        return_to = request.query_params.get("return_to", "/ui/remote-tokens")
         if not return_to.startswith("/ui"):
-            return_to = "/ui/gitlab-tokens"
+            return_to = "/ui/remote-tokens"
         return _render_template(
             request,
-            "gitlab_token_create.html",
+            "remote_token_create.html",
             {
-                "title": "Add GitLab Token",
-                "active_nav": "gitlab_tokens",
+                "title": "Add Remote Token",
+                "active_nav": "remote_tokens",
                 "growl_message": None,
                 "return_to": return_to,
             },
         )
 
-    @app.get("/ui/gitlab-tokens/{token_id}/edit")
-    def gitlab_tokens_edit_ui(token_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
-        token = database.get_gitlab_token(token_id)
+    @app.get("/ui/remote-tokens/{token_id}/edit")
+    def remote_tokens_edit_ui(token_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        token = database.get_remote_token(token_id)
         if not token:
-            raise HTTPException(status_code=404, detail="GitLab token not found")
+            raise HTTPException(status_code=404, detail="Remote token not found")
         return _render_template(
             request,
-            "gitlab_token_edit.html",
+            "remote_token_edit.html",
             {
-                "title": "Edit GitLab Token",
-                "active_nav": "gitlab_tokens",
+                "title": "Edit Remote Token",
+                "active_nav": "remote_tokens",
                 "growl_message": None,
                 "token": token,
             },
@@ -3977,9 +4418,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     @app.get("/ui/issue-sources")
     def issue_sources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         sources = database.list_issue_sources()
-        github_task_source = database.get_task_source(GitHubIssuesSource.id)
-        gitlab_task_source = database.get_task_source(GitLabIssuesSource.id)
-        legacy_config = github_task_source.config if github_task_source else {}
         project_lookup = {project.id: project.name for project in database.list_projects()}
         github_token_lookup = {
             token.id: token.note or token.user_login or token.id
@@ -3991,14 +4429,19 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         }
         token_lookup = {**github_token_lookup, **gitlab_token_lookup}
         agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
-        legacy_project_id = str(legacy_config.get("project_id", "")).strip()
-        legacy_project_name = project_lookup.get(legacy_project_id, "unset") if legacy_project_id else "unset"
-        legacy_owner = str(legacy_config.get("owner", "")).strip()
-        legacy_repo = str(legacy_config.get("repo", "")).strip()
-        legacy_state = str(legacy_config.get("state", "")).strip()
-        legacy_labels = ", ".join(legacy_config.get("labels", []) or [])
-        legacy_has_config = bool(legacy_owner or legacy_repo or legacy_state or legacy_labels or legacy_project_id)
         growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="issue_sources",
+            title="Issue Sources",
+            description="GitHub and GitLab issue sources for ticket polling.",
+            create_label="Add Issue Source",
+            create_url="/ui/issue-sources/create?return_to=/ui/issue-sources",
+            rows=_build_issue_source_rows(sources, project_lookup, token_lookup, agent_lookup),
+            empty_message="No issue sources yet.",
+        )
         return _render_template(
             request,
             "issue_sources.html",
@@ -4006,18 +4449,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "title": "Issue Sources",
                 "active_nav": "issue_sources",
                 "growl_message": growl_message,
-                "sources": sources,
-                "github_task_source": github_task_source,
-                "gitlab_task_source": gitlab_task_source,
-                "project_lookup": project_lookup,
-                "token_lookup": token_lookup,
-                "agent_lookup": agent_lookup,
-                "legacy_github_config": legacy_has_config,
-                "legacy_github_project_name": legacy_project_name,
-                "legacy_github_owner": legacy_owner,
-                "legacy_github_repo": legacy_repo,
-                "legacy_github_state": legacy_state,
-                "legacy_github_labels": legacy_labels,
+                **table_context,
             },
         )
 
@@ -4091,6 +4523,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         labels = _parse_labels(labels_raw)
         enabled = form.get("enabled") == "on"
         auto_start = form.get("auto_start") == "on"
+        poll_interval_raw = str(form.get("poll_interval_seconds", "60")).strip()
+        poll_interval_seconds = max(10, int(poll_interval_raw)) if poll_interval_raw.isdigit() else 60
         if not project_id or not token_id or not repo:
             raise HTTPException(status_code=400, detail="Missing issue source fields")
         if provider == "github":
@@ -4114,6 +4548,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             labels=labels,
             enabled=enabled,
             auto_start=auto_start,
+            poll_interval_seconds=poll_interval_seconds,
         )
         return_to = str(form.get("return_to", "/ui/issue-sources")).strip() or "/ui/issue-sources"
         if not return_to.startswith("/ui"):
@@ -4138,6 +4573,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         labels = _parse_labels(labels_raw)
         enabled = form.get("enabled") == "on"
         auto_start = form.get("auto_start") == "on"
+        poll_interval_raw = str(form.get("poll_interval_seconds", "60")).strip()
+        poll_interval_seconds = max(10, int(poll_interval_raw)) if poll_interval_raw.isdigit() else 60
         if not project_id or not token_id or not repo:
             raise HTTPException(status_code=400, detail="Missing issue source fields")
         if agent_id and not database.get_agent(agent_id):
@@ -4155,6 +4592,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             labels=labels,
             enabled=enabled,
             auto_start=auto_start,
+            poll_interval_seconds=poll_interval_seconds,
         )
         return RedirectResponse("/ui/issue-sources?saved=issue_source_updated", status_code=303)
 

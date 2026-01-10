@@ -142,6 +142,7 @@ class IssueSourceRecord:
     labels: list[str]
     enabled: bool
     auto_start: bool
+    poll_interval_seconds: int
     created_at: str
     updated_at: str
 
@@ -158,6 +159,7 @@ class GitHubSourceRecord:
     labels: list[str]
     enabled: bool
     auto_start: bool
+    poll_interval_seconds: int
     created_at: str
     updated_at: str
 
@@ -173,6 +175,7 @@ class GitLabSourceRecord:
     labels: list[str]
     enabled: bool
     auto_start: bool
+    poll_interval_seconds: int
     created_at: str
     updated_at: str
 
@@ -191,6 +194,18 @@ class GitHubTokenRecord:
 @dataclass(frozen=True)
 class GitLabTokenRecord:
     id: str
+    note: Optional[str]
+    token: str
+    user_id: Optional[str]
+    user_login: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class RemoteTokenRecord:
+    id: str
+    provider: str
     note: Optional[str]
     token: str
     user_id: Optional[str]
@@ -288,6 +303,9 @@ class AgentRecord:
     trust_level: Optional[str]
     input_echo_prefix: Optional[str]
     response_prefix: Optional[str]
+    llm_base_url: Optional[str]
+    llm_api_key: Optional[str]
+    llm_model: Optional[str]
     created_at: str
     updated_at: str
 
@@ -534,6 +552,7 @@ class IssueSourceModel(Base):
     labels_json: Mapped[str] = mapped_column(Text, nullable=False)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False)
     auto_start: Mapped[int] = mapped_column(Integer, nullable=False)
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -562,6 +581,19 @@ class GitLabTokenModel(Base):
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class RemoteTokenModel(Base):
+    __tablename__ = "remote_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    user_login: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class AgentModel(Base):
     __tablename__ = "agents"
 
@@ -576,6 +608,9 @@ class AgentModel(Base):
     trust_level: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     input_echo_prefix: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     response_prefix: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    llm_base_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    llm_api_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    llm_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -1337,35 +1372,35 @@ class Database:
             session.query(ProjectModel).filter(ProjectModel.id == project_id).delete()
 
     def list_github_tokens(self) -> list[GitHubTokenRecord]:
-        with self.session() as session:
-            rows = session.execute(select(GitHubTokenModel).order_by(GitHubTokenModel.created_at.desc())).scalars().all()
+        """Legacy wrapper - returns tokens from unified remote_tokens table."""
+        tokens = self.list_remote_tokens(provider="github")
         return [
             GitHubTokenRecord(
-                id=row.id,
-                note=row.note,
-                token=row.token,
-                user_id=row.user_id,
-                user_login=row.user_login,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
+                id=t.id,
+                note=t.note,
+                token=t.token,
+                user_id=t.user_id,
+                user_login=t.user_login,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
             )
-            for row in rows
+            for t in tokens
         ]
 
     def list_gitlab_tokens(self) -> list[GitLabTokenRecord]:
-        with self.session() as session:
-            rows = session.execute(select(GitLabTokenModel).order_by(GitLabTokenModel.created_at.desc())).scalars().all()
+        """Legacy wrapper - returns tokens from unified remote_tokens table."""
+        tokens = self.list_remote_tokens(provider="gitlab")
         return [
             GitLabTokenRecord(
-                id=row.id,
-                note=row.note,
-                token=row.token,
-                user_id=row.user_id,
-                user_login=row.user_login,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
+                id=t.id,
+                note=t.note,
+                token=t.token,
+                user_id=t.user_id,
+                user_login=t.user_login,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
             )
-            for row in rows
+            for t in tokens
         ]
 
     def list_repo_resources(self) -> list[RepoResourceRecord]:
@@ -1606,28 +1641,34 @@ class Database:
             row.updated_at = utc_now()
 
     def get_latest_github_token_update(self) -> str:
+        """Legacy wrapper - uses unified remote_tokens table."""
         with self.session() as session:
-            value = session.execute(select(func.max(GitHubTokenModel.updated_at))).scalar_one_or_none()
+            value = session.execute(
+                select(func.max(RemoteTokenModel.updated_at)).where(RemoteTokenModel.provider == "github")
+            ).scalar_one_or_none()
         return value or ""
 
     def get_latest_gitlab_token_update(self) -> str:
+        """Legacy wrapper - uses unified remote_tokens table."""
         with self.session() as session:
-            value = session.execute(select(func.max(GitLabTokenModel.updated_at))).scalar_one_or_none()
+            value = session.execute(
+                select(func.max(RemoteTokenModel.updated_at)).where(RemoteTokenModel.provider == "gitlab")
+            ).scalar_one_or_none()
         return value or ""
 
     def get_github_token(self, token_id: str) -> Optional[GitHubTokenRecord]:
-        with self.session() as session:
-            row = session.get(GitHubTokenModel, token_id)
-        if not row:
+        """Legacy wrapper - uses unified remote_tokens table."""
+        t = self.get_remote_token(token_id)
+        if not t or t.provider != "github":
             return None
         return GitHubTokenRecord(
-            id=row.id,
-            note=row.note,
-            token=row.token,
-            user_id=row.user_id,
-            user_login=row.user_login,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
+            id=t.id,
+            note=t.note,
+            token=t.token,
+            user_id=t.user_id,
+            user_login=t.user_login,
+            created_at=t.created_at,
+            updated_at=t.updated_at,
         )
 
     def insert_github_token(
@@ -1638,19 +1679,15 @@ class Database:
         user_id: Optional[str],
         user_login: Optional[str],
     ) -> None:
-        now = utc_now()
-        with self.session() as session:
-            session.add(
-                GitHubTokenModel(
-                    id=token_id,
-                    token=token,
-                    note=note,
-                    user_id=user_id,
-                    user_login=user_login,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+        """Legacy wrapper - uses unified remote_tokens table."""
+        self.insert_remote_token(
+            token_id,
+            provider="github",
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=user_login,
+        )
 
     def update_github_token(
         self,
@@ -1661,41 +1698,32 @@ class Database:
         user_id: Optional[str] = None,
         user_login: Optional[str] = None,
     ) -> None:
-        with self.session() as session:
-            row = session.get(GitHubTokenModel, token_id)
-            if not row:
-                return
-            if token is not None:
-                row.token = token
-            if note is not None:
-                row.note = note
-            if user_id is not None:
-                row.user_id = user_id
-            if user_login is not None:
-                row.user_login = user_login
-            row.updated_at = utc_now()
+        """Legacy wrapper - uses unified remote_tokens table."""
+        self.update_remote_token(
+            token_id,
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=user_login,
+        )
 
     def delete_github_token(self, token_id: str) -> None:
-        with self.session() as session:
-            session.query(IssueSourceModel).filter(
-                IssueSourceModel.token_id == token_id,
-                IssueSourceModel.provider == "github",
-            ).delete()
-            session.query(GitHubTokenModel).filter(GitHubTokenModel.id == token_id).delete()
+        """Legacy wrapper - uses unified remote_tokens table."""
+        self.delete_remote_token(token_id)
 
     def get_gitlab_token(self, token_id: str) -> Optional[GitLabTokenRecord]:
-        with self.session() as session:
-            row = session.get(GitLabTokenModel, token_id)
-        if not row:
+        """Legacy wrapper - uses unified remote_tokens table."""
+        t = self.get_remote_token(token_id)
+        if not t or t.provider != "gitlab":
             return None
         return GitLabTokenRecord(
-            id=row.id,
-            note=row.note,
-            token=row.token,
-            user_id=row.user_id,
-            user_login=row.user_login,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
+            id=t.id,
+            note=t.note,
+            token=t.token,
+            user_id=t.user_id,
+            user_login=t.user_login,
+            created_at=t.created_at,
+            updated_at=t.updated_at,
         )
 
     def insert_gitlab_token(
@@ -1706,19 +1734,15 @@ class Database:
         user_id: Optional[str],
         user_login: Optional[str],
     ) -> None:
-        now = utc_now()
-        with self.session() as session:
-            session.add(
-                GitLabTokenModel(
-                    id=token_id,
-                    token=token,
-                    note=note,
-                    user_id=user_id,
-                    user_login=user_login,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+        """Legacy wrapper - uses unified remote_tokens table."""
+        self.insert_remote_token(
+            token_id,
+            provider="gitlab",
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=user_login,
+        )
 
     def update_gitlab_token(
         self,
@@ -1729,10 +1753,101 @@ class Database:
         user_id: Optional[str] = None,
         user_login: Optional[str] = None,
     ) -> None:
+        """Legacy wrapper - uses unified remote_tokens table."""
+        self.update_remote_token(
+            token_id,
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=user_login,
+        )
+
+    def delete_gitlab_token(self, token_id: str) -> None:
+        """Legacy wrapper - uses unified remote_tokens table."""
+        self.delete_remote_token(token_id)
+
+    # --- Unified RemoteToken methods ---
+
+    def list_remote_tokens(
+        self,
+        provider: Optional[str] = None,
+    ) -> list[RemoteTokenRecord]:
         with self.session() as session:
-            row = session.get(GitLabTokenModel, token_id)
+            stmt = select(RemoteTokenModel)
+            if provider:
+                stmt = stmt.where(RemoteTokenModel.provider == provider)
+            rows = session.execute(stmt.order_by(RemoteTokenModel.created_at.desc())).scalars().all()
+        return [
+            RemoteTokenRecord(
+                id=row.id,
+                provider=row.provider,
+                note=row.note,
+                token=row.token,
+                user_id=row.user_id,
+                user_login=row.user_login,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_remote_token(self, token_id: str) -> Optional[RemoteTokenRecord]:
+        with self.session() as session:
+            row = session.get(RemoteTokenModel, token_id)
+            if not row:
+                return None
+            return RemoteTokenRecord(
+                id=row.id,
+                provider=row.provider,
+                note=row.note,
+                token=row.token,
+                user_id=row.user_id,
+                user_login=row.user_login,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+
+    def insert_remote_token(
+        self,
+        token_id: str,
+        *,
+        provider: str,
+        token: str,
+        note: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_login: Optional[str] = None,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                RemoteTokenModel(
+                    id=token_id,
+                    provider=provider,
+                    note=note,
+                    token=token,
+                    user_id=user_id,
+                    user_login=user_login,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_remote_token(
+        self,
+        token_id: str,
+        *,
+        provider: Optional[str] = None,
+        token: Optional[str] = None,
+        note: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_login: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(RemoteTokenModel, token_id)
             if not row:
                 return
+            if provider is not None:
+                row.provider = provider
             if token is not None:
                 row.token = token
             if note is not None:
@@ -1743,13 +1858,15 @@ class Database:
                 row.user_login = user_login
             row.updated_at = utc_now()
 
-    def delete_gitlab_token(self, token_id: str) -> None:
+    def delete_remote_token(self, token_id: str) -> None:
         with self.session() as session:
-            session.query(IssueSourceModel).filter(
-                IssueSourceModel.token_id == token_id,
-                IssueSourceModel.provider == "gitlab",
-            ).delete()
-            session.query(GitLabTokenModel).filter(GitLabTokenModel.id == token_id).delete()
+            row = session.get(RemoteTokenModel, token_id)
+            if row:
+                session.query(IssueSourceModel).filter(
+                    IssueSourceModel.token_id == token_id,
+                    IssueSourceModel.provider == row.provider,
+                ).delete()
+                session.query(RemoteTokenModel).filter(RemoteTokenModel.id == token_id).delete()
 
     def list_issue_sources(
         self,
@@ -1775,6 +1892,7 @@ class Database:
                 labels=json_loads(row.labels_json) or [],
                 enabled=bool(row.enabled),
                 auto_start=bool(row.auto_start),
+                poll_interval_seconds=row.poll_interval_seconds,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -1797,6 +1915,7 @@ class Database:
             labels=json_loads(row.labels_json) or [],
             enabled=bool(row.enabled),
             auto_start=bool(row.auto_start),
+            poll_interval_seconds=row.poll_interval_seconds,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1813,6 +1932,7 @@ class Database:
         labels: list[str],
         enabled: bool,
         auto_start: bool,
+        poll_interval_seconds: int = 60,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1828,6 +1948,7 @@ class Database:
                     labels_json=json_dumps(labels),
                     enabled=1 if enabled else 0,
                     auto_start=1 if auto_start else 0,
+                    poll_interval_seconds=poll_interval_seconds,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1846,6 +1967,7 @@ class Database:
         labels: Optional[list[str]] = None,
         enabled: Optional[bool] = None,
         auto_start: Optional[bool] = None,
+        poll_interval_seconds: Optional[int] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(IssueSourceModel, source_id)
@@ -1869,6 +1991,8 @@ class Database:
                 row.enabled = 1 if enabled else 0
             if auto_start is not None:
                 row.auto_start = 1 if auto_start else 0
+            if poll_interval_seconds is not None:
+                row.poll_interval_seconds = poll_interval_seconds
             row.updated_at = utc_now()
 
     def delete_issue_source(self, source_id: str) -> None:
@@ -1892,6 +2016,7 @@ class Database:
                     labels=source.labels,
                     enabled=source.enabled,
                     auto_start=source.auto_start,
+                    poll_interval_seconds=source.poll_interval_seconds,
                     created_at=source.created_at,
                     updated_at=source.updated_at,
                 )
@@ -1914,6 +2039,7 @@ class Database:
             labels=source.labels,
             enabled=source.enabled,
             auto_start=source.auto_start,
+            poll_interval_seconds=source.poll_interval_seconds,
             created_at=source.created_at,
             updated_at=source.updated_at,
         )
@@ -2022,6 +2148,7 @@ class Database:
                 labels=source.labels,
                 enabled=source.enabled,
                 auto_start=source.auto_start,
+                poll_interval_seconds=source.poll_interval_seconds,
                 created_at=source.created_at,
                 updated_at=source.updated_at,
             )
@@ -2042,6 +2169,7 @@ class Database:
             labels=source.labels,
             enabled=source.enabled,
             auto_start=source.auto_start,
+            poll_interval_seconds=source.poll_interval_seconds,
             created_at=source.created_at,
             updated_at=source.updated_at,
         )
@@ -2671,6 +2799,9 @@ class Database:
                 trust_level=row.trust_level,
                 input_echo_prefix=row.input_echo_prefix,
                 response_prefix=row.response_prefix,
+                llm_base_url=row.llm_base_url,
+                llm_api_key=row.llm_api_key,
+                llm_model=row.llm_model,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -2766,6 +2897,9 @@ class Database:
         trust_level: Optional[str],
         input_echo_prefix: Optional[str],
         response_prefix: Optional[str],
+        llm_base_url: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_model: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -2782,6 +2916,9 @@ class Database:
                     trust_level=trust_level,
                     input_echo_prefix=input_echo_prefix,
                     response_prefix=response_prefix,
+                    llm_base_url=llm_base_url,
+                    llm_api_key=llm_api_key,
+                    llm_model=llm_model,
                     created_at=now,
                     updated_at=now,
                 )
@@ -2801,6 +2938,9 @@ class Database:
         trust_level: Optional[str] = None,
         input_echo_prefix: Optional[str] = None,
         response_prefix: Optional[str] = None,
+        llm_base_url: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_model: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -2826,6 +2966,12 @@ class Database:
                 row.input_echo_prefix = input_echo_prefix
             if response_prefix is not None:
                 row.response_prefix = response_prefix
+            if llm_base_url is not None:
+                row.llm_base_url = llm_base_url
+            if llm_api_key is not None:
+                row.llm_api_key = llm_api_key
+            if llm_model is not None:
+                row.llm_model = llm_model
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -2849,6 +2995,9 @@ class Database:
             trust_level=row.trust_level,
             input_echo_prefix=row.input_echo_prefix,
             response_prefix=row.response_prefix,
+            llm_base_url=row.llm_base_url,
+            llm_api_key=row.llm_api_key,
+            llm_model=row.llm_model,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -2870,6 +3019,9 @@ class Database:
             trust_level=row.trust_level,
             input_echo_prefix=row.input_echo_prefix,
             response_prefix=row.response_prefix,
+            llm_base_url=row.llm_base_url,
+            llm_api_key=row.llm_api_key,
+            llm_model=row.llm_model,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Edit Remote Token</h3>
+      <p class="muted">Provider: {{ token.provider }} | User: {{ token.user_login or 'unknown' }}{% if token.user_id %} ({{ token.user_id }}){% endif %}</p>
+      <form method="post" action="/remote-tokens/{{ token.id }}/edit">
+        <div class="field-group">
+          <label>Provider</label>
+          <select name="provider" required>
+            <option value="github" {% if token.provider == 'github' %}selected{% endif %}>GitHub</option>
+            <option value="gitlab" {% if token.provider == 'gitlab' %}selected{% endif %}>GitLab</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Note</label>
+          <input type="text" name="note" value="{{ token.note or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Personal Access Token</label>
+          <input type="password" name="token" placeholder="leave blank to keep existing" />
+        </div>
+        <button type="submit">Save Token</button>
+      </form>
+      <form method="post" action="/remote-tokens/{{ token.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this token? This cannot be undone.">Delete Token</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

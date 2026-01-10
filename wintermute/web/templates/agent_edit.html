@@ -54,6 +54,19 @@
           <label>Response Prefix</label>
           <input type="text" name="response_prefix" value="{{ agent.response_prefix or '' }}" placeholder="•" />
         </div>
+        <h4>LLM API Configuration (for decision path)</h4>
+        <div class="field-group">
+          <label>LLM Base URL</label>
+          <input type="text" name="llm_base_url" value="{{ agent.llm_base_url or '' }}" placeholder="http://localhost:11434/v1" />
+        </div>
+        <div class="field-group">
+          <label>LLM API Key</label>
+          <input type="text" name="llm_api_key" value="{{ agent.llm_api_key or '' }}" placeholder="ollama" />
+        </div>
+        <div class="field-group">
+          <label>LLM Model</label>
+          <input type="text" name="llm_model" value="{{ agent.llm_model or '' }}" placeholder="llama3.2" />
+        </div>
         <button type="submit">Save Agent</button>
       </form>
       <div class="form-actions">
