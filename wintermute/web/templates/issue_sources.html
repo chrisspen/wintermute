@@ -4,8 +4,8 @@
 <div class="panel">
   <div class="grid">
     <div class="tile">
-      <h3>GitHub Sources</h3>
-      <a href="/ui/github-sources/create?return_to=/ui/github-sources">Add GitHub Source</a>
+      <h3>Issue Sources</h3>
+      <a href="/ui/issue-sources/create?return_to=/ui/issue-sources">Add Issue Source</a>
     </div>
     <div class="tile">
       <h3>GitHub Poller</h3>
@@ -20,12 +20,24 @@
       </form>
     </div>
     <div class="tile">
+      <h3>GitLab Poller</h3>
+      <form method="post" action="/sources/gitlab_issues/ui_update">
+        <div class="checkbox-row">
+          <input type="checkbox" name="enabled" {% if gitlab_task_source and gitlab_task_source.enabled %}checked{% endif %} />
+          <label>Enabled</label>
+        </div>
+        <label>Poll Interval (seconds)</label>
+        <input type="number" name="poll_interval_seconds" min="10" value="{{ gitlab_task_source.poll_interval_seconds if gitlab_task_source else 60 }}" />
+        <button type="submit">Update Poller</button>
+      </form>
+    </div>
+    <div class="tile">
       <h3>Source List</h3>
       <ul>
         {% for source in sources %}
         <li>
-          <a href="/ui/github-sources/{{ source.id }}/edit">
-            {{ project_lookup.get(source.project_id, 'unknown') }}: {{ source.owner }}/{{ source.repo }}
+          <a href="/ui/issue-sources/{{ source.id }}/edit">
+            [{{ source.provider }}] {{ project_lookup.get(source.project_id, 'unknown') }}: {{ source.repo }}
           </a>
           ({{ 'enabled' if source.enabled else 'disabled' }})
           [{{ token_lookup.get(source.token_id, 'no token') }}]
@@ -33,18 +45,18 @@
           [{{ 'auto' if source.auto_start else 'manual' }}]
         </li>
         {% else %}
-        <li class="muted">No GitHub sources yet</li>
+        <li class="muted">No issue sources yet</li>
         {% endfor %}
       </ul>
     </div>
-    {% if legacy_config %}
+    {% if legacy_github_config %}
     <div class="tile">
       <h3>Legacy GitHub Issues Config</h3>
       <ul>
-        <li>Project: {{ legacy_project_name }}</li>
-        <li>Repo: {{ legacy_owner }}/{{ legacy_repo }}</li>
-        <li>State: {{ legacy_state or 'open' }}</li>
-        <li>Labels: {{ legacy_labels or 'none' }}</li>
+        <li>Project: {{ legacy_github_project_name }}</li>
+        <li>Repo: {{ legacy_github_owner }}/{{ legacy_github_repo }}</li>
+        <li>State: {{ legacy_github_state or 'open' }}</li>
+        <li>Labels: {{ legacy_github_labels or 'none' }}</li>
       </ul>
     </div>
     {% endif %}

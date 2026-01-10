@@ -10,6 +10,9 @@ from unittest.mock import MagicMock, patch, PropertyMock
 
 # Create mock modules before importing wintermute modules
 # This allows tests to run without sqlalchemy installed
+# Save original modules so we can restore them after import
+_original_db = sys.modules.get('wintermute.db')
+_original_runner = sys.modules.get('wintermute.runner')
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,17 @@ from wintermute.claude_client import (
     _CLAUDE_PROCESSES,
     _CLAUDE_LOCK,
 )
+
+# Restore original modules after import to avoid polluting other tests
+if _original_db is not None:
+    sys.modules['wintermute.db'] = _original_db
+else:
+    del sys.modules['wintermute.db']
+
+if _original_runner is not None:
+    sys.modules['wintermute.runner'] = _original_runner
+else:
+    del sys.modules['wintermute.runner']
 
 
 def _make_agent(

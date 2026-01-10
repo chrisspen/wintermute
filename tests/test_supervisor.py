@@ -66,6 +66,7 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         draft = WorkItemDraft(work_id="a", priority=5, source_id="queue", checkpoint={})
         source = QueueSource([draft])
         supervisor = Supervisor(self.db, [source], self.executor, self.tools)
+        supervisor._ensure_task_sources()
         await supervisor._poll_sources()
         await supervisor._poll_sources()
         items = self.db.fetch_ready_work_items("9999-01-01T00:00:00+00:00")
@@ -75,6 +76,7 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         draft = WorkItemDraft(work_id="b", priority=5, source_id="queue", checkpoint={})
         source = FailingSource([draft])
         supervisor = Supervisor(self.db, [source], self.executor, self.tools, max_attempts=1)
+        supervisor._ensure_task_sources()
         self.db.insert_work_item_if_absent(draft.work_id, draft.source_id, draft.priority, draft.checkpoint)
         record = self.db.get_work_item("b")
         assert record is not None
@@ -88,6 +90,7 @@ class SupervisorTests(unittest.IsolatedAsyncioTestCase):
         high = WorkItemDraft(work_id="high", priority=1, source_id="queue", checkpoint={})
         source = QueueSource([high])
         supervisor = Supervisor(self.db, [source], self.executor, self.tools)
+        supervisor._ensure_task_sources()
         self.db.insert_work_item_if_absent(low.work_id, low.source_id, low.priority, low.checkpoint)
         supervisor._current_work_id = "low"
         await supervisor._poll_sources()

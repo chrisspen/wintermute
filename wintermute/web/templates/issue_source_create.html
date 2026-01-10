@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Add Issue Source</h3>
+      {% if token_notice %}
+      <p class="muted">{{ token_notice }}</p>
+      {% endif %}
+      <form method="post" action="/issue-sources">
+        <input type="hidden" name="return_to" value="{{ return_to }}" />
+        <div class="checkbox-row">
+          <input type="checkbox" name="enabled" checked />
+          <label>Enabled</label>
+        </div>
+        <label>Provider</label>
+        <select name="provider" id="provider-select" required>
+          <option value="github" selected>GitHub</option>
+          <option value="gitlab">GitLab</option>
+        </select>
+        <label>Project</label>
+        <select name="project_id" required>
+          {% for project in projects %}
+          <option value="{{ project.id }}">{{ project.name }}</option>
+          {% endfor %}
+        </select>
+        <div id="github-token-group">
+          <label>GitHub Token</label>
+          <select name="github_token_id">
+            <option value="">Select a token</option>
+            {% for token in github_tokens %}
+            <option value="{{ token.id }}">{{ token.note or token.user_login or token.id }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="gitlab-token-group" style="display: none;">
+          <label>GitLab Token</label>
+          <select name="gitlab_token_id">
+            <option value="">Select a token</option>
+            {% for token in gitlab_tokens %}
+            <option value="{{ token.id }}">{{ token.note or token.user_login or token.id }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <label>Agent</label>
+        <select name="agent_id">
+          <option value="">None</option>
+          {% for agent in agents %}
+          <option value="{{ agent.id }}">{{ agent.name }}</option>
+          {% endfor %}
+        </select>
+        <label>Repository Path</label>
+        <input type="text" name="repo" placeholder="owner/repo" required />
+        <label>Issue State</label>
+        <select name="state">
+          <option value="open" selected>open</option>
+          <option value="closed">closed</option>
+          <option value="all">all</option>
+        </select>
+        <label>Labels (comma-separated)</label>
+        <input type="text" name="labels" />
+        <div class="checkbox-row">
+          <input type="checkbox" name="auto_start" />
+          <label>Auto-start agent sessions for issues</label>
+        </div>
+        <button type="submit">Add Issue Source</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  var providerSelect = document.getElementById('provider-select');
+  var githubTokenGroup = document.getElementById('github-token-group');
+  var gitlabTokenGroup = document.getElementById('gitlab-token-group');
+
+  function updateTokenVisibility() {
+    var provider = providerSelect.value;
+    if (provider === 'github') {
+      githubTokenGroup.style.display = 'block';
+      gitlabTokenGroup.style.display = 'none';
+    } else {
+      githubTokenGroup.style.display = 'none';
+      gitlabTokenGroup.style.display = 'block';
+    }
+  }
+
+  providerSelect.addEventListener('change', updateTokenVisibility);
+  updateTokenVisibility();
+})();
+</script>
+{% endblock %}

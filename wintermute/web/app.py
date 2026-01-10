@@ -2719,12 +2719,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         project_sources = []
         for source in issue_sources:
             provider = source.provider
-            if provider == "github":
-                edit_url = f"/ui/github-sources/{source.id}/edit"
-            elif provider == "gitlab":
-                edit_url = f"/ui/gitlab-sources/{source.id}/edit"
-            else:
-                edit_url = None
+            edit_url = f"/ui/issue-sources/{source.id}/edit"
             project_sources.append(
                 {
                     "id": source.id,
@@ -2908,12 +2903,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             source_record = database.get_github_source(source_id) if source_id else None
             if source_record:
                 source_label = f"{source_record.owner}/{source_record.repo}"
-                source_href = f"/ui/github-sources/{source_record.id}/edit"
+                source_href = f"/ui/issue-sources/{source_record.id}/edit"
         elif is_gitlab_ticket:
             source_record = database.get_gitlab_source(source_id) if source_id else None
             if source_record:
                 source_label = source_record.project_path
-                source_href = f"/ui/gitlab-sources/{source_record.id}/edit"
+                source_href = f"/ui/issue-sources/{source_record.id}/edit"
         if source_record and ticket.project_id != source_record.project_id:
             database.update_ticket(ticket.id, project_id=source_record.project_id)
             ticket = database.get_ticket(ticket.id) or ticket
@@ -3852,71 +3847,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             },
         )
 
+    # Legacy routes - redirect to unified issue sources
     @app.get("/ui/github-sources")
-    def github_sources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        sources = database.list_github_sources()
-        github_task_source = database.get_task_source(GitHubIssuesSource.id)
-        legacy_config = github_task_source.config if github_task_source else {}
-        project_lookup = {project.id: project.name for project in database.list_projects()}
-        token_lookup = {
-            token.id: token.note or token.user_login or token.id
-            for token in database.list_github_tokens()
-        }
-        agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
-        legacy_project_id = str(legacy_config.get("project_id", "")).strip()
-        legacy_project_name = project_lookup.get(legacy_project_id, "unset") if legacy_project_id else "unset"
-        legacy_owner = str(legacy_config.get("owner", "")).strip()
-        legacy_repo = str(legacy_config.get("repo", "")).strip()
-        legacy_state = str(legacy_config.get("state", "")).strip()
-        legacy_labels = ", ".join(legacy_config.get("labels", []) or [])
-        legacy_has_config = bool(legacy_owner or legacy_repo or legacy_state or legacy_labels or legacy_project_id)
-        growl_message = _growl_message(request.query_params.get("saved"))
-        return _render_template(
-            request,
-            "github_sources.html",
-            {
-                "title": "GitHub Sources",
-                "active_nav": "github_sources",
-                "growl_message": growl_message,
-                "sources": sources,
-                "github_task_source": github_task_source,
-                "project_lookup": project_lookup,
-                "token_lookup": token_lookup,
-                "agent_lookup": agent_lookup,
-                "legacy_config": legacy_has_config,
-                "legacy_project_name": legacy_project_name,
-                "legacy_owner": legacy_owner,
-                "legacy_repo": legacy_repo,
-                "legacy_state": legacy_state,
-                "legacy_labels": legacy_labels,
-            },
-        )
+    def github_sources_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/issue-sources", status_code=302)
 
     @app.get("/ui/gitlab-sources")
-    def gitlab_sources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        sources = database.list_gitlab_sources()
-        gitlab_task_source = database.get_task_source(GitLabIssuesSource.id)
-        project_lookup = {project.id: project.name for project in database.list_projects()}
-        token_lookup = {
-            token.id: token.note or token.user_login or token.id
-            for token in database.list_gitlab_tokens()
-        }
-        agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
-        growl_message = _growl_message(request.query_params.get("saved"))
-        return _render_template(
-            request,
-            "gitlab_sources.html",
-            {
-                "title": "GitLab Sources",
-                "active_nav": "gitlab_sources",
-                "growl_message": growl_message,
-                "sources": sources,
-                "gitlab_task_source": gitlab_task_source,
-                "project_lookup": project_lookup,
-                "token_lookup": token_lookup,
-                "agent_lookup": agent_lookup,
-            },
-        )
+    def gitlab_sources_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/issue-sources", status_code=302)
 
     @app.get("/ui/github-tokens")
     def github_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -4019,255 +3957,213 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.get("/ui/github-sources/create")
-    def github_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        projects = database.list_projects()
-        tokens = database.list_github_tokens()
-        agents = database.list_agents()
-        return_to = request.query_params.get("return_to", "/ui/github-sources")
-        if not return_to.startswith("/ui"):
-            return_to = "/ui/github-sources"
-        token_notice = "" if tokens else "Add a GitHub token before creating a source."
-        return _render_template(
-            request,
-            "github_source_create.html",
-            {
-                "title": "Add GitHub Source",
-                "active_nav": "github_sources",
-                "growl_message": None,
-                "projects": projects,
-                "tokens": tokens,
-                "agents": agents,
-                "return_to": return_to,
-                "token_notice": token_notice if token_notice and not tokens else "",
-            },
-        )
+    def github_sources_create_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/issue-sources/create", status_code=302)
 
     @app.get("/ui/gitlab-sources/create")
-    def gitlab_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        projects = database.list_projects()
-        tokens = database.list_gitlab_tokens()
-        agents = database.list_agents()
-        return_to = request.query_params.get("return_to", "/ui/gitlab-sources")
-        if not return_to.startswith("/ui"):
-            return_to = "/ui/gitlab-sources"
-        token_notice = "" if tokens else "Add a GitLab token before creating a source."
-        return _render_template(
-            request,
-            "gitlab_source_create.html",
-            {
-                "title": "Add GitLab Source",
-                "active_nav": "gitlab_sources",
-                "growl_message": None,
-                "projects": projects,
-                "tokens": tokens,
-                "agents": agents,
-                "return_to": return_to,
-                "token_notice": token_notice if token_notice and not tokens else "",
-            },
-        )
+    def gitlab_sources_create_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/issue-sources/create", status_code=302)
 
     @app.get("/ui/github-sources/{source_id}/edit")
-    def github_sources_edit_ui(source_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
-        source = database.get_github_source(source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="GitHub source not found")
-        projects = database.list_projects()
-        tokens = database.list_github_tokens()
-        agents = database.list_agents()
-        labels = ", ".join(source.labels)
-        return _render_template(
-            request,
-            "github_source_edit.html",
-            {
-                "title": "Edit GitHub Source",
-                "active_nav": "github_sources",
-                "growl_message": None,
-                "source": source,
-                "projects": projects,
-                "tokens": tokens,
-                "agents": agents,
-                "labels": labels,
-            },
-        )
+    def github_sources_edit_ui_redirect(source_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse(f"/ui/issue-sources/{source_id}/edit", status_code=302)
 
     @app.get("/ui/gitlab-sources/{source_id}/edit")
-    def gitlab_sources_edit_ui(source_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
-        source = database.get_gitlab_source(source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail="GitLab source not found")
+    def gitlab_sources_edit_ui_redirect(source_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse(f"/ui/issue-sources/{source_id}/edit", status_code=302)
+
+    # --- Unified Issue Sources UI ---
+
+    @app.get("/ui/issue-sources")
+    def issue_sources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        sources = database.list_issue_sources()
+        github_task_source = database.get_task_source(GitHubIssuesSource.id)
+        gitlab_task_source = database.get_task_source(GitLabIssuesSource.id)
+        legacy_config = github_task_source.config if github_task_source else {}
+        project_lookup = {project.id: project.name for project in database.list_projects()}
+        github_token_lookup = {
+            token.id: token.note or token.user_login or token.id
+            for token in database.list_github_tokens()
+        }
+        gitlab_token_lookup = {
+            token.id: token.note or token.user_login or token.id
+            for token in database.list_gitlab_tokens()
+        }
+        token_lookup = {**github_token_lookup, **gitlab_token_lookup}
+        agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
+        legacy_project_id = str(legacy_config.get("project_id", "")).strip()
+        legacy_project_name = project_lookup.get(legacy_project_id, "unset") if legacy_project_id else "unset"
+        legacy_owner = str(legacy_config.get("owner", "")).strip()
+        legacy_repo = str(legacy_config.get("repo", "")).strip()
+        legacy_state = str(legacy_config.get("state", "")).strip()
+        legacy_labels = ", ".join(legacy_config.get("labels", []) or [])
+        legacy_has_config = bool(legacy_owner or legacy_repo or legacy_state or legacy_labels or legacy_project_id)
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "issue_sources.html",
+            {
+                "title": "Issue Sources",
+                "active_nav": "issue_sources",
+                "growl_message": growl_message,
+                "sources": sources,
+                "github_task_source": github_task_source,
+                "gitlab_task_source": gitlab_task_source,
+                "project_lookup": project_lookup,
+                "token_lookup": token_lookup,
+                "agent_lookup": agent_lookup,
+                "legacy_github_config": legacy_has_config,
+                "legacy_github_project_name": legacy_project_name,
+                "legacy_github_owner": legacy_owner,
+                "legacy_github_repo": legacy_repo,
+                "legacy_github_state": legacy_state,
+                "legacy_github_labels": legacy_labels,
+            },
+        )
+
+    @app.get("/ui/issue-sources/create")
+    def issue_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
-        tokens = database.list_gitlab_tokens()
+        github_tokens = database.list_github_tokens()
+        gitlab_tokens = database.list_gitlab_tokens()
+        agents = database.list_agents()
+        return_to = request.query_params.get("return_to", "/ui/issue-sources")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/issue-sources"
+        token_notice = ""
+        if not github_tokens and not gitlab_tokens:
+            token_notice = "Add a GitHub or GitLab token before creating a source."
+        return _render_template(
+            request,
+            "issue_source_create.html",
+            {
+                "title": "Add Issue Source",
+                "active_nav": "issue_sources",
+                "growl_message": None,
+                "projects": projects,
+                "github_tokens": github_tokens,
+                "gitlab_tokens": gitlab_tokens,
+                "agents": agents,
+                "return_to": return_to,
+                "token_notice": token_notice,
+            },
+        )
+
+    @app.get("/ui/issue-sources/{source_id}/edit")
+    def issue_sources_edit_ui(source_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        source = database.get_issue_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Issue source not found")
+        projects = database.list_projects()
+        github_tokens = database.list_github_tokens()
+        gitlab_tokens = database.list_gitlab_tokens()
         agents = database.list_agents()
         labels = ", ".join(source.labels)
         return _render_template(
             request,
-            "gitlab_source_edit.html",
+            "issue_source_edit.html",
             {
-                "title": "Edit GitLab Source",
-                "active_nav": "gitlab_sources",
+                "title": "Edit Issue Source",
+                "active_nav": "issue_sources",
                 "growl_message": None,
                 "source": source,
                 "projects": projects,
-                "tokens": tokens,
+                "github_tokens": github_tokens,
+                "gitlab_tokens": gitlab_tokens,
                 "agents": agents,
                 "labels": labels,
             },
         )
-    @app.post("/github-sources")
-    async def create_github_source(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+
+    @app.post("/issue-sources")
+    async def create_issue_source(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
+        provider = str(form.get("provider", "github")).strip()
         project_id = str(form.get("project_id", "")).strip()
-        token_id = str(form.get("token_id", "")).strip()
+        if provider == "github":
+            token_id = str(form.get("github_token_id", "")).strip()
+        else:
+            token_id = str(form.get("gitlab_token_id", "")).strip()
         agent_id = str(form.get("agent_id", "")).strip() or None
-        owner = str(form.get("owner", "")).strip()
         repo = str(form.get("repo", "")).strip()
         state = str(form.get("state", "open")).strip() or "open"
         labels_raw = str(form.get("labels", "")).strip()
         labels = _parse_labels(labels_raw)
         enabled = form.get("enabled") == "on"
         auto_start = form.get("auto_start") == "on"
-        if not project_id or not token_id or not owner or not repo:
-            raise HTTPException(status_code=400, detail="Missing GitHub source fields")
-        if not database.get_github_token(token_id):
-            raise HTTPException(status_code=400, detail="GitHub token not found")
+        if not project_id or not token_id or not repo:
+            raise HTTPException(status_code=400, detail="Missing issue source fields")
+        if provider == "github":
+            if not database.get_github_token(token_id):
+                raise HTTPException(status_code=400, detail="GitHub token not found")
+        else:
+            if not database.get_gitlab_token(token_id):
+                raise HTTPException(status_code=400, detail="GitLab token not found")
         if agent_id and not database.get_agent(agent_id):
             raise HTTPException(status_code=400, detail="Agent not found")
         if auto_start and not agent_id:
             raise HTTPException(status_code=400, detail="Agent is required for auto-start")
-        database.insert_github_source(
+        database.insert_issue_source(
             str(uuid.uuid4()),
+            provider=provider,
             token_id=token_id,
             agent_id=agent_id,
             project_id=project_id,
-            owner=owner,
             repo=repo,
             state=state,
             labels=labels,
             enabled=enabled,
             auto_start=auto_start,
         )
-        return_to = str(form.get("return_to", "/ui/github-sources")).strip() or "/ui/github-sources"
+        return_to = str(form.get("return_to", "/ui/issue-sources")).strip() or "/ui/issue-sources"
         if not return_to.startswith("/ui"):
-            return_to = "/ui/github-sources"
-        return RedirectResponse(f"{return_to}?saved=github_source_created", status_code=303)
+            return_to = "/ui/issue-sources"
+        return RedirectResponse(f"{return_to}?saved=issue_source_created", status_code=303)
 
-    @app.post("/github-sources/{source_id}/edit")
-    async def update_github_source(
+    @app.post("/issue-sources/{source_id}/edit")
+    async def update_issue_source(
         source_id: str, request: Request, user: str = Depends(_require_login)
     ) -> RedirectResponse:
         form = await request.form()
+        provider = str(form.get("provider", "github")).strip()
         project_id = str(form.get("project_id", "")).strip()
-        token_id = str(form.get("token_id", "")).strip()
+        if provider == "github":
+            token_id = str(form.get("github_token_id", "")).strip()
+        else:
+            token_id = str(form.get("gitlab_token_id", "")).strip()
         agent_id = str(form.get("agent_id", "")).strip() or None
-        owner = str(form.get("owner", "")).strip()
         repo = str(form.get("repo", "")).strip()
         state = str(form.get("state", "open")).strip() or "open"
         labels_raw = str(form.get("labels", "")).strip()
         labels = _parse_labels(labels_raw)
         enabled = form.get("enabled") == "on"
         auto_start = form.get("auto_start") == "on"
-        if not project_id or not token_id or not owner or not repo:
-            raise HTTPException(status_code=400, detail="Missing GitHub source fields")
+        if not project_id or not token_id or not repo:
+            raise HTTPException(status_code=400, detail="Missing issue source fields")
         if agent_id and not database.get_agent(agent_id):
             raise HTTPException(status_code=400, detail="Agent not found")
         if auto_start and not agent_id:
             raise HTTPException(status_code=400, detail="Agent is required for auto-start")
-        database.update_github_source(
+        database.update_issue_source(
             source_id,
+            provider=provider,
             token_id=token_id,
             agent_id=agent_id,
             project_id=project_id,
-            owner=owner,
             repo=repo,
             state=state,
             labels=labels,
             enabled=enabled,
             auto_start=auto_start,
         )
-        return RedirectResponse("/ui/github-sources?saved=github_source_updated", status_code=303)
+        return RedirectResponse("/ui/issue-sources?saved=issue_source_updated", status_code=303)
 
-    @app.post("/github-sources/{source_id}/delete")
-    async def delete_github_source(
+    @app.post("/issue-sources/{source_id}/delete")
+    async def delete_issue_source(
         source_id: str, user: str = Depends(_require_login)
     ) -> RedirectResponse:
-        database.delete_github_source(source_id)
-        return RedirectResponse("/ui/github-sources?saved=github_source_deleted", status_code=303)
-
-    @app.post("/gitlab-sources")
-    async def create_gitlab_source(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
-        form = await request.form()
-        project_id = str(form.get("project_id", "")).strip()
-        token_id = str(form.get("token_id", "")).strip()
-        agent_id = str(form.get("agent_id", "")).strip() or None
-        project_path = str(form.get("project_path", "")).strip()
-        state = str(form.get("state", "open")).strip() or "open"
-        labels_raw = str(form.get("labels", "")).strip()
-        labels = _parse_labels(labels_raw)
-        enabled = form.get("enabled") == "on"
-        auto_start = form.get("auto_start") == "on"
-        if not project_id or not token_id or not project_path:
-            raise HTTPException(status_code=400, detail="Missing GitLab source fields")
-        if not database.get_gitlab_token(token_id):
-            raise HTTPException(status_code=400, detail="GitLab token not found")
-        if agent_id and not database.get_agent(agent_id):
-            raise HTTPException(status_code=400, detail="Agent not found")
-        if auto_start and not agent_id:
-            raise HTTPException(status_code=400, detail="Agent is required for auto-start")
-        database.insert_gitlab_source(
-            str(uuid.uuid4()),
-            token_id=token_id,
-            agent_id=agent_id,
-            project_id=project_id,
-            project_path=project_path,
-            state=state,
-            labels=labels,
-            enabled=enabled,
-            auto_start=auto_start,
-        )
-        return_to = str(form.get("return_to", "/ui/gitlab-sources")).strip() or "/ui/gitlab-sources"
-        if not return_to.startswith("/ui"):
-            return_to = "/ui/gitlab-sources"
-        return RedirectResponse(f"{return_to}?saved=gitlab_source_created", status_code=303)
-
-    @app.post("/gitlab-sources/{source_id}/edit")
-    async def update_gitlab_source(
-        source_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
-        form = await request.form()
-        project_id = str(form.get("project_id", "")).strip()
-        token_id = str(form.get("token_id", "")).strip()
-        agent_id = str(form.get("agent_id", "")).strip() or None
-        project_path = str(form.get("project_path", "")).strip()
-        state = str(form.get("state", "open")).strip() or "open"
-        labels_raw = str(form.get("labels", "")).strip()
-        labels = _parse_labels(labels_raw)
-        enabled = form.get("enabled") == "on"
-        auto_start = form.get("auto_start") == "on"
-        if not project_id or not token_id or not project_path:
-            raise HTTPException(status_code=400, detail="Missing GitLab source fields")
-        if agent_id and not database.get_agent(agent_id):
-            raise HTTPException(status_code=400, detail="Agent not found")
-        if auto_start and not agent_id:
-            raise HTTPException(status_code=400, detail="Agent is required for auto-start")
-        database.update_gitlab_source(
-            source_id,
-            token_id=token_id,
-            agent_id=agent_id,
-            project_id=project_id,
-            project_path=project_path,
-            state=state,
-            labels=labels,
-            enabled=enabled,
-            auto_start=auto_start,
-        )
-        return RedirectResponse("/ui/gitlab-sources?saved=gitlab_source_updated", status_code=303)
-
-    @app.post("/gitlab-sources/{source_id}/delete")
-    async def delete_gitlab_source(
-        source_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
-        database.delete_gitlab_source(source_id)
-        return RedirectResponse("/ui/gitlab-sources?saved=gitlab_source_deleted", status_code=303)
+        database.delete_issue_source(source_id)
+        return RedirectResponse("/ui/issue-sources?saved=issue_source_deleted", status_code=303)
 
     @app.get("/ui/project-vms/{mapping_id}/edit")
     def project_vms_edit_ui(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
