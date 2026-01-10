@@ -22,7 +22,8 @@
           <label>Session Mode</label>
           <select name="session_mode">
             <option value="tmux" {% if agent.session_mode == "tmux" %}selected{% endif %}>tmux</option>
-            <option value="mcp" {% if agent.session_mode == "mcp" %}selected{% endif %}>mcp</option>
+            <option value="mcp" {% if agent.session_mode == "mcp" %}selected{% endif %}>mcp (Codex)</option>
+            <option value="claude" {% if agent.session_mode == "claude" %}selected{% endif %}>claude</option>
           </select>
         </div>
         <div class="field-group">

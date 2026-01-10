@@ -303,6 +303,7 @@ class AgentSessionRecord:
     repo_path: str
     thread_ts: Optional[str]
     mcp_conversation_id: Optional[str]
+    claude_session_id: Optional[str]
     last_output: Optional[str]
     last_output_offset: int
     output_buffer: Optional[str]
@@ -591,6 +592,7 @@ class AgentSessionModel(Base):
     repo_path: Mapped[str] = mapped_column(String, nullable=False)
     thread_ts: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     mcp_conversation_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    claude_session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_output_offset: Mapped[int] = mapped_column(Integer, nullable=False)
     output_buffer: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -2893,6 +2895,7 @@ class Database:
                 repo_path=row.repo_path,
                 thread_ts=row.thread_ts,
                 mcp_conversation_id=row.mcp_conversation_id,
+                claude_session_id=getattr(row, "claude_session_id", None),
                 last_output=row.last_output,
                 last_output_offset=row.last_output_offset,
                 output_buffer=row.output_buffer,
@@ -2933,6 +2936,7 @@ class Database:
             repo_path=row.repo_path,
             thread_ts=row.thread_ts,
             mcp_conversation_id=row.mcp_conversation_id,
+            claude_session_id=getattr(row, "claude_session_id", None),
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
             output_buffer=row.output_buffer,
@@ -2996,6 +3000,7 @@ class Database:
         status: Optional[str] = None,
         thread_ts: Optional[str] = None,
         mcp_conversation_id: Optional[str] = None,
+        claude_session_id: Optional[str] = None,
         last_output: Optional[str] = None,
         last_output_offset: Optional[int] = None,
         output_buffer: Optional[str] = None,
@@ -3018,6 +3023,8 @@ class Database:
                 row.thread_ts = thread_ts
             if mcp_conversation_id is not None:
                 row.mcp_conversation_id = mcp_conversation_id
+            if claude_session_id is not None:
+                row.claude_session_id = claude_session_id
             if last_output is not None:
                 row.last_output = last_output
             if last_output_offset is not None:
@@ -3066,6 +3073,7 @@ class Database:
             repo_path=row.repo_path,
             thread_ts=row.thread_ts,
             mcp_conversation_id=row.mcp_conversation_id,
+            claude_session_id=getattr(row, "claude_session_id", None),
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
             output_buffer=row.output_buffer,
@@ -3096,6 +3104,7 @@ class Database:
             repo_path=row.repo_path,
             thread_ts=row.thread_ts,
             mcp_conversation_id=row.mcp_conversation_id,
+            claude_session_id=getattr(row, "claude_session_id", None),
             last_output=row.last_output,
             last_output_offset=row.last_output_offset,
             output_buffer=row.output_buffer,
