@@ -4,11 +4,11 @@
 <div class="panel">
   <div class="grid">
     <div class="tile">
-      <h3>Add GitHub Source</h3>
+      <h3>Add GitLab Source</h3>
       {% if token_notice %}
       <p class="muted">{{ token_notice }}</p>
       {% endif %}
-      <form method="post" action="/github-sources">
+      <form method="post" action="/gitlab-sources">
         <input type="hidden" name="return_to" value="{{ return_to }}" />
         <div class="checkbox-row">
           <input type="checkbox" name="enabled" checked />
@@ -33,10 +33,8 @@
           <option value="{{ agent.id }}">{{ agent.name }}</option>
           {% endfor %}
         </select>
-        <label>Repo Owner</label>
-        <input type="text" name="owner" required />
-        <label>Repo Name</label>
-        <input type="text" name="repo" required />
+        <label>Project Path</label>
+        <input type="text" name="project_path" placeholder="group/subgroup/repo" required />
         <label>Issue State</label>
         <select name="state">
           <option value="open" selected>open</option>
@@ -49,7 +47,7 @@
           <input type="checkbox" name="auto_start" />
           <label>Auto-start agent sessions for issues</label>
         </div>
-        <button type="submit">Add GitHub Source</button>
+        <button type="submit">Add GitLab Source</button>
       </form>
     </div>
   </div>

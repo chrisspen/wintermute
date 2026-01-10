@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>GitLab Sources</h3>
+      <a href="/ui/gitlab-sources/create?return_to=/ui/gitlab-sources">Add GitLab Source</a>
+    </div>
+    <div class="tile">
+      <h3>GitLab Poller</h3>
+      <form method="post" action="/sources/gitlab_issues/ui_update">
+        <div class="checkbox-row">
+          <input type="checkbox" name="enabled" {% if gitlab_task_source and gitlab_task_source.enabled %}checked{% endif %} />
+          <label>Enabled</label>
+        </div>
+        <label>Poll Interval (seconds)</label>
+        <input type="number" name="poll_interval_seconds" min="10" value="{{ gitlab_task_source.poll_interval_seconds if gitlab_task_source else 60 }}" />
+        <button type="submit">Update Poller</button>
+      </form>
+    </div>
+    <div class="tile">
+      <h3>Source List</h3>
+      <ul>
+        {% for source in sources %}
+        <li>
+          <a href="/ui/gitlab-sources/{{ source.id }}/edit">
+            {{ project_lookup.get(source.project_id, 'unknown') }}: {{ source.project_path }}
+          </a>
+          ({{ 'enabled' if source.enabled else 'disabled' }})
+          [{{ token_lookup.get(source.token_id, 'no token') }}]
+          [{{ agent_lookup.get(source.agent_id, 'no agent') }}]
+          [{{ 'auto' if source.auto_start else 'manual' }}]
+        </li>
+        {% else %}
+        <li class="muted">No GitLab sources yet</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

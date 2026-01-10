@@ -17,6 +17,7 @@ from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext, WorkItemBlocked
 from wintermute.sources.demo import DemoSource
 from wintermute.sources.github import GitHubIssuesSource
+from wintermute.sources.gitlab import GitLabIssuesSource
 from wintermute.sources.comment_dispatch import CommentDispatchSource
 from wintermute.sources.slack import (
     SlackSource,
@@ -25,6 +26,8 @@ from wintermute.sources.slack import (
     SLACK_PROVIDER,
 )
 from wintermute.sources.sessions import SessionSource
+from wintermute.sources.tickets import TicketAutoStartSource
+from wintermute.sources.standup import StandupSource
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
 from wintermute.runner import build_ssh_spec, delete_repo_path
@@ -33,6 +36,11 @@ from wintermute.tools.github import (
     GitHubCommentIssueTool,
     GitHubGetIssueTool,
     GitHubListIssuesTool,
+)
+from wintermute.tools.gitlab import (
+    GitLabCommentIssueTool,
+    GitLabGetIssueTool,
+    GitLabListIssuesTool,
 )
 from wintermute.tools.slack import SlackPostMessageTool
 
@@ -302,6 +310,7 @@ class Supervisor:
         version = (
             self.db.get_latest_credential_update(),
             self.db.get_latest_github_token_update(),
+            self.db.get_latest_gitlab_token_update(),
         )
         if version != self._tools_version:
             self.tools = build_default_tools(self.db)
@@ -338,6 +347,10 @@ def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:
             registry.register(GitHubListIssuesTool(db=db))
             registry.register(GitHubGetIssueTool(db=db))
             registry.register(GitHubCommentIssueTool(db=db))
+        if db.list_gitlab_tokens():
+            registry.register(GitLabListIssuesTool(db=db))
+            registry.register(GitLabGetIssueTool(db=db))
+            registry.register(GitLabCommentIssueTool(db=db))
     return registry
 
 
@@ -356,8 +369,11 @@ async def main() -> None:
     register(DemoSource())
     register(CommentDispatchSource())
     register(GitHubIssuesSource())
+    register(GitLabIssuesSource())
     register(SlackSource())
     register(SessionSource())
+    register(TicketAutoStartSource())
+    register(StandupSource())
     db = Database()
     executor = Executor()
     tools = build_default_tools(db)

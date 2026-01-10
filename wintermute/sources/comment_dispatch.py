@@ -1,4 +1,4 @@
-"""Dispatch approved public comments to GitHub."""
+"""Dispatch approved public comments to GitHub or GitLab."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import Any
 
 from wintermute.db import Database
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
+from wintermute.tickets import parse_issue_ticket
 
 
 @dataclass
@@ -24,27 +25,52 @@ class CommentDispatchWorkItem(WorkItem):
             return
         if not comment.public or not comment.approved or comment.sent:
             return
-        if not comment.source_id or comment.issue_number is None:
+        provider, source_id, issue_number = parse_issue_ticket(comment.ticket_id)
+        if comment.issue_number is not None:
+            issue_number = comment.issue_number
+        if not source_id or issue_number is None or not provider:
             logger.warning("Comment %s missing source or issue number", comment.id)
             return
-        source = ctx.db.get_github_source(comment.source_id)
-        if not source or not source.token_id:
-            logger.warning("Comment %s missing GitHub source/token", comment.id)
+        if provider == "github":
+            source = ctx.db.get_github_source(source_id)
+            if not source or not source.token_id:
+                logger.warning("Comment %s missing GitHub source/token", comment.id)
+                return
+            tool = ctx.tools.get("github_comment_issue")
+            if not tool:
+                logger.warning("GitHub comment tool not available")
+                return
+            await ctx.tools.call(
+                "github_comment_issue",
+                {
+                    "token_id": source.token_id,
+                    "owner": source.owner,
+                    "repo": source.repo,
+                    "issue_number": issue_number,
+                    "body": comment.body,
+                },
+            )
+        elif provider == "gitlab":
+            source = ctx.db.get_gitlab_source(source_id)
+            if not source or not source.token_id:
+                logger.warning("Comment %s missing GitLab source/token", comment.id)
+                return
+            tool = ctx.tools.get("gitlab_comment_issue")
+            if not tool:
+                logger.warning("GitLab comment tool not available")
+                return
+            await ctx.tools.call(
+                "gitlab_comment_issue",
+                {
+                    "token_id": source.token_id,
+                    "project_id": source.project_path,
+                    "issue_iid": issue_number,
+                    "body": comment.body,
+                },
+            )
+        else:
+            logger.warning("Comment %s provider unsupported", comment.id)
             return
-        tool = ctx.tools.get("github_comment_issue")
-        if not tool:
-            logger.warning("GitHub comment tool not available")
-            return
-        await ctx.tools.call(
-            "github_comment_issue",
-            {
-                "token_id": source.token_id,
-                "owner": source.owner,
-                "repo": source.repo,
-                "issue_number": comment.issue_number,
-                "body": comment.body,
-            },
-        )
         ctx.db.mark_comment_sent(comment.id)
 
 

@@ -70,6 +70,18 @@
               GitHub Sources
             </a>
             <a
+              href="/ui/gitlab-tokens"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'gitlab_tokens' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              GitLab Tokens
+            </a>
+            <a
+              href="/ui/gitlab-sources"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'gitlab_sources' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              GitLab Sources
+            </a>
+            <a
               href="/ui/api-tokens"
               class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'api_tokens' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
             >
@@ -270,6 +282,15 @@
             closeModal();
           }
         });
+
+        document.addEventListener('keydown', function (event) {
+          if (event.key !== 'Escape') {
+            return;
+          }
+          if (modal.classList.contains('open')) {
+            closeModal();
+          }
+        });
       })();
     </script>
     <script>
@@ -428,6 +449,16 @@
 
         modal.addEventListener('click', function (event) {
           if (event.target === modal) {
+            resetPicker();
+            setOpen(false);
+          }
+        });
+
+        document.addEventListener('keydown', function (event) {
+          if (event.key !== 'Escape') {
+            return;
+          }
+          if (modal.classList.contains('open')) {
             resetPicker();
             setOpen(false);
           }

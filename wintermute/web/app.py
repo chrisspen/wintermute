@@ -17,6 +17,7 @@ import os
 import re
 import secrets
 import uuid
+import urllib.parse
 from datetime import datetime, timezone
 from dataclasses import asdict
 from typing import Any, Optional
@@ -51,6 +52,11 @@ from wintermute.runner import (
     strip_port_forwards,
 )
 from wintermute.sources.github import GitHubIssuesSource, _fetch_issue_comments, _issue_prompt
+from wintermute.sources.gitlab import (
+    GitLabIssuesSource,
+    _fetch_issue_comments as _fetch_gitlab_issue_comments,
+    _issue_prompt as _gitlab_issue_prompt,
+)
 from wintermute.sources.comment_dispatch import CommentDispatchSource
 from wintermute.sources.slack import (
     SLACK_APP_TOKEN_NAME,
@@ -58,6 +64,9 @@ from wintermute.sources.slack import (
     SLACK_PROVIDER,
     SlackSource,
 )
+from wintermute.sources.tickets import TicketAutoStartSource
+from wintermute.sources.standup import StandupSource
+from wintermute.tickets import parse_issue_ticket
 from wintermute.tools.github import GITHUB_PROVIDER, GITHUB_TOKEN_NAME
 
 
@@ -88,6 +97,8 @@ API_PERMISSION_MODELS = [
     {"key": "credentials", "label": "Credentials"},
     {"key": "github_sources", "label": "GitHub Sources"},
     {"key": "github_tokens", "label": "GitHub Tokens"},
+    {"key": "gitlab_sources", "label": "GitLab Sources"},
+    {"key": "gitlab_tokens", "label": "GitLab Tokens"},
     {"key": "project_vms", "label": "Project VM Mappings"},
     {"key": "projects", "label": "Projects"},
     {"key": "repo_resources", "label": "Repo Resources"},
@@ -112,6 +123,7 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "assigned_to", "label": "Assignee"},
             {"key": "estimate", "label": "Estimate"},
             {"key": "status", "label": "Status"},
+            {"key": "auto_start", "label": "Auto Start"},
             {"key": "source_url", "label": "Source"},
             {"key": "description", "label": "Description"},
             {"key": "internal_notes", "label": "Internal Notes"},
@@ -281,16 +293,16 @@ async def _get_github_comments_cached(
 
 
 def _parse_github_ticket(ticket_id: str) -> tuple[Optional[str], Optional[int]]:
-    if not ticket_id.startswith("github:"):
+    provider, source_id, issue_number = parse_issue_ticket(ticket_id)
+    if provider != "github":
         return None, None
-    parts = ticket_id.split(":")
-    if len(parts) < 3:
+    return source_id, issue_number
+
+
+def _parse_gitlab_ticket(ticket_id: str) -> tuple[Optional[str], Optional[int]]:
+    provider, source_id, issue_number = parse_issue_ticket(ticket_id)
+    if provider != "gitlab":
         return None, None
-    source_id = parts[1] or None
-    try:
-        issue_number = int(parts[2])
-    except ValueError:
-        issue_number = None
     return source_id, issue_number
 
 
@@ -317,6 +329,32 @@ def _parse_labels(raw: str) -> list[str]:
         if cleaned:
             labels.append(cleaned)
     return labels
+
+
+def _normalize_source_repo(provider: str, raw: str) -> Optional[str]:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    provider = provider.strip().lower()
+    if "://" in value:
+        parsed = urllib.parse.urlparse(value)
+        path = parsed.path.strip("/")
+    else:
+        path = value.strip("/")
+        if "github.com/" in value:
+            path = value.split("github.com/", 1)[1].strip("/")
+        if "gitlab.com/" in value:
+            path = value.split("gitlab.com/", 1)[1].strip("/")
+    if "/-/" in path:
+        path = path.split("/-/", 1)[0]
+    if path.endswith(".git"):
+        path = path[:-4]
+    if provider == "github":
+        parts = [part for part in path.split("/") if part]
+        if len(parts) >= 2:
+            return f"{parts[0]}/{parts[1]}"
+        return path
+    return path
 
 
 def _display_value(value: Any) -> str:
@@ -428,6 +466,7 @@ def _build_ticket_rows(
             "assigned_to": {"text": _display_value(ticket.assigned_to)},
             "estimate": {"text": _display_value(ticket.estimate)},
             "status": {"text": _display_value(ticket.status)},
+            "auto_start": {"text": "yes" if ticket.auto_start else "no"},
             "source_url": {
                 "text": _format_url(ticket.source_url),
                 "href": ticket.source_url,
@@ -569,6 +608,24 @@ async def _fetch_github_user(token: str) -> tuple[str, str]:
             return user_id, login
 
 
+async def _fetch_gitlab_user(token: str) -> tuple[str, str]:
+    headers = {
+        "Accept": "application/json",
+        "PRIVATE-TOKEN": token,
+        "User-Agent": "wintermute",
+    }
+    api_base = os.environ.get("WINTERMUTE_GITLAB_API_BASE", "https://gitlab.com/api/v4").rstrip("/")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{api_base}/user", headers=headers) as response:
+            payload = await response.json()
+            if response.status >= 400:
+                message = payload.get("message", "GitLab API error") if isinstance(payload, dict) else "GitLab API error"
+                raise HTTPException(status_code=400, detail=f"GitLab token validation failed: {message}")
+            user_id = str(payload.get("id", ""))
+            login = str(payload.get("username", ""))
+            return user_id, login
+
+
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or "project"
@@ -677,6 +734,7 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "project_created": "Project created",
         "project_updated": "Project updated",
         "project_deleted": "Deletion of project successful",
+        "project_source_created": "Project source created",
         "ticket_created": "Ticket created",
         "ticket_updated": "Ticket updated",
         "ticket_deleted": "Ticket deleted",
@@ -690,13 +748,22 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
         "mapping_updated": "Project mapping updated",
         "mapping_deleted": "Project mapping deleted",
         "github_source": "Saved GitHub source settings",
+        "gitlab_source": "Saved GitLab source settings",
         "slack_source": "Saved Slack source settings",
+        "ticket_auto_start_source": "Saved ticket auto-start settings",
+        "standup_source": "Saved standup settings",
         "github_source_created": "GitHub source created",
         "github_source_updated": "GitHub source updated",
         "github_source_deleted": "GitHub source deleted",
+        "gitlab_source_created": "GitLab source created",
+        "gitlab_source_updated": "GitLab source updated",
+        "gitlab_source_deleted": "GitLab source deleted",
         "github_token_created": "GitHub token created",
         "github_token_updated": "GitHub token updated",
         "github_token_deleted": "GitHub token deleted",
+        "gitlab_token_created": "GitLab token created",
+        "gitlab_token_updated": "GitLab token updated",
+        "gitlab_token_deleted": "GitLab token deleted",
         "api_token_created": "API token created",
         "api_token_updated": "API token updated",
         "api_token_deleted": "API token deleted",
@@ -1097,6 +1164,33 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     config={},
                 )
                 row = database.get_task_source(source_id)
+            elif source_id == GitLabIssuesSource.id:
+                database.upsert_task_source(
+                    GitLabIssuesSource.id,
+                    GitLabIssuesSource.enabled,
+                    GitLabIssuesSource.base_priority,
+                    GitLabIssuesSource.poll_interval_seconds,
+                    config={},
+                )
+                row = database.get_task_source(source_id)
+            elif source_id == TicketAutoStartSource.id:
+                database.upsert_task_source(
+                    TicketAutoStartSource.id,
+                    TicketAutoStartSource.enabled,
+                    TicketAutoStartSource.base_priority,
+                    TicketAutoStartSource.poll_interval_seconds,
+                    config={},
+                )
+                row = database.get_task_source(source_id)
+            elif source_id == StandupSource.id:
+                database.upsert_task_source(
+                    StandupSource.id,
+                    StandupSource.enabled,
+                    StandupSource.base_priority,
+                    StandupSource.poll_interval_seconds,
+                    config={},
+                )
+                row = database.get_task_source(source_id)
             if not row:
                 raise HTTPException(status_code=404, detail="Source not found")
         enabled = form.get("enabled") == "on"
@@ -1107,6 +1201,22 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             config = database.get_task_source(SlackSource.id).config
         elif source_id == GitHubIssuesSource.id:
             config = row.config
+        elif source_id == GitLabIssuesSource.id:
+            config = row.config
+        elif source_id == TicketAutoStartSource.id:
+            config = row.config
+        elif source_id == StandupSource.id:
+            time_raw = str(form.get("standup_time", "")).strip()
+            timezone_raw = str(form.get("standup_timezone", "")).strip()
+            channel_raw = str(form.get("standup_channel", "")).strip()
+            if time_raw:
+                config["time"] = time_raw
+            if timezone_raw:
+                config["timezone"] = timezone_raw
+            if channel_raw:
+                config["channel"] = channel_raw
+            else:
+                config.pop("channel", None)
         else:
             channels_raw = str(form.get("channels", ""))
             config["channels"] = _parse_channels(channels_raw)
@@ -1120,7 +1230,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             poll_interval_seconds,
             config,
         )
-        saved = "github_source" if source_id == GitHubIssuesSource.id else "slack_source"
+        if source_id == GitHubIssuesSource.id:
+            saved = "github_source"
+        elif source_id == GitLabIssuesSource.id:
+            saved = "gitlab_source"
+        elif source_id == TicketAutoStartSource.id:
+            saved = "ticket_auto_start_source"
+        elif source_id == StandupSource.id:
+            saved = "standup_source"
+        else:
+            saved = "slack_source"
         return RedirectResponse(f"/ui?saved={saved}", status_code=303)
 
     @app.get("/work-items")
@@ -1288,6 +1407,58 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     ) -> RedirectResponse:
         database.delete_github_token(token_id)
         return RedirectResponse("/ui/github-tokens?saved=github_token_deleted", status_code=303)
+
+    @app.post("/gitlab-tokens")
+    async def create_gitlab_token(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        token = str(form.get("token", "")).strip()
+        note = str(form.get("note", "")).strip() or None
+        if not token:
+            raise HTTPException(status_code=400, detail="GitLab token is required")
+        user_id, login = await _fetch_gitlab_user(token)
+        database.insert_gitlab_token(
+            token_id=str(uuid.uuid4()),
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=login,
+        )
+        return_to = str(form.get("return_to", "/ui/gitlab-tokens")).strip() or "/ui/gitlab-tokens"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/gitlab-tokens"
+        return RedirectResponse(f"{return_to}?saved=gitlab_token_created", status_code=303)
+
+    @app.post("/gitlab-tokens/{token_id}/edit")
+    async def update_gitlab_token(
+        token_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        token = str(form.get("token", "")).strip()
+        note = str(form.get("note", "")).strip() or None
+        existing = database.get_gitlab_token(token_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="GitLab token not found")
+        user_id = existing.user_id
+        user_login = existing.user_login
+        if token:
+            user_id, user_login = await _fetch_gitlab_user(token)
+        database.update_gitlab_token(
+            token_id,
+            token=token or existing.token,
+            note=note if note is not None else existing.note,
+            user_id=user_id,
+            user_login=user_login,
+        )
+        return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_updated", status_code=303)
+
+    @app.post("/gitlab-tokens/{token_id}/delete")
+    async def delete_gitlab_token(
+        token_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_gitlab_token(token_id)
+        return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_deleted", status_code=303)
 
     @app.get("/ui/api-tokens")
     def api_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -1512,6 +1683,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     status=payload.get("status") or "open",
                     internal_notes=payload.get("internal_notes"),
                     source_url=payload.get("source_url"),
+                    auto_start=bool(payload.get("auto_start", False)),
                 ),
                 "update": lambda item_id, payload: database.update_ticket(
                     item_id,
@@ -1525,6 +1697,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     estimate=payload.get("estimate"),
                     status=payload.get("status"),
                     source_url=payload.get("source_url"),
+                    auto_start=payload.get("auto_start"),
                 ),
                 "delete": database.delete_ticket,
             },
@@ -1707,6 +1880,54 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     auto_start=payload.get("auto_start"),
                 ),
                 "delete": database.delete_github_source,
+            },
+            "gitlab_tokens": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_gitlab_tokens()],
+                "get": database.get_gitlab_token,
+                "required": ["token"],
+                "create": lambda payload: database.insert_gitlab_token(
+                    str(uuid.uuid4()),
+                    payload.get("note"),
+                    payload["token"],
+                    payload.get("user_id"),
+                    payload.get("user_login"),
+                ),
+                "update": lambda item_id, payload: database.update_gitlab_token(
+                    item_id,
+                    token=payload.get("token"),
+                    note=payload.get("note"),
+                    user_id=payload.get("user_id"),
+                    user_login=payload.get("user_login"),
+                ),
+                "delete": database.delete_gitlab_token,
+            },
+            "gitlab_sources": {
+                "list": lambda: [_record_to_dict(row) for row in database.list_gitlab_sources()],
+                "get": database.get_gitlab_source,
+                "required": ["project_id", "project_path"],
+                "create": lambda payload: database.insert_gitlab_source(
+                    payload.get("id") or str(uuid.uuid4()),
+                    payload.get("token_id"),
+                    payload.get("agent_id"),
+                    payload["project_id"],
+                    payload["project_path"],
+                    payload.get("state") or "open",
+                    payload.get("labels") or [],
+                    bool(payload.get("enabled", True)),
+                    bool(payload.get("auto_start", False)),
+                ),
+                "update": lambda item_id, payload: database.update_gitlab_source(
+                    item_id,
+                    token_id=payload.get("token_id"),
+                    agent_id=payload.get("agent_id"),
+                    project_id=payload.get("project_id"),
+                    project_path=payload.get("project_path"),
+                    state=payload.get("state"),
+                    labels=payload.get("labels"),
+                    enabled=payload.get("enabled"),
+                    auto_start=payload.get("auto_start"),
+                ),
+                "delete": database.delete_gitlab_source,
             },
             "task_sources": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_task_sources()],
@@ -1913,7 +2134,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     @app.get("/api/tickets/{ticket_id}/github-comments")
     async def api_ticket_github_comments(ticket_id: str, request: Request) -> dict[str, Any]:
         _require_api_permission(request, "tickets", "read")
-        source_id, issue_number = _parse_github_ticket(ticket_id)
+        _provider, source_id, issue_number = parse_issue_ticket(ticket_id)
         if not source_id or issue_number is None:
             raise HTTPException(status_code=400, detail="Ticket is not a GitHub issue")
         ticket = database.get_ticket(ticket_id)
@@ -2046,10 +2267,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         existing = database.get_session_by_ticket(ticket_id)
         if existing and existing.status == "running":
             return {"ok": True, "message": "Session already running", "session_id": existing.id}
-        source_id, issue_number = _parse_github_ticket(ticket_id)
-        source = database.get_github_source(source_id) if source_id else None
-        if issue_number is not None and not source:
+        provider, source_id, issue_number = parse_issue_ticket(ticket_id)
+        github_source = database.get_github_source(source_id) if provider == "github" and source_id else None
+        gitlab_source = database.get_gitlab_source(source_id) if provider == "gitlab" and source_id else None
+        source = github_source or gitlab_source
+        if issue_number is not None and provider == "github" and not github_source:
             raise HTTPException(status_code=400, detail="GitHub source not found")
+        if issue_number is not None and provider == "gitlab" and not gitlab_source:
+            raise HTTPException(status_code=400, detail="GitLab source not found")
         agent_id = ticket.agent_id or (source.agent_id if source else None)
         if not agent_id:
             raise HTTPException(status_code=400, detail="Ticket agent not configured")
@@ -2102,9 +2327,20 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             if not repo_path:
                 raise HTTPException(status_code=400, detail="Repository not configured")
             if source and source.token_id and project_vm.repo_url:
-                token_record = database.get_github_token(source.token_id)
-                if token_record:
-                    configure_git_push_auth(base_spec, repo_path, project_vm.repo_url, token_record.token)
+                if provider == "github":
+                    token_record = database.get_github_token(source.token_id)
+                    if token_record:
+                        configure_git_push_auth(base_spec, repo_path, project_vm.repo_url, token_record.token)
+                elif provider == "gitlab":
+                    token_record = database.get_gitlab_token(source.token_id)
+                    if token_record:
+                        configure_git_push_auth(
+                            base_spec,
+                            repo_path,
+                            project_vm.repo_url,
+                            token_record.token,
+                            username="oauth2",
+                        )
             if is_codex_command(agent.command) and agent.trust_level:
                 set_codex_trust(base_spec, repo_path, agent.trust_level)
             if issue_number is not None:
@@ -2140,7 +2376,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
         if agent.session_mode != "mcp":
             start_session(session_spec, session_id, agent, repo_path)
-        if issue_number is not None and source:
+        if issue_number is not None and source and provider == "github":
             token_record = database.get_github_token(source.token_id) if source.token_id else None
             comments: list[dict[str, Any]] = []
             if token_record:
@@ -2156,6 +2392,29 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 },
                 source.owner,
                 source.repo,
+                comments=comments,
+                internal_notes=ticket.internal_notes,
+                branch_name=branch_name,
+                repo_path=repo_path,
+                project_name=project.name,
+                project_slug=project.slug,
+                prompt_template=project.prompt_template,
+            )
+        elif issue_number is not None and source and provider == "gitlab":
+            token_record = database.get_gitlab_token(source.token_id) if source.token_id else None
+            comments = []
+            if token_record:
+                comments = await _fetch_gitlab_issue_comments(
+                    token_record.token, source.project_path, int(issue_number)
+                )
+            prompt = _gitlab_issue_prompt(
+                {
+                    "issue_number": issue_number,
+                    "title": ticket.title,
+                    "body": ticket.description or "",
+                    "web_url": ticket.source_url or "",
+                },
+                source.project_path,
                 comments=comments,
                 internal_notes=ticket.internal_notes,
                 branch_name=branch_name,
@@ -2393,7 +2652,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         channel_id_raw = str(form.get("slack_channel_id", "")).strip()
         if channel_id_raw:
             channel_id = channel_id_raw
-        if not channel_id:
+        slack_bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+        if not channel_id and slack_bot:
             client = _slack_client(database)
             try:
                 resp = client.conversations_create(name=channel_name, is_private=False)
@@ -2403,43 +2663,41 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 if "name_taken" in error_text:
                     channel_id = _find_channel_id(client, channel_name)
                 elif "missing_scope" in error_text:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Slack channel create failed (missing scope: channels:manage).",
-                    ) from exc
+                    logging.getLogger(__name__).warning(
+                        "Slack channel create missing scope; continuing without channel id."
+                    )
                 else:
-                    raise HTTPException(
-                        status_code=400, detail=f"Slack channel create failed: {exc}"
-                    ) from exc
-        if not channel_id:
-            raise HTTPException(status_code=400, detail="Slack channel id missing")
-        admin_user_id = _slack_admin_user_id(database)
-        client = _slack_client(database)
-        try:
-            client.conversations_join(channel=channel_id)
-        except Exception:
-            pass
-        if admin_user_id:
-            invited = False
+                    logging.getLogger(__name__).warning(
+                        "Slack channel create failed; continuing without channel id: %s", exc
+                    )
+        if channel_id and slack_bot:
+            admin_user_id = _slack_admin_user_id(database)
+            client = _slack_client(database)
             try:
-                client.conversations_invite(channel=channel_id, users=admin_user_id)
-                invited = True
+                client.conversations_join(channel=channel_id)
             except Exception:
+                pass
+            if admin_user_id:
+                invited = False
                 try:
-                    client.channels_invite(channel=channel_id, user=admin_user_id)
+                    client.conversations_invite(channel=channel_id, users=admin_user_id)
                     invited = True
                 except Exception:
-                    invited = False
-            if not invited:
+                    try:
+                        client.channels_invite(channel=channel_id, user=admin_user_id)
+                        invited = True
+                    except Exception:
+                        invited = False
+                if not invited:
+                    client.chat_postMessage(
+                        channel=channel_id,
+                        text="Channel created. Please /join to receive updates.",
+                    )
+            else:
                 client.chat_postMessage(
                     channel=channel_id,
                     text="Channel created. Please /join to receive updates.",
                 )
-        else:
-            client.chat_postMessage(
-                channel=channel_id,
-                text="Channel created. Please /join to receive updates.",
-            )
         project_id = str(uuid.uuid4())
         database.insert_project(project_id, name, slug, channel_id, prompt_template, max_repo_resources)
         _update_slack_channel_filter(database)
@@ -2450,6 +2708,37 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         project = database.get_project(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
+        issue_sources = database.list_issue_sources(project_id=project_id)
+        github_tokens = database.list_github_tokens()
+        gitlab_tokens = database.list_gitlab_tokens()
+        agents = database.list_agents()
+        token_lookup = {
+            token.id: token.note or token.user_login or token.id for token in github_tokens + gitlab_tokens
+        }
+        agent_lookup = {agent.id: agent.name for agent in agents}
+        project_sources = []
+        for source in issue_sources:
+            provider = source.provider
+            if provider == "github":
+                edit_url = f"/ui/github-sources/{source.id}/edit"
+            elif provider == "gitlab":
+                edit_url = f"/ui/gitlab-sources/{source.id}/edit"
+            else:
+                edit_url = None
+            project_sources.append(
+                {
+                    "id": source.id,
+                    "provider": provider,
+                    "repo": source.repo,
+                    "state": source.state,
+                    "labels": ", ".join(source.labels) if source.labels else "n/a",
+                    "enabled": source.enabled,
+                    "auto_start": source.auto_start,
+                    "token_label": token_lookup.get(source.token_id, "n/a"),
+                    "agent_label": agent_lookup.get(source.agent_id, "n/a"),
+                    "edit_url": edit_url,
+                }
+            )
         return _render_template(
             request,
             "project_edit.html",
@@ -2459,8 +2748,54 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "project": project,
                 "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
+                "project_sources": project_sources,
+                "github_tokens": github_tokens,
+                "gitlab_tokens": gitlab_tokens,
+                "agents": agents,
             },
         )
+
+    @app.post("/projects/{project_id}/sources")
+    async def create_project_source(
+        project_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        project = database.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        form = await request.form()
+        return_to = str(form.get("return_to", f"/ui/projects/{project_id}/edit")).strip() or f"/ui/projects/{project_id}/edit"
+        provider = str(form.get("provider", "")).strip().lower()
+        if provider not in {"github", "gitlab"}:
+            raise HTTPException(status_code=400, detail="Invalid source provider")
+        repo_input = str(form.get("repo", "")).strip()
+        repo = _normalize_source_repo(provider, repo_input)
+        if not repo:
+            raise HTTPException(status_code=400, detail="Source repo missing")
+        token_id = str(form.get("token_id", "")).strip() or None
+        if token_id:
+            if provider == "github" and not database.get_github_token(token_id):
+                raise HTTPException(status_code=400, detail="GitHub token not found")
+            if provider == "gitlab" and not database.get_gitlab_token(token_id):
+                raise HTTPException(status_code=400, detail="GitLab token not found")
+        agent_id = str(form.get("agent_id", "")).strip() or None
+        state = str(form.get("state", "open")).strip() or "open"
+        labels_raw = str(form.get("labels", "")).strip()
+        labels = _parse_labels(labels_raw)
+        enabled = form.get("enabled") == "on"
+        auto_start = form.get("auto_start") == "on"
+        database.insert_issue_source(
+            source_id=str(uuid.uuid4()),
+            provider=provider,
+            token_id=token_id,
+            agent_id=agent_id,
+            project_id=project.id,
+            repo=repo,
+            state=state,
+            labels=labels,
+            enabled=enabled,
+            auto_start=auto_start,
+        )
+        return RedirectResponse(f"{return_to}?saved=project_source_created", status_code=303)
 
     @app.post("/projects/{project_id}")
     async def update_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2524,6 +2859,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         estimate = str(form.get("estimate", "")).strip() or None
         status = str(form.get("status", "open")).strip() or "open"
         source_url = str(form.get("source_url", "")).strip() or None
+        auto_start = form.get("auto_start") == "on"
         return_to = str(form.get("return_to", "/ui/tickets")).strip() or "/ui/tickets"
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
@@ -2540,6 +2876,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             status=status,
             internal_notes=internal_notes,
             source_url=source_url,
+            auto_start=auto_start,
         )
         return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
 
@@ -2556,13 +2893,27 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         growl_message = _growl_message(request.query_params.get("saved"))
         session = database.get_session_by_ticket(ticket_id)
         session_running = bool(session and session.status == "running")
-        is_github_ticket = ticket.id.startswith("github:")
+        provider, source_id, issue_number = parse_issue_ticket(ticket_id)
+        is_github_ticket = provider == "github"
+        is_gitlab_ticket = provider == "gitlab"
+        is_external_ticket = provider is not None
         description_html = _render_markdown(ticket.description)
         github_comments: list[dict[str, Any]] = []
         github_comments_error: Optional[str] = None
         github_comments_cached = False
-        source_id, issue_number = _parse_github_ticket(ticket_id)
-        source_record = database.get_github_source(source_id) if source_id else None
+        source_record = None
+        source_label = None
+        source_href = None
+        if is_github_ticket:
+            source_record = database.get_github_source(source_id) if source_id else None
+            if source_record:
+                source_label = f"{source_record.owner}/{source_record.repo}"
+                source_href = f"/ui/github-sources/{source_record.id}/edit"
+        elif is_gitlab_ticket:
+            source_record = database.get_gitlab_source(source_id) if source_id else None
+            if source_record:
+                source_label = source_record.project_path
+                source_href = f"/ui/gitlab-sources/{source_record.id}/edit"
         if source_record and ticket.project_id != source_record.project_id:
             database.update_ticket(ticket.id, project_id=source_record.project_id)
             ticket = database.get_ticket(ticket.id) or ticket
@@ -2582,11 +2933,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if is_github_ticket and not source_record:
             start_ready = False
             start_reason = "GitHub source is missing for this ticket."
+        if is_gitlab_ticket and not source_record:
+            start_ready = False
+            start_reason = "GitLab source is missing for this ticket."
         agent_id = ticket.agent_id or (source_record.agent_id if source_record else None)
         if not agent_id:
             start_ready = False
             start_reason = "No agent assigned to this ticket."
-        if source_id and issue_number is not None:
+        if is_github_ticket and source_id and issue_number is not None:
             source = database.get_github_source(source_id)
             if source and source.token_id:
                 token_record = database.get_github_token(source.token_id)
@@ -2625,6 +2979,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "users": database.list_users(),
                 "description_html": description_html,
                 "is_github_ticket": is_github_ticket,
+                "is_gitlab_ticket": is_gitlab_ticket,
+                "is_external_ticket": is_external_ticket,
                 "project_vm": project_vm,
                 "start_ready": start_ready,
                 "start_reason": start_reason,
@@ -2639,6 +2995,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "session_id": session.id if session else None,
                 "session_repo_path": session.repo_path if session else None,
                 "source_record": source_record,
+                "source_label": source_label,
+                "source_href": source_href,
             },
         )
 
@@ -2656,6 +3014,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         estimate = str(form.get("estimate", "")).strip() or None
         status = str(form.get("status", "open")).strip() or "open"
         source_url = str(form.get("source_url", "")).strip() or None
+        auto_start = form.get("auto_start") == "on"
         if not project_id or not title:
             raise HTTPException(status_code=400, detail="Missing ticket fields")
         database.update_ticket(
@@ -2669,6 +3028,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             estimate=estimate,
             status=status,
             source_url=source_url,
+            auto_start=auto_start,
         )
         return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
 
@@ -2679,8 +3039,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         ticket = database.get_ticket(ticket_id)
         if not ticket:
             raise HTTPException(status_code=404, detail="Ticket not found")
-        if ticket.id.startswith("github:"):
-            raise HTTPException(status_code=400, detail="GitHub ticket descriptions are read-only")
+        provider, _source_id, _issue_number = parse_issue_ticket(ticket.id)
+        if provider:
+            raise HTTPException(status_code=400, detail="External ticket descriptions are read-only")
         payload = await request.json()
         description = str(payload.get("description", ""))
         database.update_ticket(ticket_id, description=description)
@@ -3185,6 +3546,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slack_admin = database.get_credential_by_name(SLACK_PROVIDER, "admin_user_id")
         github_tokens = database.list_github_tokens()
         github_sources = database.list_github_sources()
+        gitlab_tokens = database.list_gitlab_tokens()
+        gitlab_sources = database.list_gitlab_sources()
+        ticket_auto_start_source = database.get_task_source(TicketAutoStartSource.id)
+        standup_source = database.get_task_source(StandupSource.id)
         api_tokens = database.list_api_tokens()
         growl_message = _growl_message(request.query_params.get("saved"))
         return _render_template(
@@ -3213,6 +3578,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "slack_admin": slack_admin,
                 "github_tokens": github_tokens,
                 "github_sources": github_sources,
+                "gitlab_tokens": gitlab_tokens,
+                "gitlab_sources": gitlab_sources,
+                "ticket_auto_start_source": ticket_auto_start_source,
+                "standup_source": standup_source,
                 "api_tokens": api_tokens,
                 "project_lookup": {project.id: project.name for project in projects},
                 "vm_lookup": {vm.id: vm.name for vm in vm_targets},
@@ -3523,6 +3892,32 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/gitlab-sources")
+    def gitlab_sources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        sources = database.list_gitlab_sources()
+        gitlab_task_source = database.get_task_source(GitLabIssuesSource.id)
+        project_lookup = {project.id: project.name for project in database.list_projects()}
+        token_lookup = {
+            token.id: token.note or token.user_login or token.id
+            for token in database.list_gitlab_tokens()
+        }
+        agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "gitlab_sources.html",
+            {
+                "title": "GitLab Sources",
+                "active_nav": "gitlab_sources",
+                "growl_message": growl_message,
+                "sources": sources,
+                "gitlab_task_source": gitlab_task_source,
+                "project_lookup": project_lookup,
+                "token_lookup": token_lookup,
+                "agent_lookup": agent_lookup,
+            },
+        )
+
     @app.get("/ui/github-tokens")
     def github_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         tokens = database.list_github_tokens()
@@ -3576,6 +3971,53 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/gitlab-tokens")
+    def gitlab_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        tokens = database.list_gitlab_tokens()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "gitlab_tokens.html",
+            {
+                "title": "GitLab Tokens",
+                "active_nav": "gitlab_tokens",
+                "growl_message": growl_message,
+                "tokens": tokens,
+            },
+        )
+
+    @app.get("/ui/gitlab-tokens/create")
+    def gitlab_tokens_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        return_to = request.query_params.get("return_to", "/ui/gitlab-tokens")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/gitlab-tokens"
+        return _render_template(
+            request,
+            "gitlab_token_create.html",
+            {
+                "title": "Add GitLab Token",
+                "active_nav": "gitlab_tokens",
+                "growl_message": None,
+                "return_to": return_to,
+            },
+        )
+
+    @app.get("/ui/gitlab-tokens/{token_id}/edit")
+    def gitlab_tokens_edit_ui(token_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        token = database.get_gitlab_token(token_id)
+        if not token:
+            raise HTTPException(status_code=404, detail="GitLab token not found")
+        return _render_template(
+            request,
+            "gitlab_token_edit.html",
+            {
+                "title": "Edit GitLab Token",
+                "active_nav": "gitlab_tokens",
+                "growl_message": None,
+                "token": token,
+            },
+        )
+
     @app.get("/ui/github-sources/create")
     def github_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
@@ -3591,6 +4033,30 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             {
                 "title": "Add GitHub Source",
                 "active_nav": "github_sources",
+                "growl_message": None,
+                "projects": projects,
+                "tokens": tokens,
+                "agents": agents,
+                "return_to": return_to,
+                "token_notice": token_notice if token_notice and not tokens else "",
+            },
+        )
+
+    @app.get("/ui/gitlab-sources/create")
+    def gitlab_sources_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        projects = database.list_projects()
+        tokens = database.list_gitlab_tokens()
+        agents = database.list_agents()
+        return_to = request.query_params.get("return_to", "/ui/gitlab-sources")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/gitlab-sources"
+        token_notice = "" if tokens else "Add a GitLab token before creating a source."
+        return _render_template(
+            request,
+            "gitlab_source_create.html",
+            {
+                "title": "Add GitLab Source",
+                "active_nav": "gitlab_sources",
                 "growl_message": None,
                 "projects": projects,
                 "tokens": tokens,
@@ -3624,6 +4090,29 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/gitlab-sources/{source_id}/edit")
+    def gitlab_sources_edit_ui(source_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        source = database.get_gitlab_source(source_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="GitLab source not found")
+        projects = database.list_projects()
+        tokens = database.list_gitlab_tokens()
+        agents = database.list_agents()
+        labels = ", ".join(source.labels)
+        return _render_template(
+            request,
+            "gitlab_source_edit.html",
+            {
+                "title": "Edit GitLab Source",
+                "active_nav": "gitlab_sources",
+                "growl_message": None,
+                "source": source,
+                "projects": projects,
+                "tokens": tokens,
+                "agents": agents,
+                "labels": labels,
+            },
+        )
     @app.post("/github-sources")
     async def create_github_source(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
@@ -3703,6 +4192,82 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     ) -> RedirectResponse:
         database.delete_github_source(source_id)
         return RedirectResponse("/ui/github-sources?saved=github_source_deleted", status_code=303)
+
+    @app.post("/gitlab-sources")
+    async def create_gitlab_source(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        token_id = str(form.get("token_id", "")).strip()
+        agent_id = str(form.get("agent_id", "")).strip() or None
+        project_path = str(form.get("project_path", "")).strip()
+        state = str(form.get("state", "open")).strip() or "open"
+        labels_raw = str(form.get("labels", "")).strip()
+        labels = _parse_labels(labels_raw)
+        enabled = form.get("enabled") == "on"
+        auto_start = form.get("auto_start") == "on"
+        if not project_id or not token_id or not project_path:
+            raise HTTPException(status_code=400, detail="Missing GitLab source fields")
+        if not database.get_gitlab_token(token_id):
+            raise HTTPException(status_code=400, detail="GitLab token not found")
+        if agent_id and not database.get_agent(agent_id):
+            raise HTTPException(status_code=400, detail="Agent not found")
+        if auto_start and not agent_id:
+            raise HTTPException(status_code=400, detail="Agent is required for auto-start")
+        database.insert_gitlab_source(
+            str(uuid.uuid4()),
+            token_id=token_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            project_path=project_path,
+            state=state,
+            labels=labels,
+            enabled=enabled,
+            auto_start=auto_start,
+        )
+        return_to = str(form.get("return_to", "/ui/gitlab-sources")).strip() or "/ui/gitlab-sources"
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/gitlab-sources"
+        return RedirectResponse(f"{return_to}?saved=gitlab_source_created", status_code=303)
+
+    @app.post("/gitlab-sources/{source_id}/edit")
+    async def update_gitlab_source(
+        source_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        project_id = str(form.get("project_id", "")).strip()
+        token_id = str(form.get("token_id", "")).strip()
+        agent_id = str(form.get("agent_id", "")).strip() or None
+        project_path = str(form.get("project_path", "")).strip()
+        state = str(form.get("state", "open")).strip() or "open"
+        labels_raw = str(form.get("labels", "")).strip()
+        labels = _parse_labels(labels_raw)
+        enabled = form.get("enabled") == "on"
+        auto_start = form.get("auto_start") == "on"
+        if not project_id or not token_id or not project_path:
+            raise HTTPException(status_code=400, detail="Missing GitLab source fields")
+        if agent_id and not database.get_agent(agent_id):
+            raise HTTPException(status_code=400, detail="Agent not found")
+        if auto_start and not agent_id:
+            raise HTTPException(status_code=400, detail="Agent is required for auto-start")
+        database.update_gitlab_source(
+            source_id,
+            token_id=token_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            project_path=project_path,
+            state=state,
+            labels=labels,
+            enabled=enabled,
+            auto_start=auto_start,
+        )
+        return RedirectResponse("/ui/gitlab-sources?saved=gitlab_source_updated", status_code=303)
+
+    @app.post("/gitlab-sources/{source_id}/delete")
+    async def delete_gitlab_source(
+        source_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_gitlab_source(source_id)
+        return RedirectResponse("/ui/gitlab-sources?saved=gitlab_source_deleted", status_code=303)
 
     @app.get("/ui/project-vms/{mapping_id}/edit")
     def project_vms_edit_ui(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> Response:

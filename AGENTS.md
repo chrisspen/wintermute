@@ -17,6 +17,9 @@ Wintermute is a local, persistent “work supervisor” that runs an async prior
 - **Repo Resource**: reusable repo checkout path tied to a project/VM/session (clone mode pool).
 - **GitHub Source**: per-repo config (with token) that polls issues and emits work items.
 - **GitHub Token**: per-user credential used by one or more GitHub sources.
+- **GitLab Source**: per-project config (with token) that polls issues and emits work items.
+- **GitLab Token**: per-user credential used by one or more GitLab sources.
+- **Standup Source**: scheduled daily standup prompts for running agent sessions.
 - **API Token**: scoped credential for REST access with per-model CRUD permissions.
 
 ## Interfaces (contract-first)
@@ -68,13 +71,20 @@ The web admin console provides:
 - WorkItems views: queued/running/failed/done, checkpoint viewer, retry controls, “requeue”, “cancel”.
 - Logs: tail view (structured JSON logs preferred).
 - Projects, Tickets, VM targets, Agents, and Project VM mappings.
+- Ticket auto-start source for internal tickets.
 - Slack channel per project; Slack command `start <projectslug> <agentslug>` to launch sessions.
 - Project VM mapping edit page with repo mode/path/url controls.
 - Repo resource pool (clone mode) with per-project `max_repo_resources` and daily cleanup for unused clones (default 30 days).
 - Repo resource cleanup age is configured via `WINTERMUTE_REPO_RESOURCE_TTL_DAYS` (default 30).
 - GitHub token storage and GitHub source configuration (multiple repos, optional auto-start).
 - GitHub session output: `PUBLIC:` lines become comments pending approval; `NOTE:` lines stay internal.
+- GitHub session output: `BLOCKER:` lines mark sessions blocked and move tickets to needs-feedback.
 - Approved public comments are auto-dispatched to GitHub by the comment dispatch source.
+- GitLab token storage and GitLab source configuration (multiple projects, optional auto-start).
+- GitLab session output: `PUBLIC:` lines become comments pending approval; `NOTE:` lines stay internal.
+- GitLab session output: `BLOCKER:` lines mark sessions blocked and move tickets to needs-feedback.
+- Approved public comments are auto-dispatched to GitLab by the comment dispatch source.
+- Standup scheduling (daily standup source) with time, timezone, and optional Slack channel; agents reply with `STANDUP:` lines.
 - API tokens with CRUD permissions and optional env export (`WINTERMUTE_ADMIN_API_TOKEN`).
 - Admin API endpoints can restart web/supervisor (requires Admin update permission).
 - Relaunchers (`run_web.sh`, `run_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
@@ -100,8 +110,11 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 ## Repository layout (recommended)
 - `wintermute/supervisor.py` — scheduler, heap, polling, preemption, persistence
 - `wintermute/sources/` — TaskSources (chat, jira, github, slack, sessions)
+- `wintermute/sources/gitlab.py` — GitLab issues TaskSource
+- `wintermute/sources/standup.py` — Daily standup TaskSource
 - `wintermute/executor.py` — LLM adapter + structured output parsing
 - `wintermute/tools/` — tool definitions + permission gating
+- `wintermute/tools/gitlab.py` — GitLab API tools
 - `wintermute/web/` — FastAPI app + UI
 - `wintermute/db.py` — SQLite ORM models/migrations
 - `wintermute/runner.py` — SSH + tmux session runner for agent sessions

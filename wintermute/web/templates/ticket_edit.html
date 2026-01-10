@@ -70,12 +70,12 @@
         <div class="field-group">
           <div class="label-row">
             <label>Description</label>
-            {% if not is_github_ticket %}
+            {% if not is_external_ticket %}
             <button type="button" id="desc-edit" class="ghost small">Edit</button>
             {% endif %}
           </div>
           <div id="desc-view" class="markdown-body">{{ description_html | safe }}</div>
-          {% if not is_github_ticket %}
+          {% if not is_external_ticket %}
           <div id="desc-edit-panel" class="description-edit hidden">
             <textarea id="desc-text" rows="6">{{ ticket.description or '' }}</textarea>
             <button type="button" id="desc-save">Save Description</button>
@@ -91,12 +91,14 @@
             {% endif %}
           </div>
         </div>
-        {% if source_record %}
+        {% if source_label %}
         <div class="field-group">
           <label>Source</label>
           <div class="inline-field">
-            <span class="inline-value">{{ source_record.owner }}/{{ source_record.repo }}</span>
-            <a href="/ui/github-sources/{{ source_record.id }}/edit" class="inline-link">view</a>
+            <span class="inline-value">{{ source_label }}</span>
+            {% if source_href %}
+            <a href="{{ source_href }}" class="inline-link">view</a>
+            {% endif %}
           </div>
         </div>
         {% endif %}
@@ -142,6 +144,12 @@
             <option value="done" {% if ticket.status == 'done' %}selected{% endif %}>done</option>
           </select>
         </div>
+        {% if not is_external_ticket %}
+        <div class="checkbox-row">
+          <input type="checkbox" name="auto_start" {% if ticket.auto_start %}checked{% endif %} />
+          <label>Auto-start agent session when open</label>
+        </div>
+        {% endif %}
         <button type="submit">Save Ticket</button>
       </form>
       <div class="form-actions">
@@ -201,7 +209,7 @@
         <textarea id="comment-body" name="body" rows="4" placeholder="Type a message to send to the running agent..."></textarea>
         <label class="checkbox">
           <input type="checkbox" name="public" value="1" />
-          Public (send to GitHub when approved)
+          Public (send to source when approved)
         </label>
       </form>
     </div>

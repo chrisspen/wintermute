@@ -33,6 +33,16 @@ def json_loads(value: Optional[str]) -> Any:
     return json.loads(value)
 
 
+def _split_repo(repo: str) -> tuple[str, str]:
+    cleaned = (repo or "").strip().strip("/")
+    if not cleaned:
+        return "", ""
+    if "/" not in cleaned:
+        return cleaned, cleaned
+    owner, name = cleaned.split("/", 1)
+    return owner, name
+
+
 @dataclass(frozen=True)
 class TaskSourceRecord:
     id: str
@@ -121,6 +131,22 @@ class ProjectRecord:
 
 
 @dataclass(frozen=True)
+class IssueSourceRecord:
+    id: str
+    provider: str
+    token_id: Optional[str]
+    agent_id: Optional[str]
+    project_id: str
+    repo: str
+    state: str
+    labels: list[str]
+    enabled: bool
+    auto_start: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class GitHubSourceRecord:
     id: str
     token_id: Optional[str]
@@ -137,7 +163,33 @@ class GitHubSourceRecord:
 
 
 @dataclass(frozen=True)
+class GitLabSourceRecord:
+    id: str
+    token_id: Optional[str]
+    agent_id: Optional[str]
+    project_id: str
+    project_path: str
+    state: str
+    labels: list[str]
+    enabled: bool
+    auto_start: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class GitHubTokenRecord:
+    id: str
+    note: Optional[str]
+    token: str
+    user_id: Optional[str]
+    user_login: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class GitLabTokenRecord:
     id: str
     note: Optional[str]
     token: str
@@ -161,6 +213,7 @@ class TicketRecord:
     source_url: Optional[str]
     github_comments_json: Optional[str]
     github_comments_fetched_at: Optional[str]
+    auto_start: bool
     created_at: str
     updated_at: str
 
@@ -401,6 +454,7 @@ class TicketModel(Base):
     source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     github_comments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     github_comments_fetched_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    auto_start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -466,14 +520,14 @@ class ProjectVMModel(Base):
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
-class GitHubSourceModel(Base):
-    __tablename__ = "github_sources"
+class IssueSourceModel(Base):
+    __tablename__ = "issue_sources"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
     token_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
-    owner: Mapped[str] = mapped_column(String, nullable=False)
     repo: Mapped[str] = mapped_column(String, nullable=False)
     state: Mapped[str] = mapped_column(String, nullable=False)
     labels_json: Mapped[str] = mapped_column(Text, nullable=False)
@@ -485,6 +539,18 @@ class GitHubSourceModel(Base):
 
 class GitHubTokenModel(Base):
     __tablename__ = "github_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    token: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    user_login: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class GitLabTokenModel(Base):
+    __tablename__ = "gitlab_tokens"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -1262,8 +1328,8 @@ class Database:
             session.query(ProjectVMModel).filter(
                 ProjectVMModel.project_id == project_id
             ).delete()
-            session.query(GitHubSourceModel).filter(
-                GitHubSourceModel.project_id == project_id
+            session.query(IssueSourceModel).filter(
+                IssueSourceModel.project_id == project_id
             ).delete()
             session.query(TicketModel).filter(TicketModel.project_id == project_id).delete()
             session.query(ProjectModel).filter(ProjectModel.id == project_id).delete()
@@ -1273,6 +1339,22 @@ class Database:
             rows = session.execute(select(GitHubTokenModel).order_by(GitHubTokenModel.created_at.desc())).scalars().all()
         return [
             GitHubTokenRecord(
+                id=row.id,
+                note=row.note,
+                token=row.token,
+                user_id=row.user_id,
+                user_login=row.user_login,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def list_gitlab_tokens(self) -> list[GitLabTokenRecord]:
+        with self.session() as session:
+            rows = session.execute(select(GitLabTokenModel).order_by(GitLabTokenModel.created_at.desc())).scalars().all()
+        return [
+            GitLabTokenRecord(
                 id=row.id,
                 note=row.note,
                 token=row.token,
@@ -1526,6 +1608,11 @@ class Database:
             value = session.execute(select(func.max(GitHubTokenModel.updated_at))).scalar_one_or_none()
         return value or ""
 
+    def get_latest_gitlab_token_update(self) -> str:
+        with self.session() as session:
+            value = session.execute(select(func.max(GitLabTokenModel.updated_at))).scalar_one_or_none()
+        return value or ""
+
     def get_github_token(self, token_id: str) -> Optional[GitHubTokenRecord]:
         with self.session() as session:
             row = session.get(GitHubTokenModel, token_id)
@@ -1588,24 +1675,99 @@ class Database:
 
     def delete_github_token(self, token_id: str) -> None:
         with self.session() as session:
-            session.query(GitHubSourceModel).filter(
-                GitHubSourceModel.token_id == token_id
+            session.query(IssueSourceModel).filter(
+                IssueSourceModel.token_id == token_id,
+                IssueSourceModel.provider == "github",
             ).delete()
             session.query(GitHubTokenModel).filter(GitHubTokenModel.id == token_id).delete()
 
-    def list_github_sources(self, project_id: Optional[str] = None) -> list[GitHubSourceRecord]:
+    def get_gitlab_token(self, token_id: str) -> Optional[GitLabTokenRecord]:
         with self.session() as session:
-            stmt = select(GitHubSourceModel)
+            row = session.get(GitLabTokenModel, token_id)
+        if not row:
+            return None
+        return GitLabTokenRecord(
+            id=row.id,
+            note=row.note,
+            token=row.token,
+            user_id=row.user_id,
+            user_login=row.user_login,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_gitlab_token(
+        self,
+        token_id: str,
+        token: str,
+        note: Optional[str],
+        user_id: Optional[str],
+        user_login: Optional[str],
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                GitLabTokenModel(
+                    id=token_id,
+                    token=token,
+                    note=note,
+                    user_id=user_id,
+                    user_login=user_login,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_gitlab_token(
+        self,
+        token_id: str,
+        *,
+        token: Optional[str] = None,
+        note: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_login: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(GitLabTokenModel, token_id)
+            if not row:
+                return
+            if token is not None:
+                row.token = token
+            if note is not None:
+                row.note = note
+            if user_id is not None:
+                row.user_id = user_id
+            if user_login is not None:
+                row.user_login = user_login
+            row.updated_at = utc_now()
+
+    def delete_gitlab_token(self, token_id: str) -> None:
+        with self.session() as session:
+            session.query(IssueSourceModel).filter(
+                IssueSourceModel.token_id == token_id,
+                IssueSourceModel.provider == "gitlab",
+            ).delete()
+            session.query(GitLabTokenModel).filter(GitLabTokenModel.id == token_id).delete()
+
+    def list_issue_sources(
+        self,
+        project_id: Optional[str] = None,
+        provider: Optional[str] = None,
+    ) -> list[IssueSourceRecord]:
+        with self.session() as session:
+            stmt = select(IssueSourceModel)
             if project_id:
-                stmt = stmt.where(GitHubSourceModel.project_id == project_id)
-            rows = session.execute(stmt.order_by(GitHubSourceModel.created_at.desc())).scalars().all()
+                stmt = stmt.where(IssueSourceModel.project_id == project_id)
+            if provider:
+                stmt = stmt.where(IssueSourceModel.provider == provider)
+            rows = session.execute(stmt.order_by(IssueSourceModel.created_at.desc())).scalars().all()
         return [
-            GitHubSourceRecord(
+            IssueSourceRecord(
                 id=row.id,
+                provider=row.provider,
                 token_id=row.token_id,
                 agent_id=row.agent_id,
                 project_id=row.project_id,
-                owner=row.owner,
                 repo=row.repo,
                 state=row.state,
                 labels=json_loads(row.labels_json) or [],
@@ -1617,17 +1779,17 @@ class Database:
             for row in rows
         ]
 
-    def get_github_source(self, source_id: str) -> Optional[GitHubSourceRecord]:
+    def get_issue_source(self, source_id: str) -> Optional[IssueSourceRecord]:
         with self.session() as session:
-            row = session.get(GitHubSourceModel, source_id)
+            row = session.get(IssueSourceModel, source_id)
         if not row:
             return None
-        return GitHubSourceRecord(
+        return IssueSourceRecord(
             id=row.id,
+            provider=row.provider,
             token_id=row.token_id,
             agent_id=row.agent_id,
             project_id=row.project_id,
-            owner=row.owner,
             repo=row.repo,
             state=row.state,
             labels=json_loads(row.labels_json) or [],
@@ -1635,6 +1797,123 @@ class Database:
             auto_start=bool(row.auto_start),
             created_at=row.created_at,
             updated_at=row.updated_at,
+        )
+
+    def insert_issue_source(
+        self,
+        source_id: str,
+        provider: str,
+        token_id: Optional[str],
+        agent_id: Optional[str],
+        project_id: str,
+        repo: str,
+        state: str,
+        labels: list[str],
+        enabled: bool,
+        auto_start: bool,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                IssueSourceModel(
+                    id=source_id,
+                    provider=provider,
+                    token_id=token_id,
+                    agent_id=agent_id,
+                    project_id=project_id,
+                    repo=repo,
+                    state=state,
+                    labels_json=json_dumps(labels),
+                    enabled=1 if enabled else 0,
+                    auto_start=1 if auto_start else 0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_issue_source(
+        self,
+        source_id: str,
+        *,
+        provider: Optional[str] = None,
+        token_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        repo: Optional[str] = None,
+        state: Optional[str] = None,
+        labels: Optional[list[str]] = None,
+        enabled: Optional[bool] = None,
+        auto_start: Optional[bool] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(IssueSourceModel, source_id)
+            if not row:
+                return
+            if provider is not None:
+                row.provider = provider
+            if token_id is not None:
+                row.token_id = token_id
+            if agent_id is not None:
+                row.agent_id = agent_id
+            if project_id is not None:
+                row.project_id = project_id
+            if repo is not None:
+                row.repo = repo
+            if state is not None:
+                row.state = state
+            if labels is not None:
+                row.labels_json = json_dumps(labels)
+            if enabled is not None:
+                row.enabled = 1 if enabled else 0
+            if auto_start is not None:
+                row.auto_start = 1 if auto_start else 0
+            row.updated_at = utc_now()
+
+    def delete_issue_source(self, source_id: str) -> None:
+        with self.session() as session:
+            session.query(IssueSourceModel).filter(IssueSourceModel.id == source_id).delete()
+
+    def list_github_sources(self, project_id: Optional[str] = None) -> list[GitHubSourceRecord]:
+        sources = self.list_issue_sources(project_id=project_id, provider="github")
+        results: list[GitHubSourceRecord] = []
+        for source in sources:
+            owner, repo = _split_repo(source.repo)
+            results.append(
+                GitHubSourceRecord(
+                    id=source.id,
+                    token_id=source.token_id,
+                    agent_id=source.agent_id,
+                    project_id=source.project_id,
+                    owner=owner,
+                    repo=repo,
+                    state=source.state,
+                    labels=source.labels,
+                    enabled=source.enabled,
+                    auto_start=source.auto_start,
+                    created_at=source.created_at,
+                    updated_at=source.updated_at,
+                )
+            )
+        return results
+
+    def get_github_source(self, source_id: str) -> Optional[GitHubSourceRecord]:
+        source = self.get_issue_source(source_id)
+        if not source or source.provider != "github":
+            return None
+        owner, repo = _split_repo(source.repo)
+        return GitHubSourceRecord(
+            id=source.id,
+            token_id=source.token_id,
+            agent_id=source.agent_id,
+            project_id=source.project_id,
+            owner=owner,
+            repo=repo,
+            state=source.state,
+            labels=source.labels,
+            enabled=source.enabled,
+            auto_start=source.auto_start,
+            created_at=source.created_at,
+            updated_at=source.updated_at,
         )
 
     def insert_github_source(
@@ -1650,24 +1929,19 @@ class Database:
         enabled: bool,
         auto_start: bool,
     ) -> None:
-        now = utc_now()
-        with self.session() as session:
-            session.add(
-                GitHubSourceModel(
-                    id=source_id,
-                    token_id=token_id,
-                    agent_id=agent_id,
-                    project_id=project_id,
-                    owner=owner,
-                    repo=repo,
-                    state=state,
-                    labels_json=json_dumps(labels),
-                    enabled=1 if enabled else 0,
-                    auto_start=1 if auto_start else 0,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+        repo_value = f"{owner.strip()}/{repo.strip()}".strip("/")
+        self.insert_issue_source(
+            source_id,
+            "github",
+            token_id,
+            agent_id,
+            project_id,
+            repo_value,
+            state,
+            labels,
+            enabled,
+            auto_start,
+        )
 
     def update_github_source(
         self,
@@ -1683,33 +1957,146 @@ class Database:
         enabled: Optional[bool] = None,
         auto_start: Optional[bool] = None,
     ) -> None:
-        with self.session() as session:
-            row = session.get(GitHubSourceModel, source_id)
-            if not row:
-                return
-            if token_id is not None:
-                row.token_id = token_id
-            if agent_id is not None:
-                row.agent_id = agent_id
-            if project_id is not None:
-                row.project_id = project_id
-            if owner is not None:
-                row.owner = owner
-            if repo is not None:
-                row.repo = repo
-            if state is not None:
-                row.state = state
-            if labels is not None:
-                row.labels_json = json_dumps(labels)
-            if enabled is not None:
-                row.enabled = 1 if enabled else 0
-            if auto_start is not None:
-                row.auto_start = 1 if auto_start else 0
-            row.updated_at = utc_now()
+        repo_value = None
+        if owner is not None or repo is not None:
+            current = self.get_github_source(source_id)
+            current_owner = owner if owner is not None else (current.owner if current else "")
+            current_repo = repo if repo is not None else (current.repo if current else "")
+            repo_value = f"{current_owner.strip()}/{current_repo.strip()}".strip("/")
+        self.update_issue_source(
+            source_id,
+            token_id=token_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            repo=repo_value,
+            state=state,
+            labels=labels,
+            enabled=enabled,
+            auto_start=auto_start,
+        )
 
     def delete_github_source(self, source_id: str) -> None:
+        self.delete_issue_source(source_id)
+
+    def list_auto_start_tickets(self) -> list[TicketRecord]:
         with self.session() as session:
-            session.query(GitHubSourceModel).filter(GitHubSourceModel.id == source_id).delete()
+            rows = session.execute(
+                select(TicketModel)
+                .where(TicketModel.auto_start == 1)
+                .where(TicketModel.status == "open")
+                .order_by(TicketModel.updated_at.desc())
+            ).scalars().all()
+        return [
+            TicketRecord(
+                id=row.id,
+                project_id=row.project_id,
+                agent_id=row.agent_id,
+                title=row.title,
+                description=row.description,
+                internal_notes=row.internal_notes,
+                assigned_to=row.assigned_to,
+                estimate=row.estimate,
+                status=row.status,
+                source_url=row.source_url,
+                github_comments_json=row.github_comments_json,
+                github_comments_fetched_at=row.github_comments_fetched_at,
+                auto_start=bool(row.auto_start),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def list_gitlab_sources(self, project_id: Optional[str] = None) -> list[GitLabSourceRecord]:
+        sources = self.list_issue_sources(project_id=project_id, provider="gitlab")
+        return [
+            GitLabSourceRecord(
+                id=source.id,
+                token_id=source.token_id,
+                agent_id=source.agent_id,
+                project_id=source.project_id,
+                project_path=source.repo,
+                state=source.state,
+                labels=source.labels,
+                enabled=source.enabled,
+                auto_start=source.auto_start,
+                created_at=source.created_at,
+                updated_at=source.updated_at,
+            )
+            for source in sources
+        ]
+
+    def get_gitlab_source(self, source_id: str) -> Optional[GitLabSourceRecord]:
+        source = self.get_issue_source(source_id)
+        if not source or source.provider != "gitlab":
+            return None
+        return GitLabSourceRecord(
+            id=source.id,
+            token_id=source.token_id,
+            agent_id=source.agent_id,
+            project_id=source.project_id,
+            project_path=source.repo,
+            state=source.state,
+            labels=source.labels,
+            enabled=source.enabled,
+            auto_start=source.auto_start,
+            created_at=source.created_at,
+            updated_at=source.updated_at,
+        )
+
+    def insert_gitlab_source(
+        self,
+        source_id: str,
+        token_id: Optional[str],
+        agent_id: Optional[str],
+        project_id: str,
+        project_path: str,
+        state: str,
+        labels: list[str],
+        enabled: bool,
+        auto_start: bool,
+    ) -> None:
+        self.insert_issue_source(
+            source_id,
+            "gitlab",
+            token_id,
+            agent_id,
+            project_id,
+            project_path.strip().strip("/"),
+            state,
+            labels,
+            enabled,
+            auto_start,
+        )
+
+    def update_gitlab_source(
+        self,
+        source_id: str,
+        *,
+        token_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        project_path: Optional[str] = None,
+        state: Optional[str] = None,
+        labels: Optional[list[str]] = None,
+        enabled: Optional[bool] = None,
+        auto_start: Optional[bool] = None,
+    ) -> None:
+        repo_value = project_path.strip().strip("/") if project_path is not None else None
+        self.update_issue_source(
+            source_id,
+            token_id=token_id,
+            agent_id=agent_id,
+            project_id=project_id,
+            repo=repo_value,
+            state=state,
+            labels=labels,
+            enabled=enabled,
+            auto_start=auto_start,
+        )
+
+    def delete_gitlab_source(self, source_id: str) -> None:
+        self.delete_issue_source(source_id)
 
     def list_tickets(self, project_id: Optional[str] = None) -> list[TicketRecord]:
         with self.session() as session:
@@ -1731,6 +2118,7 @@ class Database:
                     source_url=row.source_url,
                     github_comments_json=row.github_comments_json,
                     github_comments_fetched_at=row.github_comments_fetched_at,
+                    auto_start=bool(row.auto_start),
                     created_at=row.created_at,
                     updated_at=row.updated_at,
                 )
@@ -1755,6 +2143,7 @@ class Database:
                 source_url=row.source_url,
                 github_comments_json=row.github_comments_json,
                 github_comments_fetched_at=row.github_comments_fetched_at,
+                auto_start=bool(row.auto_start),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -1771,6 +2160,7 @@ class Database:
         internal_notes: Optional[str] = None,
         source_url: Optional[str] = None,
         agent_id: Optional[str] = None,
+        auto_start: bool = False,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1788,6 +2178,7 @@ class Database:
                     source_url=source_url,
                     github_comments_json=None,
                     github_comments_fetched_at=None,
+                    auto_start=1 if auto_start else 0,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1808,6 +2199,7 @@ class Database:
         source_url: Optional[str] = None,
         github_comments_json: Optional[str] = None,
         github_comments_fetched_at: Optional[str] = None,
+        auto_start: Optional[bool] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(TicketModel, ticket_id)
@@ -1835,10 +2227,16 @@ class Database:
                 row.github_comments_json = github_comments_json
             if github_comments_fetched_at is not None:
                 row.github_comments_fetched_at = github_comments_fetched_at
+            if auto_start is not None:
+                row.auto_start = 1 if auto_start else 0
             row.updated_at = utc_now()
 
     def backfill_ticket_source_urls(self) -> int:
         updated = 0
+        api_base = os.environ.get("WINTERMUTE_GITLAB_API_BASE", "https://gitlab.com/api/v4").rstrip("/")
+        gitlab_web_base = os.environ.get("WINTERMUTE_GITLAB_WEB_BASE_URL", "").strip()
+        if not gitlab_web_base:
+            gitlab_web_base = api_base[:-7] if api_base.endswith("/api/v4") else api_base
         with self.session() as session:
             rows = (
                 session.execute(
@@ -1850,19 +2248,33 @@ class Database:
                 .all()
             )
             for row in rows:
-                if not row.id.startswith("github:"):
-                    continue
-                parts = row.id.split(":")
-                if len(parts) < 3:
-                    continue
-                source_id = parts[1]
-                issue_number = parts[2]
-                source = session.get(GitHubSourceModel, source_id)
-                if not source:
-                    continue
-                row.source_url = f"https://github.com/{source.owner}/{source.repo}/issues/{issue_number}"
-                row.updated_at = utc_now()
-                updated += 1
+                if row.id.startswith("github:"):
+                    parts = row.id.split(":")
+                    if len(parts) < 3:
+                        continue
+                    source_id = parts[1]
+                    issue_number = parts[2]
+                    source = session.get(IssueSourceModel, source_id)
+                    if not source or source.provider != "github":
+                        continue
+                    owner, repo = _split_repo(source.repo)
+                    if not owner or not repo:
+                        continue
+                    row.source_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
+                    row.updated_at = utc_now()
+                    updated += 1
+                elif row.id.startswith("gitlab:"):
+                    parts = row.id.split(":")
+                    if len(parts) < 3:
+                        continue
+                    source_id = parts[1]
+                    issue_number = parts[2]
+                    source = session.get(IssueSourceModel, source_id)
+                    if not source or source.provider != "gitlab":
+                        continue
+                    row.source_url = f"{gitlab_web_base}/{source.repo}/-/issues/{issue_number}"
+                    row.updated_at = utc_now()
+                    updated += 1
         return updated
 
     def delete_ticket(self, ticket_id: str) -> None:

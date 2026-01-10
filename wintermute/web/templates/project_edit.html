@@ -47,6 +47,99 @@
         </button>
       </form>
     </div>
+    <div class="tile">
+      <h3>Issue Sources</h3>
+      {% if project_sources %}
+      <ul class="muted">
+        {% for source in project_sources %}
+        <li>
+          <strong>{{ source.provider }}</strong> {{ source.repo }} ({{ source.state }})
+          {% if source.enabled %}
+          <span class="badge">enabled</span>
+          {% else %}
+          <span class="badge">disabled</span>
+          {% endif %}
+          {% if source.auto_start %}
+          <span class="badge">auto-start</span>
+          {% else %}
+          <span class="badge">manual</span>
+          {% endif %}
+          {% if source.edit_url %}
+          <a href="{{ source.edit_url }}">edit</a>
+          {% endif %}
+          <span class="muted">labels: {{ source.labels }}, token: {{ source.token_label }}, agent: {{ source.agent_label }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">No sources configured for this project yet.</p>
+      {% endif %}
+      <div class="divider"></div>
+      <form method="post" action="/projects/{{ project.id }}/sources">
+        <input type="hidden" name="return_to" value="/ui/projects/{{ project.id }}/edit" />
+        <div class="checkbox-row">
+          <input type="checkbox" name="enabled" checked />
+          <label>Enabled</label>
+        </div>
+        <div class="field-group">
+          <label>Provider</label>
+          <select name="provider" required>
+            <option value="github">GitHub</option>
+            <option value="gitlab">GitLab</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Repo URL or Path</label>
+          <input type="text" name="repo" placeholder="https://github.com/owner/repo or group/project" required />
+        </div>
+        <div class="field-group">
+          <label>Token</label>
+          <select name="token_id">
+            <option value="">None</option>
+            {% if github_tokens %}
+            <optgroup label="GitHub Tokens">
+              {% for token in github_tokens %}
+              <option value="{{ token.id }}">{{ token.note or token.user_login or token.id }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+            {% if gitlab_tokens %}
+            <optgroup label="GitLab Tokens">
+              {% for token in gitlab_tokens %}
+              <option value="{{ token.id }}">{{ token.note or token.user_login or token.id }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endif %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Agent</label>
+          <select name="agent_id">
+            <option value="">None</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}">{{ agent.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Issue State</label>
+          <select name="state">
+            <option value="open" selected>open</option>
+            <option value="closed">closed</option>
+            <option value="all">all</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Labels (comma-separated)</label>
+          <input type="text" name="labels" />
+        </div>
+        <div class="checkbox-row">
+          <input type="checkbox" name="auto_start" />
+          <label>Auto-start agent sessions for issues</label>
+        </div>
+        <button type="submit">Add Source</button>
+      </form>
+    </div>
   </div>
 </div>
 {% endblock %}

@@ -1,10 +1,12 @@
-"""GitHub issues TaskSource."""
+"""GitLab issues TaskSource."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import logging
+import os
 from typing import Any, Optional
+import urllib.parse
 
 import aiohttp
 
@@ -18,7 +20,6 @@ from wintermute.runner import (
     is_codex_command,
     parse_ssh_options,
     prepare_issue_branch,
-    send_input,
     set_codex_trust,
     start_session,
     strip_port_forwards,
@@ -26,21 +27,25 @@ from wintermute.runner import (
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft, WorkItemBlocked
 
 
-GITHUB_API_BASE = "https://api.github.com"
+GITLAB_API_BASE = os.environ.get("WINTERMUTE_GITLAB_API_BASE", "https://gitlab.com/api/v4").rstrip("/")
+
+
+def _encode_project_id(project_id: str) -> str:
+    return urllib.parse.quote(project_id, safe="")
 
 
 async def _fetch_issue_comments(
     token: str,
-    owner: str,
-    repo: str,
-    issue_number: int,
+    project_id: str,
+    issue_iid: int,
 ) -> list[dict[str, Any]]:
     headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "PRIVATE-TOKEN": token,
         "User-Agent": "wintermute",
     }
-    url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments"
+    encoded = _encode_project_id(project_id)
+    url = f"{GITLAB_API_BASE}/projects/{encoded}/issues/{issue_iid}/notes"
     comments: list[dict[str, Any]] = []
     page = 1
     async with aiohttp.ClientSession() as session:
@@ -63,8 +68,17 @@ def _tool_schema(ctx: WorkItemContext) -> list[dict[str, Any]]:
     return [asdict(definition) for definition in ctx.tools.definitions()]
 
 
+def _split_project_path(project_path: str) -> tuple[str, str]:
+    parts = [part for part in project_path.split("/") if part]
+    if not parts:
+        return project_path, project_path
+    if len(parts) == 1:
+        return parts[0], parts[0]
+    return "/".join(parts[:-1]), parts[-1]
+
+
 @dataclass
-class GitHubIssueWorkItem(WorkItem):
+class GitLabIssueWorkItem(WorkItem):
     work_id: str
     priority: int
     source_id: str
@@ -72,15 +86,15 @@ class GitHubIssueWorkItem(WorkItem):
 
     async def resume(self, ctx: WorkItemContext) -> None:
         logger = logging.getLogger(__name__)
-        source_id = self.checkpoint.get("github_source_id")
-        source = ctx.db.get_github_source(source_id) if source_id else None
+        source_id = self.checkpoint.get("gitlab_source_id")
+        source = ctx.db.get_gitlab_source(source_id) if source_id else None
         if source:
             self._sync_ticket(ctx, source)
         if source and source.auto_start:
-            logger.info("GitHub work item %s auto-start enabled", self.work_id)
+            logger.info("GitLab work item %s auto-start enabled", self.work_id)
             await self._auto_start(ctx, source)
             return
-        logger.info("GitHub work item %s using LLM decision path", self.work_id)
+        logger.info("GitLab work item %s using LLM decision path", self.work_id)
         await self._llm_decide(ctx)
 
     async def _llm_decide(self, ctx: WorkItemContext) -> None:
@@ -123,10 +137,10 @@ class GitHubIssueWorkItem(WorkItem):
         issue_number = self.checkpoint.get("issue_number")
         if issue_number is None:
             return
-        ticket_id = f"github:{source.id}:{issue_number}"
+        ticket_id = f"gitlab:{source.id}:{issue_number}"
         issue_title = str(self.checkpoint.get("title") or "")
         issue_body = str(self.checkpoint.get("body") or "")
-        issue_url = self.checkpoint.get("html_url") or ""
+        issue_url = self.checkpoint.get("web_url") or ""
         existing_ticket = ctx.db.get_ticket(ticket_id)
         if not existing_ticket:
             assigned_to = None
@@ -137,7 +151,7 @@ class GitHubIssueWorkItem(WorkItem):
                 ticket_id=ticket_id,
                 project_id=source.project_id,
                 agent_id=source.agent_id or None,
-                title=issue_title or f"GitHub issue #{issue_number}",
+                title=issue_title or f"GitLab issue #{issue_number}",
                 description=issue_body,
                 assigned_to=assigned_to,
                 estimate=None,
@@ -162,11 +176,11 @@ class GitHubIssueWorkItem(WorkItem):
         if not project:
             return
         if not source.agent_id:
-            await self._notify(ctx, project.slack_channel_id, "GitHub source missing agent assignment.")
+            await self._notify(ctx, project.slack_channel_id, "GitLab source missing agent assignment.")
             return
         agent = ctx.db.get_agent(source.agent_id)
         if not agent:
-            await self._notify(ctx, project.slack_channel_id, "GitHub source agent not found.")
+            await self._notify(ctx, project.slack_channel_id, "GitLab source agent not found.")
             return
         project_vm = ctx.db.get_project_vm_for_project(project.id)
         if not project_vm:
@@ -179,8 +193,8 @@ class GitHubIssueWorkItem(WorkItem):
         issue_number = self.checkpoint.get("issue_number")
         if issue_number is None:
             return
-        issue_url = self.checkpoint.get("html_url") or ""
-        ticket_id = f"github:{source.id}:{issue_number}"
+        issue_url = self.checkpoint.get("web_url") or ""
+        ticket_id = f"gitlab:{source.id}:{issue_number}"
         existing_ticket = ctx.db.get_ticket(ticket_id)
         issue_title = str(self.checkpoint.get("title") or "")
         issue_body = str(self.checkpoint.get("body") or "")
@@ -189,7 +203,7 @@ class GitHubIssueWorkItem(WorkItem):
                 ticket_id=ticket_id,
                 project_id=project.id,
                 agent_id=agent.id,
-                title=issue_title or f"GitHub issue #{issue_number}",
+                title=issue_title or f"GitLab issue #{issue_number}",
                 description=issue_body,
                 assigned_to=agent.name,
                 estimate=None,
@@ -218,14 +232,13 @@ class GitHubIssueWorkItem(WorkItem):
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         base_spec = build_ssh_spec_with_options(vm, base_options)
-        token_record = ctx.db.get_github_token(source.token_id) if source.token_id else None
+        token_record = ctx.db.get_gitlab_token(source.token_id) if source.token_id else None
         comments: list[dict[str, Any]] = []
         if token_record:
             try:
                 comments = await _fetch_issue_comments(
                     token_record.token,
-                    source.owner,
-                    source.repo,
+                    source.project_path,
                     int(issue_number),
                 )
             except Exception as exc:
@@ -260,7 +273,13 @@ class GitHubIssueWorkItem(WorkItem):
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
         if token_record and project_vm.repo_url:
-            configure_git_push_auth(base_spec, repo_path, project_vm.repo_url, token_record.token)
+            configure_git_push_auth(
+                base_spec,
+                repo_path,
+                project_vm.repo_url,
+                token_record.token,
+                username="oauth2",
+            )
         if is_codex_command(agent.command) and agent.trust_level:
             set_codex_trust(base_spec, repo_path, agent.trust_level)
         try:
@@ -290,8 +309,7 @@ class GitHubIssueWorkItem(WorkItem):
                 internal_notes = existing_ticket.internal_notes
             prompt = _issue_prompt(
                 self.checkpoint,
-                source.owner,
-                source.repo,
+                source.project_path,
                 comments=comments,
                 internal_notes=internal_notes,
                 branch_name=branch_name,
@@ -329,8 +347,7 @@ class GitHubIssueWorkItem(WorkItem):
 
 def _issue_prompt(
     issue: dict[str, Any],
-    owner: str,
-    repo: str,
+    project_path: str,
     *,
     comments: list[dict[str, Any]],
     internal_notes: Optional[str],
@@ -343,20 +360,20 @@ def _issue_prompt(
     issue_number = issue.get("issue_number")
     title = issue.get("title") or ""
     body = issue.get("body") or ""
-    url = issue.get("html_url") or ""
+    url = issue.get("web_url") or ""
     comments_text = ""
     if comments:
         formatted = []
         for comment in comments:
-            author = (comment.get("user") or {}).get("login") or "unknown"
+            author = (comment.get("author") or {}).get("username") or "unknown"
             created_at = comment.get("created_at") or ""
             text = comment.get("body") or ""
             formatted.append(f"- {author} ({created_at}):\n{text}")
         comments_text = "\n".join(formatted)
     notes_text = internal_notes or ""
     default_prompt = (
-        "You are working on a GitHub issue.\n"
-        f"Repo: {owner}/{repo}\n"
+        "You are working on a GitLab issue.\n"
+        f"Project: {project_path}\n"
         f"Issue #{issue_number}: {title}\n"
         f"URL: {url}\n\n"
         "Instructions:\n"
@@ -367,7 +384,7 @@ def _issue_prompt(
         "- Post status updates and questions in the Slack thread for this issue.\n"
         "- If you need help or clarification, ask in Slack and include a line starting with 'BLOCKER:' summarizing what you need.\n"
         "- Then stop this session so the supervisor can move you to other work while you wait.\n"
-        "- For GitHub comments, prefix lines with 'PUBLIC:'; they will be stored for approval.\n"
+        "- For GitLab comments, prefix lines with 'PUBLIC:'; they will be stored for approval.\n"
         "- For internal notes, prefix lines with 'NOTE:' so they stay private.\n\n"
         "Issue description:\n"
         f"{body}\n\n"
@@ -376,6 +393,7 @@ def _issue_prompt(
         "Internal notes:\n"
         f"{notes_text or 'No internal notes yet.'}\n"
     )
+    owner, repo = _split_project_path(project_path)
     context = {
         "project_name": project_name,
         "project_slug": project_slug,
@@ -393,8 +411,8 @@ def _issue_prompt(
     return render_prompt_template(prompt_template, default_prompt, context)
 
 
-class GitHubIssuesSource(TaskSource):
-    id = "github_issues"
+class GitLabIssuesSource(TaskSource):
+    id = "gitlab_issues"
     enabled = False
     base_priority = 60
     poll_interval_seconds = 60
@@ -406,31 +424,28 @@ class GitHubIssuesSource(TaskSource):
             return []
         logger = logging.getLogger(__name__)
         drafts: list[WorkItemDraft] = []
-        sources = [row for row in db.list_github_sources() if row.enabled]
-        logger.info("GitHub poller checking %d sources", len(sources))
+        sources = [row for row in db.list_gitlab_sources() if row.enabled]
+        logger.info("GitLab poller checking %d sources", len(sources))
         for repo_source in sources:
             if not repo_source.token_id:
                 continue
-            token_record = db.get_github_token(repo_source.token_id)
+            token_record = db.get_gitlab_token(repo_source.token_id)
             if not token_record:
                 continue
             issues = await self._fetch_issues(
                 token_record.token,
-                repo_source.owner,
-                repo_source.repo,
+                repo_source.project_path,
                 repo_source.state,
                 repo_source.labels,
             )
-            logger.info("Fetched %d issues for %s/%s", len(issues), repo_source.owner, repo_source.repo)
+            logger.info("Fetched %d issues for %s", len(issues), repo_source.project_path)
             for issue in issues:
-                if issue.get("pull_request"):
-                    continue
                 updated_at = issue.get("updated_at") or ""
-                issue_number = issue.get("number")
+                issue_number = issue.get("iid")
                 if issue_number is None:
                     continue
                 work_id = (
-                    f"github:{repo_source.id}:{repo_source.owner}/{repo_source.repo}"
+                    f"gitlab:{repo_source.id}:{repo_source.project_path}"
                     f"#{issue_number}:{updated_at}"
                 )
                 drafts.append(
@@ -439,27 +454,26 @@ class GitHubIssuesSource(TaskSource):
                         priority=source.base_priority,
                         source_id=self.id,
                         checkpoint={
-                            "github_source_id": repo_source.id,
-                            "github_token_id": repo_source.token_id,
+                            "gitlab_source_id": repo_source.id,
+                            "gitlab_token_id": repo_source.token_id,
                             "project_id": repo_source.project_id,
-                            "owner": repo_source.owner,
-                            "repo": repo_source.repo,
+                            "project_path": repo_source.project_path,
                             "issue_number": issue_number,
                             "title": issue.get("title"),
-                            "body": issue.get("body") or "",
+                            "body": issue.get("description") or "",
                             "state": issue.get("state"),
-                            "html_url": issue.get("html_url"),
+                            "web_url": issue.get("web_url"),
                             "api_url": issue.get("url"),
                             "updated_at": updated_at,
-                            "labels": [label.get("name") for label in issue.get("labels", [])],
-                            "author": (issue.get("user") or {}).get("login"),
+                            "labels": issue.get("labels", []),
+                            "author": (issue.get("author") or {}).get("username"),
                         },
                     )
                 )
         return drafts
 
     async def build_work_item(self, ctx: dict[str, Any], record: Any) -> WorkItem:
-        return GitHubIssueWorkItem(
+        return GitLabIssueWorkItem(
             work_id=record.work_id,
             priority=record.priority,
             source_id=record.source_id,
@@ -469,13 +483,15 @@ class GitHubIssuesSource(TaskSource):
     async def _fetch_issues(
         self,
         token: str,
-        owner: str,
-        repo: str,
+        project_id: str,
         state: str,
         labels: list[str],
     ) -> list[dict[str, Any]]:
+        state_value = (state or "open").strip().lower()
+        if state_value == "open":
+            state_value = "opened"
         params = {
-            "state": state,
+            "state": state_value,
             "per_page": 50,
         }
         if labels:
@@ -485,11 +501,12 @@ class GitHubIssuesSource(TaskSource):
                 labels_value = ",".join(labels)
             params["labels"] = labels_value
         headers = {
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "PRIVATE-TOKEN": token,
             "User-Agent": "wintermute",
         }
-        url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues"
+        encoded = _encode_project_id(project_id)
+        url = f"{GITLAB_API_BASE}/projects/{encoded}/issues"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, params=params) as response:
                 payload = await response.json()

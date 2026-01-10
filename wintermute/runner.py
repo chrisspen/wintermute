@@ -289,7 +289,12 @@ def ensure_repo(
 
 
 def configure_git_push_auth(
-    spec: SSHSpec, repo_path: str, repo_url: Optional[str], token: Optional[str]
+    spec: SSHSpec,
+    repo_path: str,
+    repo_url: Optional[str],
+    token: Optional[str],
+    *,
+    username: str = "x-access-token",
 ) -> None:
     if not repo_path or not repo_url or not token:
         return
@@ -297,7 +302,8 @@ def configure_git_push_auth(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return
     safe_token = token.replace("'", "'\"'\"'")
-    push_netloc = f"x-access-token:{safe_token}@{parsed.netloc}"
+    safe_user = username.replace("'", "'\"'\"'")
+    push_netloc = f"{safe_user}:{safe_token}@{parsed.netloc}"
     push_url = urllib.parse.urlunparse(parsed._replace(netloc=push_netloc))
     script = (
         "set -e; "

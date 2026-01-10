@@ -24,6 +24,7 @@ from wintermute.runner import (
     strip_port_forwards,
 )
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
+from wintermute.tickets import parse_issue_ticket
 
 
 @dataclass
@@ -302,80 +303,138 @@ async def _run_mcp_session(
 async def _handle_session_markers(
     ctx: WorkItemContext, session: AgentSessionRecord, output: str
 ) -> None:
-    ticket_id = session.ticket_id
-    if not ticket_id:
+    public_lines, note_lines, blocker_lines, standup_lines = _extract_marked_lines(output)
+    if not (public_lines or note_lines or blocker_lines or standup_lines):
         return
-    public_lines, note_lines = _extract_marked_lines(output)
+    ticket_id = session.ticket_id
     agent = ctx.db.get_agent(session.agent_id)
     author = agent.name if agent else None
-    source_id = _parse_github_source_id(ticket_id)
-    issue_number = _parse_github_issue_number(ticket_id)
-    for line in public_lines:
-        ctx.db.insert_comment(
-            comment_id=str(uuid.uuid4()),
-            ticket_id=ticket_id,
-            session_id=session.id,
-            project_id=session.project_id,
-            agent_id=session.agent_id,
-            author=author,
-            source_id=source_id,
-            issue_number=issue_number,
-            body=line,
-            public=True,
-            approved=False,
-        )
-    for line in note_lines:
-        ctx.db.insert_comment(
-            comment_id=str(uuid.uuid4()),
-            ticket_id=ticket_id,
-            session_id=session.id,
-            project_id=session.project_id,
-            agent_id=session.agent_id,
-            author=author,
-            source_id=source_id,
-            issue_number=issue_number,
-            body=line,
-            public=False,
-            approved=False,
-        )
+    agent_label = agent.slug if agent else "agent"
+    _provider, source_id, issue_number = parse_issue_ticket(ticket_id) if ticket_id else (None, None, None)
+    if ticket_id:
+        for line in public_lines:
+            ctx.db.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=ticket_id,
+                session_id=session.id,
+                project_id=session.project_id,
+                agent_id=session.agent_id,
+                author=author,
+                source_id=source_id,
+                issue_number=issue_number,
+                body=line,
+                public=True,
+                approved=False,
+            )
+        for line in note_lines:
+            ctx.db.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=ticket_id,
+                session_id=session.id,
+                project_id=session.project_id,
+                agent_id=session.agent_id,
+                author=author,
+                source_id=source_id,
+                issue_number=issue_number,
+                body=line,
+                public=False,
+                approved=False,
+            )
+        for line in blocker_lines:
+            ctx.db.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=ticket_id,
+                session_id=session.id,
+                project_id=session.project_id,
+                agent_id=session.agent_id,
+                author=author,
+                source_id=source_id,
+                issue_number=issue_number,
+                body=f"Blocker: {line}",
+                public=False,
+                approved=False,
+            )
+        for line in standup_lines:
+            ctx.db.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=ticket_id,
+                session_id=session.id,
+                project_id=session.project_id,
+                agent_id=session.agent_id,
+                author=author,
+                source_id=source_id,
+                issue_number=issue_number,
+                body=f"Standup: {line}",
+                public=False,
+                approved=False,
+            )
+    if blocker_lines:
+        if ticket_id:
+            ticket = ctx.db.get_ticket(ticket_id)
+            if ticket and ticket.status not in {"done", "needs-feedback"}:
+                ctx.db.update_ticket(ticket_id, status="needs-feedback")
+        ctx.db.update_session(session.id, status="blocked", awaiting_response=0)
+        project = ctx.db.get_project(session.project_id)
+        if project and project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
+            summary = "\n".join(f"- {line}" for line in blocker_lines)
+            try:
+                await ctx.tools.call(
+                    "slack_post_message",
+                    {
+                        "channel": project.slack_channel_id,
+                        "thread_ts": session.thread_ts,
+                        "text": f"[{agent_label}] BLOCKER:\n{summary}",
+                    },
+                )
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Slack blocker notify failed: %s", exc)
+    if standup_lines:
+        standup_source = ctx.db.get_task_source("standup")
+        standup_channel = None
+        if standup_source:
+            standup_channel = str(standup_source.config.get("channel") or "").strip() or None
+        if standup_channel and ctx.tools.get("slack_post_message"):
+            ticket = ctx.db.get_ticket(ticket_id) if ticket_id else None
+            ticket_label = f"{ticket.title} ({ticket.id})" if ticket else ""
+            summary = "\n".join(f"- {line}" for line in standup_lines)
+            text = f"[{agent_label}] {ticket_label}\n{summary}".strip()
+            try:
+                await ctx.tools.call(
+                    "slack_post_message",
+                    {
+                        "channel": standup_channel,
+                        "text": text,
+                    },
+                )
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Slack standup notify failed: %s", exc)
 
 
-def _extract_marked_lines(output: str) -> tuple[list[str], list[str]]:
+def _extract_marked_lines(output: str) -> tuple[list[str], list[str], list[str], list[str]]:
     public_lines: list[str] = []
     note_lines: list[str] = []
+    blocker_lines: list[str] = []
+    standup_lines: list[str] = []
+    markers = [
+        ("PUBLIC:", public_lines),
+        ("GITHUB:", public_lines),
+        ("GITLAB:", public_lines),
+        ("NOTE:", note_lines),
+        ("BLOCKER:", blocker_lines),
+        ("STANDUP:", standup_lines),
+    ]
     for raw_line in output.splitlines():
         line = raw_line.strip()
         if not line:
             continue
         upper = line.upper()
-        if upper.startswith("PUBLIC:") or upper.startswith("GITHUB:"):
-            public_lines.append(line.split(":", 1)[1].strip())
-            continue
-        if upper.startswith("NOTE:"):
-            note_lines.append(line.split(":", 1)[1].strip())
-            continue
-    return public_lines, note_lines
-
-
-def _parse_github_source_id(ticket_id: str) -> Optional[str]:
-    if not ticket_id.startswith("github:"):
-        return None
-    parts = ticket_id.split(":")
-    if len(parts) < 3:
-        return None
-    return parts[1] or None
-
-
-def _parse_github_issue_number(ticket_id: str) -> Optional[int]:
-    if not ticket_id.startswith("github:"):
-        return None
-    parts = ticket_id.split(":")
-    if len(parts) < 3:
-        return None
-    try:
-        return int(parts[2])
-    except ValueError:
-        return None
+        for marker, bucket in markers:
+            idx = upper.find(marker)
+            if idx == -1:
+                continue
+            bucket.append(line[idx + len(marker):].strip())
+            break
+    return public_lines, note_lines, blocker_lines, standup_lines
 
 
 def _store_output_comments(
@@ -384,8 +443,7 @@ def _store_output_comments(
     ticket_id = session.ticket_id
     if not ticket_id:
         return
-    source_id = _parse_github_source_id(ticket_id)
-    issue_number = _parse_github_issue_number(ticket_id)
+    _provider, source_id, issue_number = parse_issue_ticket(ticket_id)
     author = agent.name if agent else None
     for chunk in chunks:
         text = chunk.strip()

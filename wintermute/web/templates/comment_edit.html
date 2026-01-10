@@ -28,7 +28,7 @@
         <textarea name="body" rows="6">{{ comment.body }}</textarea>
         <label class="checkbox">
           <input type="checkbox" name="public" {% if comment.public %}checked{% endif %} />
-          Public (eligible for GitHub)
+          Public (eligible for GitHub/GitLab)
         </label>
         <label class="checkbox">
           <input type="checkbox" name="approved" {% if comment.approved %}checked{% endif %} />

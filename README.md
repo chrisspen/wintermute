@@ -78,7 +78,20 @@ GitHub issues setup
 - Agent output conventions:
   - Lines prefixed with `PUBLIC:` are stored as comments marked public but not sent until approved.
   - Lines prefixed with `NOTE:` are stored as internal comments only.
+  - Lines prefixed with `BLOCKER:` mark the session blocked and move the ticket to needs-feedback.
 - Approved public comments are auto-dispatched by the comment dispatch source.
+
+GitLab issues setup
+-------------------
+- Generate a GitLab Personal Access Token with `api` scope.
+- Add it under "GitLab Tokens" in the admin UI.
+- Create one or more GitLab Sources (project, token, agent, project path, labels/state).
+- Enable the GitLab poller under "GitLab Sources".
+- Agent output conventions:
+  - Lines prefixed with `PUBLIC:` are stored as comments marked public but not sent until approved.
+  - Lines prefixed with `NOTE:` are stored as internal comments only.
+  - Lines prefixed with `BLOCKER:` mark the session blocked and move the ticket to needs-feedback.
+- Approved public comments are auto-dispatched to GitLab by the comment dispatch source.
 
 REST API
 --------
@@ -139,6 +152,19 @@ start <projectslug> <agentslug>
 
 Agent output appears in a Slack thread for that session. Replies in the thread are forwarded to the agent.
 
+Internal tickets auto-start
+---------------------------
+- Create tickets that only live in Wintermute and assign an agent.
+- Check "Auto-start agent session when open" on the ticket.
+- Enable "Ticket Auto-Start" on the admin home page to let the supervisor start sessions automatically.
+
+Daily standup
+-------------
+- Enable the Standup source on the admin home page.
+- Set the standup time and timezone (24h HH:MM); add a Slack channel ID if you want a shared standup log.
+- Standup prompts are queued to running agent sessions.
+- Agents should reply with lines prefixed `STANDUP:` describing progress since the last standup, next steps, and blockers.
+
 Session modes
 -------------
 Agents support two session modes:
@@ -167,6 +193,8 @@ Environment
 - `WINTERMUTE_API_KEY` (API key for the model server)
 - `WINTERMUTE_WEB_SECRET` (session secret for the admin UI)
 - `WINTERMUTE_REPO_RESOURCE_TTL_DAYS` (days before unused clone resources are cleaned, default 30)
+- `WINTERMUTE_GITLAB_API_BASE` (GitLab API base, default `https://gitlab.com/api/v4`)
+- `WINTERMUTE_GITLAB_WEB_BASE_URL` (optional GitLab web base for source URL backfill)
 
 Migrations
 ----------

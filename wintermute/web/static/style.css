@@ -367,6 +367,26 @@
       button:hover {
         background: var(--accent-dark);
       }
+      .modal-close {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: 6px;
+        background: transparent;
+        border: 1px solid var(--edge);
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 500;
+      }
+      .modal-close:hover {
+        background: var(--surface-muted);
+        color: var(--ink);
+      }
+      .modal-close i {
+        font-size: 12px;
+      }
       .danger {
         background: #dc2626;
         color: #fff5f5;
@@ -395,9 +415,60 @@
         padding: 24px;
         width: min(420px, 100%);
         box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+        position: relative;
+      }
+      .modal-card::before {
+        content: "";
+        position: absolute;
+        inset: -16px -16px -20px -16px;
+        border-radius: 20px;
+        background:
+          radial-gradient(120% 120% at 50% -10%, rgba(16, 163, 127, 0.18), rgba(16, 163, 127, 0) 60%),
+          radial-gradient(120% 120% at 50% 120%, rgba(15, 23, 42, 0.12), rgba(15, 23, 42, 0) 60%);
+        filter: blur(14px);
+        opacity: 0.9;
+        z-index: -1;
       }
       .modal-card.wide {
         width: min(760px, 100%);
+      }
+      .column-picker-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        grid-template-rows: auto 1fr;
+        gap: 16px;
+        align-items: start;
+      }
+      .column-picker-label {
+        margin: 0;
+      }
+      .column-picker-arrows {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: center;
+        justify-self: center;
+        align-self: center;
+      }
+      .column-picker-button {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border-radius: 8px;
+        background: var(--panel);
+        border: 1px solid var(--edge);
+        color: var(--muted);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 500;
+      }
+      .column-picker-button:hover {
+        background: var(--surface-muted);
+        color: var(--ink);
+      }
+      .column-picker-button i {
+        font-size: 12px;
       }
       .modal-actions {
         display: flex;
