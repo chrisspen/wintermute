@@ -1,3 +1,6 @@
+Wintermute
+==========
+
 <img src="static/images/logo-text.png" width="300" alt="Wintermute">
 
 [![Tests](https://github.com/chrisspen/wintermute/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/chrisspen/wintermute/actions/workflows/tests.yml)
