@@ -1,5 +1,4 @@
-Wintermute
-==========
+<img src="static/images/logo-text.png" width="300" alt="Wintermute">
 
 [![Tests](https://github.com/chrisspen/wintermute/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/chrisspen/wintermute/actions/workflows/tests.yml)
 
@@ -69,31 +68,30 @@ Slack setup
 - Enable the Slack source under "Slack Source".
 - Restart the supervisor after updating Slack tokens so tools load the new credentials.
 
-GitHub issues setup
--------------------
-- Generate a GitHub Personal Access Token with `repo` scope.
-- Add it under "GitHub Tokens" in the admin UI.
-- Create one or more GitHub Sources (project, token, agent, owner, repo, labels/state).
-- Optional: enable "auto-start agent sessions" on a GitHub Source to automatically start a
-  session per issue (requires an Agent + Project VM mapping).
-- Enable the GitHub poller under "GitHub Sources".
-- Agent output conventions:
-  - Lines prefixed with `PUBLIC:` are stored as comments marked public but not sent until approved.
-  - Lines prefixed with `NOTE:` are stored as internal comments only.
-  - Lines prefixed with `BLOCKER:` mark the session blocked and move the ticket to needs-feedback.
-- Approved public comments are auto-dispatched by the comment dispatch source.
+Issue Sources (GitHub/GitLab)
+-----------------------------
+Issue Sources configure remote repositories to poll for issues. Each source has its own
+poll interval and can be independently enabled/disabled.
 
-GitLab issues setup
--------------------
-- Generate a GitLab Personal Access Token with `api` scope.
-- Add it under "GitLab Tokens" in the admin UI.
-- Create one or more GitLab Sources (project, token, agent, project path, labels/state).
-- Enable the GitLab poller under "GitLab Sources".
-- Agent output conventions:
-  - Lines prefixed with `PUBLIC:` are stored as comments marked public but not sent until approved.
-  - Lines prefixed with `NOTE:` are stored as internal comments only.
-  - Lines prefixed with `BLOCKER:` mark the session blocked and move the ticket to needs-feedback.
-- Approved public comments are auto-dispatched to GitLab by the comment dispatch source.
+**Setup:**
+- Generate a Personal Access Token:
+  - GitHub: `repo` scope
+  - GitLab: `api` scope
+- Add the token under "Remote Tokens" in the admin UI (select GitHub or GitLab provider).
+- Create an Issue Source under "Issue Sources":
+  - Select provider (GitHub or GitLab)
+  - Select project, token, and optionally an agent
+  - Set repository path (e.g., `owner/repo` for GitHub, `group/project` for GitLab)
+  - Configure state filter and labels
+  - Set poll interval (seconds between API checks, minimum 10)
+  - Optional: enable "auto-start agent sessions" to automatically start a session per issue
+    (requires an Agent + Project VM mapping)
+
+**Agent output conventions:**
+- Lines prefixed with `PUBLIC:` are stored as comments marked public but not sent until approved.
+- Lines prefixed with `NOTE:` are stored as internal comments only.
+- Lines prefixed with `BLOCKER:` mark the session blocked and move the ticket to needs-feedback.
+- Approved public comments are auto-dispatched by the comment dispatch source.
 
 REST API
 --------
@@ -169,12 +167,26 @@ Daily standup
 
 Session modes
 -------------
-Agents support two session modes:
+Agents support three session modes:
 - `tmux`: runs the agent inside tmux on the VM (attachable for live debugging).
 - `mcp`: runs the agent via `codex mcp-server` (stdio MCP transport) and stores the conversation id
   on the session.
+- `claude`: runs Claude Code CLI via the streaming JSON API.
 
 For MCP mode, ensure the Codex CLI on the VM supports `mcp-server`.
+
+Agent LLM configuration
+-----------------------
+Each agent can have its own LLM API configuration for the decision path (used when
+auto-start is disabled and the supervisor needs to decide what to do with a work item).
+
+Configure under "Agents" → Edit Agent:
+- **LLM Base URL**: OpenAI-compatible API endpoint (e.g., `http://localhost:11434/v1` for Ollama)
+- **LLM API Key**: API key for the LLM service
+- **LLM Model**: Model name (e.g., `llama3.2`, `gpt-4`)
+
+If not configured, falls back to environment variables (`WINTERMUTE_BASE_URL`,
+`WINTERMUTE_API_KEY`, `WINTERMUTE_MODEL`) or defaults to local Ollama.
 
 tmux sessions
 -------------
@@ -191,12 +203,15 @@ Environment
 `.env` is required for local run:
 
 - `WINTERMUTE_DB` (path to SQLite DB, default `./wintermute.db`)
-- `WINTERMUTE_BASE_URL` (OpenWebUI-compatible API base, e.g. `https://openwebui.chrisspen.com/api`)
+- `WINTERMUTE_BASE_URL` (OpenAI-compatible API base for LLM decisions, e.g. `http://localhost:11434/v1`)
 - `WINTERMUTE_API_KEY` (API key for the model server)
+- `WINTERMUTE_MODEL` (LLM model name, default `llama3.2`)
 - `WINTERMUTE_WEB_SECRET` (session secret for the admin UI)
 - `WINTERMUTE_REPO_RESOURCE_TTL_DAYS` (days before unused clone resources are cleaned, default 30)
 - `WINTERMUTE_GITLAB_API_BASE` (GitLab API base, default `https://gitlab.com/api/v4`)
 - `WINTERMUTE_GITLAB_WEB_BASE_URL` (optional GitLab web base for source URL backfill)
+
+Note: Per-agent LLM configuration overrides the environment variables. See "Agent LLM configuration".
 
 Migrations
 ----------
