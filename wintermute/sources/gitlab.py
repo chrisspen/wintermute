@@ -39,6 +39,7 @@ async def _fetch_issue_comments(
     token: str,
     project_id: str,
     issue_iid: int,
+    base_url: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     headers = {
         "Accept": "application/json",
@@ -46,7 +47,13 @@ async def _fetch_issue_comments(
         "User-Agent": "wintermute",
     }
     encoded = _encode_project_id(project_id)
-    url = f"{GITLAB_API_BASE}/projects/{encoded}/issues/{issue_iid}/notes"
+    if base_url:
+        api_base = base_url.rstrip("/")
+        if not api_base.endswith("/api/v4"):
+            api_base = f"{api_base}/api/v4"
+    else:
+        api_base = GITLAB_API_BASE
+    url = f"{api_base}/projects/{encoded}/issues/{issue_iid}/notes"
     comments: list[dict[str, Any]] = []
     page = 1
     async with aiohttp.ClientSession() as session:
@@ -243,6 +250,7 @@ class GitLabIssueWorkItem(WorkItem):
                     token_record.token,
                     source.project_path,
                     int(issue_number),
+                    base_url=token_record.base_url,
                 )
             except Exception as exc:
                 logger.warning("Failed to fetch issue comments: %s", exc)
@@ -445,6 +453,7 @@ class GitLabIssuesSource(TaskSource):
                 repo_source.project_path,
                 repo_source.state,
                 repo_source.labels,
+                base_url=token_record.base_url,
             )
             logger.info("Fetched %d issues for %s", len(issues), repo_source.project_path)
             for issue in issues:
@@ -494,6 +503,7 @@ class GitLabIssuesSource(TaskSource):
         project_id: str,
         state: str,
         labels: list[str],
+        base_url: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         state_value = (state or "open").strip().lower()
         if state_value == "open":
@@ -514,7 +524,13 @@ class GitLabIssuesSource(TaskSource):
             "User-Agent": "wintermute",
         }
         encoded = _encode_project_id(project_id)
-        url = f"{GITLAB_API_BASE}/projects/{encoded}/issues"
+        if base_url:
+            api_base = base_url.rstrip("/")
+            if not api_base.endswith("/api/v4"):
+                api_base = f"{api_base}/api/v4"
+        else:
+            api_base = GITLAB_API_BASE
+        url = f"{api_base}/projects/{encoded}/issues"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, params=params) as response:
                 payload = await response.json()

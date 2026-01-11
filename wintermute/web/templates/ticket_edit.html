@@ -132,7 +132,33 @@
           </select>
         </div>
         <div class="field-group">
-          <label>Estimate</label>
+          <label>Sprint</label>
+          <select name="sprint_id">
+            <option value="">(none)</option>
+            {% for sprint in sprints %}
+            <option value="{{ sprint.id }}" {% if ticket.sprint_id == sprint.id %}selected{% endif %}>{{ sprint.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Priority</label>
+          <select name="priority">
+            <option value="" {% if not ticket.priority %}selected{% endif %}>(none)</option>
+            <option value="low" {% if ticket.priority == 'low' %}selected{% endif %}>Low</option>
+            <option value="medium" {% if ticket.priority == 'medium' %}selected{% endif %}>Medium</option>
+            <option value="high" {% if ticket.priority == 'high' %}selected{% endif %}>High</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Story Points</label>
+          <input type="number" name="story_points" step="0.5" min="0" value="{{ ticket.story_points or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Hours</label>
+          <input type="number" name="hours" step="0.25" min="0" value="{{ ticket.hours or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Estimate (legacy)</label>
           <input type="text" name="estimate" value="{{ ticket.estimate or '' }}" />
         </div>
         <div class="field-group">

@@ -199,6 +199,7 @@ class GitLabTokenRecord:
     id: str
     note: Optional[str]
     token: str
+    base_url: Optional[str]
     user_id: Optional[str]
     user_login: Optional[str]
     created_at: str
@@ -211,8 +212,21 @@ class RemoteTokenRecord:
     provider: str
     note: Optional[str]
     token: str
+    base_url: Optional[str]
     user_id: Optional[str]
     user_login: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class SprintRecord:
+    id: str
+    name: str
+    start_date: str
+    end_date: str
+    enabled: bool
+    status: str
     created_at: str
     updated_at: str
 
@@ -222,11 +236,15 @@ class TicketRecord:
     id: str
     project_id: str
     agent_id: Optional[str]
+    sprint_id: Optional[str]
     title: str
     description: Optional[str]
     internal_notes: Optional[str]
     assigned_to: Optional[str]
     estimate: Optional[str]
+    hours: Optional[float]
+    story_points: Optional[float]
+    priority: Optional[str]
     status: str
     source_url: Optional[str]
     github_comments_json: Optional[str]
@@ -451,17 +469,42 @@ class ProjectModel(Base):
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class SprintModel(Base):
+    __tablename__ = "sprints"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    start_date: Mapped[str] = mapped_column(String, nullable=False)
+    end_date: Mapped[str] = mapped_column(String, nullable=False)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class TicketSprintModel(Base):
+    __tablename__ = "ticket_sprints"
+
+    ticket_id: Mapped[str] = mapped_column(String, primary_key=True)
+    sprint_id: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class TicketModel(Base):
     __tablename__ = "tickets"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    sprint_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     internal_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     assigned_to: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     estimate: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    hours: Mapped[Optional[float]] = mapped_column(String, nullable=True)
+    story_points: Mapped[Optional[float]] = mapped_column(String, nullable=True)
+    priority: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
     source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     github_comments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -567,6 +610,7 @@ class RemoteTokenModel(Base):
     provider: Mapped[str] = mapped_column(String, nullable=False)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     token: Mapped[str] = mapped_column(Text, nullable=False)
+    base_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     user_login: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -1395,6 +1439,7 @@ class Database:
                 id=t.id,
                 note=t.note,
                 token=t.token,
+                base_url=t.base_url,
                 user_id=t.user_id,
                 user_login=t.user_login,
                 created_at=t.created_at,
@@ -1716,6 +1761,7 @@ class Database:
             id=t.id,
             note=t.note,
             token=t.token,
+            base_url=t.base_url,
             user_id=t.user_id,
             user_login=t.user_login,
             created_at=t.created_at,
@@ -1779,6 +1825,7 @@ class Database:
                 provider=row.provider,
                 note=row.note,
                 token=row.token,
+                base_url=row.base_url,
                 user_id=row.user_id,
                 user_login=row.user_login,
                 created_at=row.created_at,
@@ -1797,6 +1844,7 @@ class Database:
                 provider=row.provider,
                 note=row.note,
                 token=row.token,
+                base_url=row.base_url,
                 user_id=row.user_id,
                 user_login=row.user_login,
                 created_at=row.created_at,
@@ -1810,6 +1858,7 @@ class Database:
         provider: str,
         token: str,
         note: Optional[str] = None,
+        base_url: Optional[str] = None,
         user_id: Optional[str] = None,
         user_login: Optional[str] = None,
     ) -> None:
@@ -1821,6 +1870,7 @@ class Database:
                     provider=provider,
                     note=note,
                     token=token,
+                    base_url=base_url,
                     user_id=user_id,
                     user_login=user_login,
                     created_at=now,
@@ -1835,6 +1885,7 @@ class Database:
         provider: Optional[str] = None,
         token: Optional[str] = None,
         note: Optional[str] = None,
+        base_url: Optional[str] = None,
         user_id: Optional[str] = None,
         user_login: Optional[str] = None,
     ) -> None:
@@ -1848,6 +1899,8 @@ class Database:
                 row.token = token
             if note is not None:
                 row.note = note
+            if base_url is not None:
+                row.base_url = base_url or None
             if user_id is not None:
                 row.user_id = user_id
             if user_login is not None:
@@ -2115,11 +2168,15 @@ class Database:
                 id=row.id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                sprint_id=row.sprint_id,
                 title=row.title,
                 description=row.description,
                 internal_notes=row.internal_notes,
                 assigned_to=row.assigned_to,
                 estimate=row.estimate,
+                hours=float(row.hours) if row.hours else None,
+                story_points=float(row.story_points) if row.story_points else None,
+                priority=row.priority,
                 status=row.status,
                 source_url=row.source_url,
                 github_comments_json=row.github_comments_json,
@@ -2224,22 +2281,28 @@ class Database:
     def delete_gitlab_source(self, source_id: str) -> None:
         self.delete_issue_source(source_id)
 
-    def list_tickets(self, project_id: Optional[str] = None) -> list[TicketRecord]:
+    def list_tickets(self, project_id: Optional[str] = None, sprint_id: Optional[str] = None) -> list[TicketRecord]:
         with self.session() as session:
             stmt = select(TicketModel)
             if project_id:
                 stmt = stmt.where(TicketModel.project_id == project_id)
+            if sprint_id:
+                stmt = stmt.where(TicketModel.sprint_id == sprint_id)
             rows = session.execute(stmt.order_by(TicketModel.created_at.desc())).scalars().all()
             return [
                 TicketRecord(
                     id=row.id,
                     project_id=row.project_id,
                     agent_id=row.agent_id,
+                    sprint_id=row.sprint_id,
                     title=row.title,
                     description=row.description,
                     internal_notes=row.internal_notes,
                     assigned_to=row.assigned_to,
                     estimate=row.estimate,
+                    hours=float(row.hours) if row.hours else None,
+                    story_points=float(row.story_points) if row.story_points else None,
+                    priority=row.priority,
                     status=row.status,
                     source_url=row.source_url,
                     github_comments_json=row.github_comments_json,
@@ -2260,11 +2323,15 @@ class Database:
                 id=row.id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                sprint_id=row.sprint_id,
                 title=row.title,
                 description=row.description,
                 internal_notes=row.internal_notes,
                 assigned_to=row.assigned_to,
                 estimate=row.estimate,
+                hours=float(row.hours) if row.hours else None,
+                story_points=float(row.story_points) if row.story_points else None,
+                priority=row.priority,
                 status=row.status,
                 source_url=row.source_url,
                 github_comments_json=row.github_comments_json,
@@ -2286,6 +2353,10 @@ class Database:
         internal_notes: Optional[str] = None,
         source_url: Optional[str] = None,
         agent_id: Optional[str] = None,
+        sprint_id: Optional[str] = None,
+        hours: Optional[float] = None,
+        story_points: Optional[float] = None,
+        priority: Optional[str] = None,
         auto_start: bool = False,
     ) -> None:
         now = utc_now()
@@ -2295,11 +2366,15 @@ class Database:
                     id=ticket_id,
                     project_id=project_id,
                     agent_id=agent_id,
+                    sprint_id=sprint_id,
                     title=title,
                     description=description,
                     internal_notes=internal_notes,
                     assigned_to=assigned_to,
                     estimate=estimate,
+                    hours=str(hours) if hours is not None else None,
+                    story_points=str(story_points) if story_points is not None else None,
+                    priority=priority,
                     status=status,
                     source_url=source_url,
                     github_comments_json=None,
@@ -2316,16 +2391,24 @@ class Database:
         *,
         project_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        sprint_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
         internal_notes: Optional[str] = None,
         assigned_to: Optional[str] = None,
         estimate: Optional[str] = None,
+        hours: Optional[float] = None,
+        story_points: Optional[float] = None,
+        priority: Optional[str] = None,
         status: Optional[str] = None,
         source_url: Optional[str] = None,
         github_comments_json: Optional[str] = None,
         github_comments_fetched_at: Optional[str] = None,
         auto_start: Optional[bool] = None,
+        clear_sprint: bool = False,
+        clear_hours: bool = False,
+        clear_story_points: bool = False,
+        clear_priority: bool = False,
     ) -> None:
         with self.session() as session:
             row = session.get(TicketModel, ticket_id)
@@ -2335,6 +2418,10 @@ class Database:
                 row.project_id = project_id
             if agent_id is not None:
                 row.agent_id = agent_id or None
+            if sprint_id is not None:
+                row.sprint_id = sprint_id or None
+            if clear_sprint:
+                row.sprint_id = None
             if title is not None:
                 row.title = title
             if description is not None:
@@ -2345,6 +2432,18 @@ class Database:
                 row.assigned_to = assigned_to
             if estimate is not None:
                 row.estimate = estimate
+            if hours is not None:
+                row.hours = str(hours)
+            if clear_hours:
+                row.hours = None
+            if story_points is not None:
+                row.story_points = str(story_points)
+            if clear_story_points:
+                row.story_points = None
+            if priority is not None:
+                row.priority = priority or None
+            if clear_priority:
+                row.priority = None
             if status is not None:
                 row.status = status
             if source_url is not None:
@@ -2406,6 +2505,262 @@ class Database:
     def delete_ticket(self, ticket_id: str) -> None:
         with self.session() as session:
             session.query(TicketModel).filter(TicketModel.id == ticket_id).delete()
+
+    # Sprint CRUD methods
+
+    def list_sprints(self, status: Optional[str] = None) -> list[SprintRecord]:
+        with self.session() as session:
+            stmt = select(SprintModel)
+            if status:
+                stmt = stmt.where(SprintModel.status == status)
+            rows = session.execute(stmt.order_by(SprintModel.start_date.desc())).scalars().all()
+            return [
+                SprintRecord(
+                    id=row.id,
+                    name=row.name,
+                    start_date=row.start_date,
+                    end_date=row.end_date,
+                    enabled=bool(row.enabled),
+                    status=row.status,
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                for row in rows
+            ]
+
+    def get_sprint(self, sprint_id: str) -> Optional[SprintRecord]:
+        with self.session() as session:
+            row = session.get(SprintModel, sprint_id)
+            if not row:
+                return None
+            return SprintRecord(
+                id=row.id,
+                name=row.name,
+                start_date=row.start_date,
+                end_date=row.end_date,
+                enabled=bool(row.enabled),
+                status=row.status,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+
+    def get_active_sprint(self) -> Optional[SprintRecord]:
+        """Get the current active sprint."""
+        with self.session() as session:
+            row = session.execute(
+                select(SprintModel)
+                .where(SprintModel.status == "active")
+                .order_by(SprintModel.start_date.desc())
+            ).scalars().first()
+            if not row:
+                return None
+            return SprintRecord(
+                id=row.id,
+                name=row.name,
+                start_date=row.start_date,
+                end_date=row.end_date,
+                enabled=bool(row.enabled),
+                status=row.status,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+
+    def insert_sprint(
+        self,
+        sprint_id: str,
+        name: str,
+        start_date: str,
+        end_date: str,
+        enabled: bool = True,
+        status: str = "active",
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                SprintModel(
+                    id=sprint_id,
+                    name=name,
+                    start_date=start_date,
+                    end_date=end_date,
+                    enabled=1 if enabled else 0,
+                    status=status,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_sprint(
+        self,
+        sprint_id: str,
+        *,
+        name: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        status: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(SprintModel, sprint_id)
+            if not row:
+                return
+            if name is not None:
+                row.name = name
+            if start_date is not None:
+                row.start_date = start_date
+            if end_date is not None:
+                row.end_date = end_date
+            if enabled is not None:
+                row.enabled = 1 if enabled else 0
+            if status is not None:
+                row.status = status
+            row.updated_at = utc_now()
+
+    def delete_sprint(self, sprint_id: str) -> None:
+        with self.session() as session:
+            session.query(SprintModel).filter(SprintModel.id == sprint_id).delete()
+
+    def move_open_tickets_to_sprint(self, from_sprint_id: str, to_sprint_id: str) -> int:
+        """Move all open tickets from one sprint to another. Returns count moved."""
+        with self.session() as session:
+            # Get open tickets in the source sprint via junction table
+            ticket_ids = session.execute(
+                select(TicketSprintModel.ticket_id)
+                .where(TicketSprintModel.sprint_id == from_sprint_id)
+            ).scalars().all()
+            if not ticket_ids:
+                return 0
+            open_tickets = session.execute(
+                select(TicketModel)
+                .where(TicketModel.id.in_(ticket_ids))
+                .where(TicketModel.status.in_(["open", "in-progress"]))
+            ).scalars().all()
+            count = 0
+            now = utc_now()
+            for ticket in open_tickets:
+                # Remove from old sprint
+                session.execute(
+                    select(TicketSprintModel)
+                    .where(TicketSprintModel.ticket_id == ticket.id)
+                    .where(TicketSprintModel.sprint_id == from_sprint_id)
+                )
+                session.query(TicketSprintModel).filter(
+                    TicketSprintModel.ticket_id == ticket.id,
+                    TicketSprintModel.sprint_id == from_sprint_id,
+                ).delete()
+                # Add to new sprint
+                session.add(TicketSprintModel(
+                    ticket_id=ticket.id,
+                    sprint_id=to_sprint_id,
+                    created_at=now,
+                ))
+                count += 1
+            return count
+
+    def add_ticket_to_sprint(self, ticket_id: str, sprint_id: str) -> bool:
+        """Add a ticket to a sprint. Returns True if added, False if already exists."""
+        with self.session() as session:
+            existing = session.execute(
+                select(TicketSprintModel)
+                .where(TicketSprintModel.ticket_id == ticket_id)
+                .where(TicketSprintModel.sprint_id == sprint_id)
+            ).scalars().first()
+            if existing:
+                return False
+            session.add(TicketSprintModel(
+                ticket_id=ticket_id,
+                sprint_id=sprint_id,
+                created_at=utc_now(),
+            ))
+            return True
+
+    def remove_ticket_from_sprint(self, ticket_id: str, sprint_id: str) -> bool:
+        """Remove a ticket from a sprint. Returns True if removed, False if not found."""
+        with self.session() as session:
+            deleted = session.query(TicketSprintModel).filter(
+                TicketSprintModel.ticket_id == ticket_id,
+                TicketSprintModel.sprint_id == sprint_id,
+            ).delete()
+            return deleted > 0
+
+    def list_tickets_in_sprint(self, sprint_id: str) -> list[TicketRecord]:
+        """List all tickets in a sprint via the junction table."""
+        with self.session() as session:
+            ticket_ids = session.execute(
+                select(TicketSprintModel.ticket_id)
+                .where(TicketSprintModel.sprint_id == sprint_id)
+            ).scalars().all()
+            if not ticket_ids:
+                return []
+            rows = session.execute(
+                select(TicketModel)
+                .where(TicketModel.id.in_(ticket_ids))
+                .order_by(TicketModel.created_at.desc())
+            ).scalars().all()
+            return [
+                TicketRecord(
+                    id=row.id,
+                    project_id=row.project_id,
+                    agent_id=row.agent_id,
+                    sprint_id=row.sprint_id,
+                    title=row.title,
+                    description=row.description,
+                    internal_notes=row.internal_notes,
+                    assigned_to=row.assigned_to,
+                    estimate=row.estimate,
+                    hours=float(row.hours) if row.hours else None,
+                    story_points=float(row.story_points) if row.story_points else None,
+                    priority=row.priority,
+                    status=row.status,
+                    source_url=row.source_url,
+                    github_comments_json=row.github_comments_json,
+                    github_comments_fetched_at=row.github_comments_fetched_at,
+                    auto_start=bool(row.auto_start),
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                for row in rows
+            ]
+
+    def list_tickets_not_in_sprint(self, sprint_id: str, status_filter: Optional[list[str]] = None) -> list[TicketRecord]:
+        """List all tickets not in the given sprint, optionally filtered by status."""
+        with self.session() as session:
+            # Get ticket IDs already in this sprint
+            in_sprint_ids = session.execute(
+                select(TicketSprintModel.ticket_id)
+                .where(TicketSprintModel.sprint_id == sprint_id)
+            ).scalars().all()
+            stmt = select(TicketModel)
+            if in_sprint_ids:
+                stmt = stmt.where(TicketModel.id.notin_(in_sprint_ids))
+            if status_filter:
+                stmt = stmt.where(TicketModel.status.in_(status_filter))
+            rows = session.execute(
+                stmt.order_by(TicketModel.created_at.desc())
+            ).scalars().all()
+            return [
+                TicketRecord(
+                    id=row.id,
+                    project_id=row.project_id,
+                    agent_id=row.agent_id,
+                    sprint_id=row.sprint_id,
+                    title=row.title,
+                    description=row.description,
+                    internal_notes=row.internal_notes,
+                    assigned_to=row.assigned_to,
+                    estimate=row.estimate,
+                    hours=float(row.hours) if row.hours else None,
+                    story_points=float(row.story_points) if row.story_points else None,
+                    priority=row.priority,
+                    status=row.status,
+                    source_url=row.source_url,
+                    github_comments_json=row.github_comments_json,
+                    github_comments_fetched_at=row.github_comments_fetched_at,
+                    auto_start=bool(row.auto_start),
+                    created_at=row.created_at,
+                    updated_at=row.updated_at,
+                )
+                for row in rows
+            ]
 
     def list_comments(self, ticket_id: Optional[str] = None) -> list[CommentRecord]:
         with self.session() as session:

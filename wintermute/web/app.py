@@ -164,6 +164,7 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "name", "label": "Agent"},
             {"key": "slug", "label": "Slug"},
             {"key": "session_mode", "label": "Session Mode"},
+            {"key": "vm_target_id", "label": "VM"},
             {"key": "command", "label": "Command"},
             {"key": "required_ssh_options", "label": "SSH Options"},
             {"key": "env_vars", "label": "Env Vars"},
@@ -290,6 +291,19 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "mcp_conversation_id", "label": "MCP Conv ID"},
             {"key": "claude_session_id", "label": "Claude Session"},
             {"key": "last_output_at", "label": "Last Output", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
+    "sprints": {
+        "default": ["name", "start_date", "end_date", "status"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "name", "label": "Sprint"},
+            {"key": "start_date", "label": "Start Date"},
+            {"key": "end_date", "label": "End Date"},
+            {"key": "enabled", "label": "Auto-Cycle"},
+            {"key": "status", "label": "Status"},
             {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
             {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
         ],
@@ -623,7 +637,7 @@ def _build_vm_rows(vm_targets: list[Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _build_agent_rows(agents: list[Any]) -> list[dict[str, Any]]:
+def _build_agent_rows(agents: list[Any], vm_lookup: dict[str, str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for agent in agents:
         cells = {
@@ -631,6 +645,7 @@ def _build_agent_rows(agents: list[Any]) -> list[dict[str, Any]]:
             "name": {"text": _display_value(agent.name), "href": f"/ui/agents/{agent.id}/edit"},
             "slug": {"text": _display_value(agent.slug)},
             "session_mode": {"text": _display_value(agent.session_mode)},
+            "vm_target_id": {"text": vm_lookup.get(agent.vm_target_id, agent.vm_target_id or "—")},
             "command": {"text": _truncate_text(agent.command, 80)},
             "required_ssh_options": {"text": _truncate_text(agent.required_ssh_options, 80)},
             "env_vars": {"text": _truncate_text(agent.env_vars, 80)},
@@ -657,6 +672,23 @@ def _build_api_token_rows(api_tokens: list[Any]) -> list[dict[str, Any]]:
             "updated_at": {"text": _format_timestamp(token.updated_at)},
         }
         rows.append({"id": token.id, "cells": cells})
+    return rows
+
+
+def _build_sprint_rows(sprints: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for sprint in sprints:
+        cells = {
+            "id": {"text": _display_value(sprint.id)},
+            "name": {"text": _display_value(sprint.name), "href": f"/ui/sprints/{sprint.id}/edit"},
+            "start_date": {"text": sprint.start_date[:10] if sprint.start_date else "—"},
+            "end_date": {"text": sprint.end_date[:10] if sprint.end_date else "—"},
+            "enabled": {"text": "Yes" if sprint.enabled else "No"},
+            "status": {"text": _display_value(sprint.status)},
+            "created_at": {"text": _format_timestamp(sprint.created_at)},
+            "updated_at": {"text": _format_timestamp(sprint.updated_at)},
+        }
+        rows.append({"id": sprint.id, "cells": cells})
     return rows
 
 
@@ -873,19 +905,24 @@ async def _fetch_github_user(token: str) -> tuple[str, str]:
             return user_id, login
 
 
-async def _fetch_gitlab_user(token: str) -> tuple[str, str]:
+async def _fetch_gitlab_user(token: str, base_url: Optional[str] = None) -> tuple[str, str]:
     headers = {
         "Accept": "application/json",
         "PRIVATE-TOKEN": token,
         "User-Agent": "wintermute",
     }
-    api_base = os.environ.get("WINTERMUTE_GITLAB_API_BASE", "https://gitlab.com/api/v4").rstrip("/")
+    if base_url:
+        api_base = base_url.rstrip("/")
+        if not api_base.endswith("/api/v4"):
+            api_base = f"{api_base}/api/v4"
+    else:
+        api_base = os.environ.get("WINTERMUTE_GITLAB_API_BASE", "https://gitlab.com/api/v4").rstrip("/")
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{api_base}/user", headers=headers) as response:
             payload = await response.json()
             if response.status >= 400:
                 message = payload.get("message", "GitLab API error") if isinstance(payload, dict) else "GitLab API error"
-                raise HTTPException(status_code=400, detail=f"GitLab token validation failed: {message}")
+                raise HTTPException(status_code=400, detail=f"GitLab token validation failed: {response.status} {message}")
             user_id = str(payload.get("id", ""))
             login = str(payload.get("username", ""))
             return user_id, login
@@ -1502,7 +1539,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         elif source_id == TicketAutoStartSource.id:
             saved = "ticket_auto_start_source"
         elif source_id == StandupSource.id:
-            saved = "standup_source"
+            return RedirectResponse("/ui/standup?saved=standup_source", status_code=303)
         else:
             saved = "slack_source"
         return RedirectResponse(f"/ui?saved={saved}", status_code=303)
@@ -1735,12 +1772,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         provider = str(form.get("provider", "github")).strip()
         token = str(form.get("token", "")).strip()
         note = str(form.get("note", "")).strip() or None
+        base_url = str(form.get("base_url", "")).strip() or None
         if not token:
             raise HTTPException(status_code=400, detail="Token is required")
         if provider == "github":
             user_id, login = await _fetch_github_user(token)
         elif provider == "gitlab":
-            user_id, login = await _fetch_gitlab_user(token)
+            user_id, login = await _fetch_gitlab_user(token, base_url)
         else:
             raise HTTPException(status_code=400, detail="Invalid provider")
         database.insert_remote_token(
@@ -1748,6 +1786,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             provider=provider,
             token=token,
             note=note,
+            base_url=base_url,
             user_id=user_id,
             user_login=login,
         )
@@ -1764,22 +1803,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         provider = str(form.get("provider", "")).strip()
         token = str(form.get("token", "")).strip()
         note = str(form.get("note", "")).strip() or None
+        base_url = str(form.get("base_url", "")).strip() or None
         existing = database.get_remote_token(token_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Remote token not found")
         user_id = existing.user_id
         user_login = existing.user_login
         effective_provider = provider or existing.provider
+        effective_base_url = base_url if base_url is not None else existing.base_url
         if token:
             if effective_provider == "github":
                 user_id, user_login = await _fetch_github_user(token)
             elif effective_provider == "gitlab":
-                user_id, user_login = await _fetch_gitlab_user(token)
+                user_id, user_login = await _fetch_gitlab_user(token, effective_base_url)
         database.update_remote_token(
             token_id,
             provider=provider or None,
             token=token or None,
             note=note,
+            base_url=base_url,
             user_id=user_id,
             user_login=user_login,
         )
@@ -2896,6 +2938,72 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             data = handle.read().splitlines()
         return {"service": service, "path": path, "lines": data[-lines:]}
 
+    # Sprint ticket management API (must be before catch-all routes)
+    @app.get("/api/sprints/{sprint_id}/available-tickets")
+    def api_sprint_available_tickets(
+        sprint_id: str,
+        request: Request,
+        user: str = Depends(_require_login),
+        q: str = "",
+        page: int = 1,
+        per_page: int = 20,
+    ) -> dict[str, Any]:
+        """Get tickets not in this sprint, optionally filtered by search query."""
+        tickets = database.list_tickets_not_in_sprint(
+            sprint_id,
+            status_filter=["open", "in-progress", "needs-feedback"],
+        )
+        if q:
+            q_lower = q.lower()
+            tickets = [t for t in tickets if q_lower in t.title.lower()]
+        total = len(tickets)
+        start = (page - 1) * per_page
+        end = start + per_page
+        tickets = tickets[start:end]
+        return {
+            "tickets": [
+                {
+                    "id": t.id,
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority,
+                    "story_points": t.story_points,
+                }
+                for t in tickets
+            ],
+            "total": total,
+            "page": page,
+            "per_page": per_page,
+            "pages": (total + per_page - 1) // per_page if total > 0 else 1,
+        }
+
+    @app.post("/api/sprints/{sprint_id}/tickets/{ticket_id}")
+    def api_add_ticket_to_sprint(
+        sprint_id: str,
+        ticket_id: str,
+        user: str = Depends(_require_login),
+    ) -> dict[str, Any]:
+        """Add a ticket to a sprint."""
+        sprint = database.get_sprint(sprint_id)
+        if not sprint:
+            raise HTTPException(status_code=404, detail="Sprint not found")
+        ticket = database.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        added = database.add_ticket_to_sprint(ticket_id, sprint_id)
+        return {"ok": True, "added": added, "ticket_id": ticket_id, "sprint_id": sprint_id}
+
+    @app.delete("/api/sprints/{sprint_id}/tickets/{ticket_id}")
+    def api_remove_ticket_from_sprint(
+        sprint_id: str,
+        ticket_id: str,
+        user: str = Depends(_require_login),
+    ) -> dict[str, Any]:
+        """Remove a ticket from a sprint."""
+        removed = database.remove_ticket_from_sprint(ticket_id, sprint_id)
+        return {"ok": True, "removed": removed, "ticket_id": ticket_id, "sprint_id": sprint_id}
+
+    # Generic model API routes (catch-all, must be after specific routes)
     @app.get("/api/{model}/{item_id:path}")
     async def api_get(model: str, item_id: str, request: Request) -> dict[str, Any]:
         handlers = _api_model_handlers().get(model)
@@ -3160,6 +3268,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         status = str(form.get("status", "open")).strip() or "open"
         source_url = str(form.get("source_url", "")).strip() or None
         auto_start = form.get("auto_start") == "on"
+        sprint_id = str(form.get("sprint_id", "")).strip() or None
+        priority = str(form.get("priority", "")).strip() or None
+        hours_str = str(form.get("hours", "")).strip()
+        hours = float(hours_str) if hours_str else None
+        story_points_str = str(form.get("story_points", "")).strip()
+        story_points = float(story_points_str) if story_points_str else None
         return_to = str(form.get("return_to", "/ui/tickets")).strip() or "/ui/tickets"
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
@@ -3177,6 +3291,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             internal_notes=internal_notes,
             source_url=source_url,
             auto_start=auto_start,
+            sprint_id=sprint_id,
+            priority=priority,
+            hours=hours,
+            story_points=story_points,
         )
         return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
 
@@ -3279,6 +3397,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "projects": database.list_projects(),
                 "agents": database.list_agents(),
                 "users": database.list_users(),
+                "sprints": database.list_sprints(),
                 "description_html": description_html,
                 "is_github_ticket": is_github_ticket,
                 "is_gitlab_ticket": is_gitlab_ticket,
@@ -3316,6 +3435,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         status = str(form.get("status", "open")).strip() or "open"
         source_url = str(form.get("source_url", "")).strip() or None
         auto_start = form.get("auto_start") == "on"
+        sprint_id = str(form.get("sprint_id", "")).strip() or None
+        priority = str(form.get("priority", "")).strip() or None
+        hours_str = str(form.get("hours", "")).strip()
+        hours = float(hours_str) if hours_str else None
+        story_points_str = str(form.get("story_points", "")).strip()
+        story_points = float(story_points_str) if story_points_str else None
         if not project_id or not title:
             raise HTTPException(status_code=400, detail="Missing ticket fields")
         database.update_ticket(
@@ -3330,6 +3455,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             status=status,
             source_url=source_url,
             auto_start=auto_start,
+            sprint_id=sprint_id,
+            priority=priority,
+            hours=hours,
+            story_points=story_points,
         )
         return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
 
@@ -3915,6 +4044,21 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             },
         )
 
+    @app.get("/ui/standup")
+    def standup_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        standup_source = database.get_task_source(StandupSource.id)
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "standup.html",
+            {
+                "title": "Standup",
+                "active_nav": "standup",
+                "growl_message": growl_message,
+                "standup_source": standup_source,
+            },
+        )
+
     @app.get("/ui/work-items")
     def work_items_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         status_filter = request.query_params.get("status")
@@ -4051,6 +4195,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     @app.get("/ui/agents")
     def agents_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         agents = database.list_agents()
+        vm_targets = database.list_vm_targets()
+        vm_lookup = {vm.id: vm.name for vm in vm_targets}
         growl_message = _growl_message(request.query_params.get("saved"))
         table_context = _build_table_context(
             database=database,
@@ -4061,7 +4207,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             description="Agent profiles and execution settings.",
             create_label="Add Agent",
             create_url="/ui/agents/create?return_to=/ui/agents",
-            rows=_build_agent_rows(agents),
+            rows=_build_agent_rows(agents, vm_lookup),
             empty_message="No agents yet.",
         )
         return _render_template(
@@ -4166,6 +4312,134 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "return_to": return_to,
             },
         )
+
+    # --- Sprints UI ---
+
+    @app.get("/ui/sprints")
+    def sprints_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        sprints = database.list_sprints()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="sprints",
+            title="Sprints",
+            description="Sprint cycles for project management.",
+            create_label="Add Sprint",
+            create_url="/ui/sprints/create?return_to=/ui/sprints",
+            rows=_build_sprint_rows(sprints),
+            empty_message="No sprints yet.",
+        )
+        return _render_template(
+            request,
+            "sprints.html",
+            {
+                "title": "Sprints",
+                "active_nav": "sprints",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/sprints/create")
+    def sprint_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        return_to = request.query_params.get("return_to", "/ui/sprints")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/sprints"
+        # Default dates: today and today+14
+        from datetime import date, timedelta
+        today = date.today()
+        default_start = today.isoformat()
+        default_end = (today + timedelta(days=14)).isoformat()
+        return _render_template(
+            request,
+            "sprint_create.html",
+            {
+                "title": "Add Sprint",
+                "active_nav": "sprints",
+                "growl_message": None,
+                "return_to": return_to,
+                "default_start": default_start,
+                "default_end": default_end,
+            },
+        )
+
+    @app.get("/ui/sprints/{sprint_id}/edit")
+    def sprint_edit_ui(
+        sprint_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> Response:
+        sprint = database.get_sprint(sprint_id)
+        if not sprint:
+            raise HTTPException(status_code=404, detail="Sprint not found")
+        return_to = request.query_params.get("return_to", "/ui/sprints")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/sprints"
+        tickets = database.list_tickets_in_sprint(sprint_id)
+        return _render_template(
+            request,
+            "sprint_edit.html",
+            {
+                "title": f"Edit Sprint: {sprint.name}",
+                "active_nav": "sprints",
+                "growl_message": _growl_message(request.query_params.get("saved")),
+                "sprint": sprint,
+                "tickets": tickets,
+                "return_to": return_to,
+            },
+        )
+
+    @app.post("/sprints")
+    async def create_sprint(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        start_date = str(form.get("start_date", "")).strip()
+        end_date = str(form.get("end_date", "")).strip()
+        enabled = form.get("enabled") == "on"
+        return_to = str(form.get("return_to", "/ui/sprints"))
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/sprints"
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        if not start_date or not end_date:
+            raise HTTPException(status_code=400, detail="Start and end dates are required")
+        sprint_id = str(uuid.uuid4())
+        database.insert_sprint(
+            sprint_id=sprint_id,
+            name=name,
+            start_date=start_date,
+            end_date=end_date,
+            enabled=enabled,
+            status="active",
+        )
+        return RedirectResponse(f"{return_to}?saved=sprint", status_code=303)
+
+    @app.post("/sprints/{sprint_id}/edit")
+    async def update_sprint(
+        sprint_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        start_date = str(form.get("start_date", "")).strip()
+        end_date = str(form.get("end_date", "")).strip()
+        enabled = form.get("enabled") == "on"
+        status = str(form.get("status", "active")).strip()
+        database.update_sprint(
+            sprint_id,
+            name=name if name else None,
+            start_date=start_date if start_date else None,
+            end_date=end_date if end_date else None,
+            enabled=enabled,
+            status=status if status else None,
+        )
+        return RedirectResponse(f"/ui/sprints/{sprint_id}/edit?saved=sprint", status_code=303)
+
+    @app.post("/sprints/{sprint_id}/delete")
+    async def delete_sprint(
+        sprint_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_sprint(sprint_id)
+        return RedirectResponse("/ui/sprints?saved=sprint_deleted", status_code=303)
 
     # Legacy project-vms routes - VMs are now linked directly to agents
     @app.get("/ui/project-vms")
@@ -4522,6 +4796,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         agents = database.list_agents()
+        sprints = database.list_sprints(status="active")
         return_to = request.query_params.get("return_to", "/ui/tickets")
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
@@ -4534,6 +4809,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "projects": projects,
                 "agents": agents,
+                "sprints": sprints,
                 "users": users,
                 "return_to": return_to,
             },

@@ -61,7 +61,33 @@
           </select>
         </div>
         <div class="field-group">
-          <label>Estimate</label>
+          <label>Sprint</label>
+          <select name="sprint_id">
+            <option value="">(none)</option>
+            {% for sprint in sprints %}
+            <option value="{{ sprint.id }}" {% if sprint.status == 'active' %}selected{% endif %}>{{ sprint.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Priority</label>
+          <select name="priority">
+            <option value="">(none)</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Story Points</label>
+          <input type="number" name="story_points" step="0.5" min="0" placeholder="e.g. 3" />
+        </div>
+        <div class="field-group">
+          <label>Hours</label>
+          <input type="number" name="hours" step="0.25" min="0" placeholder="e.g. 4" />
+        </div>
+        <div class="field-group">
+          <label>Estimate (legacy)</label>
           <input type="text" name="estimate" placeholder="e.g. 2h or 3pts" />
         </div>
         <div class="field-group">

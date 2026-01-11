@@ -19,6 +19,10 @@
           <input type="text" name="note" value="{{ token.note or '' }}" />
         </div>
         <div class="field-group">
+          <label>Base URL (for self-hosted instances)</label>
+          <input type="text" name="base_url" value="{{ token.base_url or '' }}" placeholder="e.g. https://gitlab.example.com" />
+        </div>
+        <div class="field-group">
           <label>Personal Access Token</label>
           <input type="password" name="token" placeholder="leave blank to keep existing" />
         </div>

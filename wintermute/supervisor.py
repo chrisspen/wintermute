@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import heapq
 import os
+import re
 import traceback
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Optional
@@ -104,6 +106,7 @@ class Supervisor:
                 await self._refresh_queue()
                 self._update_state("refreshed queue")
                 await self._cleanup_repo_resources()
+                await self._cycle_sprints()
                 if not self._current_work_id:
                     await self._run_next()
                 self._update_state("idle")
@@ -133,7 +136,7 @@ class Supervisor:
         now = datetime.now(timezone.utc).timestamp()
         for source in self.sources:
             row = rows.get(source.id)
-            if not row or not row.enabled:
+            if not row:
                 continue
             logger.debug("Polling source %s", source.id)
             last_poll = self._last_poll.get(source.id, 0.0)
@@ -326,6 +329,53 @@ class Supervisor:
             if signature != self._slack_signature:
                 await slack_source.reset_socket()
                 self._slack_signature = signature
+
+    async def _cycle_sprints(self) -> None:
+        """Check for expired sprints with auto-cycle enabled and create new ones."""
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        sprints = self.db.list_sprints(status="active")
+        for sprint in sprints:
+            if not sprint.enabled:
+                continue
+            if sprint.end_date >= today:
+                continue
+            # Sprint has ended and auto-cycle is enabled
+            try:
+                start = datetime.strptime(sprint.start_date, "%Y-%m-%d")
+                end = datetime.strptime(sprint.end_date, "%Y-%m-%d")
+                duration = end - start
+            except ValueError:
+                logger.warning("Sprint %s has invalid dates, skipping cycle", sprint.id)
+                continue
+            # Create new sprint starting day after old one ended
+            new_start = end + timedelta(days=1)
+            new_end = new_start + duration
+            # Generate new sprint name (increment number if present)
+            match = re.search(r"(\d+)$", sprint.name)
+            if match:
+                num = int(match.group(1)) + 1
+                new_name = sprint.name[: match.start()] + str(num)
+            else:
+                new_name = sprint.name + " 2"
+            new_sprint_id = str(uuid.uuid4())
+            self.db.insert_sprint(
+                sprint_id=new_sprint_id,
+                name=new_name,
+                start_date=new_start.strftime("%Y-%m-%d"),
+                end_date=new_end.strftime("%Y-%m-%d"),
+                enabled=True,
+                status="active",
+            )
+            # Move open tickets to new sprint
+            moved = self.db.move_open_tickets_to_sprint(sprint.id, new_sprint_id)
+            # Close old sprint
+            self.db.update_sprint(sprint.id, status="closed")
+            logger.info(
+                "Cycled sprint %s -> %s, moved %d tickets",
+                sprint.name,
+                new_name,
+                moved,
+            )
 
     def _get_slack_source(self) -> Optional[SlackSource]:
         for source in self.sources:

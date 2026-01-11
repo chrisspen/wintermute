@@ -138,6 +138,7 @@ When running as an agent inside a VM, the web server runs on the host machine. U
 - Find gateway: `ip route | grep default | awk '{print $3}'`
 - API calls: `curl -H "Authorization: Bearer $TOKEN" http://192.168.123.1:8000/api/...`
 - API token: read from `.codex/token` (strip the `WINTERMUTE_ADMIN_API_TOKEN=` prefix)
+- After completing web server changes you're confident will work, restart via: `curl -s -X POST -H "Authorization: Bearer $TOKEN" http://192.168.123.1:8000/api/admin/restart-web`
 
 ## Minimal local run (dev)
 Run setup:
