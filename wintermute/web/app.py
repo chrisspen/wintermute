@@ -99,7 +99,6 @@ API_PERMISSION_MODELS = [
     {"key": "github_tokens", "label": "GitHub Tokens"},
     {"key": "gitlab_sources", "label": "GitLab Sources"},
     {"key": "gitlab_tokens", "label": "GitLab Tokens"},
-    {"key": "project_vms", "label": "Project VM Mappings"},
     {"key": "projects", "label": "Projects"},
     {"key": "repo_resources", "label": "Repo Resources"},
     {"key": "sessions", "label": "Agent Sessions"},
@@ -249,26 +248,12 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
         ],
     },
-    "project_vms": {
-        "default": ["project_id", "vm_target_id", "repo_mode"],
-        "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "project_id", "label": "Project"},
-            {"key": "vm_target_id", "label": "VM Target"},
-            {"key": "repo_mode", "label": "Repo Mode"},
-            {"key": "repo_path", "label": "Repo Path"},
-            {"key": "repo_url", "label": "Repo URL"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-        ],
-    },
     "repo_resources": {
         "default": ["path", "project_id", "status"],
         "columns": [
             {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
             {"key": "path", "label": "Path"},
             {"key": "project_id", "label": "Project"},
-            {"key": "project_vm_id", "label": "Mapping"},
             {"key": "repo_mode", "label": "Repo Mode"},
             {"key": "status", "label": "Status"},
             {"key": "session_id", "label": "Session"},
@@ -297,7 +282,6 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
         "columns": [
             {"key": "id", "label": "Session ID"},
             {"key": "project_id", "label": "Project"},
-            {"key": "project_vm_id", "label": "Mapping"},
             {"key": "agent_id", "label": "Agent"},
             {"key": "ticket_id", "label": "Ticket"},
             {"key": "status", "label": "Status"},
@@ -769,27 +753,6 @@ def _build_agent_response_rows(
     return rows
 
 
-def _build_project_vm_rows(
-    project_vms: list[Any], project_lookup: dict[str, str], vm_lookup: dict[str, str]
-) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for mapping in project_vms:
-        project_name = project_lookup.get(mapping.project_id, mapping.project_id) if mapping.project_id else None
-        vm_name = vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id) if mapping.vm_target_id else None
-        cells = {
-            "id": {"text": _display_value(mapping.id)},
-            "project_id": {"text": _display_value(project_name), "href": f"/ui/project-vms/{mapping.id}/edit"},
-            "vm_target_id": {"text": _display_value(vm_name)},
-            "repo_mode": {"text": _display_value(mapping.repo_mode)},
-            "repo_path": {"text": _display_value(mapping.repo_path)},
-            "repo_url": {"text": _format_url(mapping.repo_url)},
-            "created_at": {"text": _format_timestamp(mapping.created_at)},
-            "updated_at": {"text": _format_timestamp(mapping.updated_at)},
-        }
-        rows.append({"id": mapping.id, "cells": cells})
-    return rows
-
-
 def _build_repo_resource_rows(
     resources: list[Any], project_lookup: dict[str, str]
 ) -> list[dict[str, Any]]:
@@ -800,7 +763,6 @@ def _build_repo_resource_rows(
             "id": {"text": _display_value(resource.id)},
             "path": {"text": _display_value(resource.path), "href": f"/ui/repo-resources/{resource.id}/edit"},
             "project_id": {"text": _display_value(project_name)},
-            "project_vm_id": {"text": _display_value(resource.project_vm_id)},
             "repo_mode": {"text": _display_value(resource.repo_mode)},
             "status": {"text": _display_value(resource.status)},
             "session_id": {"text": _display_value(resource.session_id)},
@@ -841,7 +803,6 @@ def _build_session_rows(
         cells = {
             "id": {"text": _display_value(session.id), "href": f"/ui/sessions/{session.id}"},
             "project_id": {"text": _display_value(project_name)},
-            "project_vm_id": {"text": _display_value(session.project_vm_id)},
             "agent_id": {"text": _display_value(agent_name)},
             "ticket_id": {"text": _display_value(session.ticket_id)},
             "status": {"text": _display_value(session.status)},
@@ -2019,11 +1980,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             "repo_resources": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_repo_resources()],
                 "get": database.get_repo_resource,
-                "required": ["project_id", "project_vm_id", "repo_mode", "path", "status"],
+                "required": ["project_id", "repo_mode", "path", "status"],
                 "create": lambda payload: database.insert_repo_resource(
                     payload.get("id") or str(uuid.uuid4()),
                     payload["project_id"],
-                    payload["project_vm_id"],
                     payload["repo_mode"],
                     payload["path"],
                     payload["status"],
@@ -2142,36 +2102,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 ),
                 "delete": database.delete_agent_response,
             },
-            "project_vms": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_project_vms()],
-                "get": database.get_project_vm,
-                "required": ["project_id", "vm_target_id"],
-                "create": lambda payload: database.insert_project_vm(
-                    str(uuid.uuid4()),
-                    payload["project_id"],
-                    payload["vm_target_id"],
-                    payload.get("repo_mode") or "mirror",
-                    payload.get("repo_path"),
-                    payload.get("repo_url"),
-                ),
-                "update": lambda item_id, payload: database.update_project_vm(
-                    item_id,
-                    project_id=payload.get("project_id"),
-                    vm_target_id=payload.get("vm_target_id"),
-                    repo_mode=payload.get("repo_mode"),
-                    repo_path=payload.get("repo_path"),
-                    repo_url=payload.get("repo_url"),
-                ),
-                "delete": database.delete_project_vm,
-            },
             "sessions": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_sessions()],
                 "get": database.get_session,
-                "required": ["project_id", "project_vm_id", "agent_id", "repo_path"],
+                "required": ["project_id", "agent_id", "repo_path"],
                 "create": lambda payload: database.insert_session(
                     payload.get("id") or str(uuid.uuid4()),
                     payload["project_id"],
-                    payload["project_vm_id"],
                     payload["agent_id"],
                     payload.get("ticket_id"),
                     payload.get("status") or "running",
@@ -2594,10 +2531,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return {"running": False, "session_id": None, "location": None, "repo_path": None}
         if session.status != "running":
             return {"running": False, "session_id": session.id, "location": None, "repo_path": session.repo_path}
-        project_vm = database.get_project_vm(session.project_vm_id)
         agent = database.get_agent(session.agent_id)
-        vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
-        if not (project_vm and agent and vm):
+        vm = database.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+        if not (agent and vm):
             return {
                 "running": False,
                 "session_id": session.id,
@@ -2671,10 +2607,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             ticket = database.get_ticket(ticket_id) or ticket
         project_id = source.project_id if source else ticket.project_id
         project = database.get_project(project_id)
-        project_vm = database.get_project_vm_for_project(project.id)
-        if not (agent and project and project_vm):
+        if not (agent and project):
             raise HTTPException(status_code=400, detail="Project configuration missing")
-        vm = database.get_vm_target(project_vm.vm_target_id)
+        if not agent.vm_target_id:
+            raise HTTPException(status_code=400, detail="Agent has no VM target configured")
+        vm = database.get_vm_target(agent.vm_target_id)
         if not vm:
             raise HTTPException(status_code=400, detail="VM target missing")
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
@@ -2687,28 +2624,27 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
         repo_resource, resource_error = database.acquire_repo_resource(
             project=project,
-            project_vm=project_vm,
             session_id=session_id,
             agent_id=agent.id,
         )
         if not repo_resource:
             raise HTTPException(status_code=400, detail=resource_error or "Repo resource unavailable")
         try:
-            repo_path = ensure_repo(base_spec, project_vm, repo_path=repo_resource.path)
+            repo_path = ensure_repo(base_spec, project, repo_path=repo_resource.path)
             if not repo_path:
                 raise HTTPException(status_code=400, detail="Repository not configured")
-            if source and source.token_id and project_vm.repo_url:
+            if source and source.token_id and project.repo_url:
                 if provider == "github":
                     token_record = database.get_github_token(source.token_id)
                     if token_record:
-                        configure_git_push_auth(base_spec, repo_path, project_vm.repo_url, token_record.token)
+                        configure_git_push_auth(base_spec, repo_path, project.repo_url, token_record.token)
                 elif provider == "gitlab":
                     token_record = database.get_gitlab_token(source.token_id)
                     if token_record:
                         configure_git_push_auth(
                             base_spec,
                             repo_path,
-                            project_vm.repo_url,
+                            project.repo_url,
                             token_record.token,
                             username="oauth2",
                         )
@@ -2738,7 +2674,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.insert_session(
             session_id=session_id,
             project_id=project.id,
-            project_vm_id=project_vm.id,
             agent_id=agent.id,
             ticket_id=ticket_id,
             status="running",
@@ -2839,10 +2774,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Session not found")
         if session.status != "running":
             return {"ok": True, "message": "Session not running"}
-        project_vm = database.get_project_vm(session.project_vm_id)
         agent = database.get_agent(session.agent_id)
-        vm = database.get_vm_target(project_vm.vm_target_id) if project_vm else None
-        if not (project_vm and agent and vm):
+        vm = database.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+        if not (agent and vm):
             raise HTTPException(status_code=400, detail="Session environment missing")
         if agent.session_mode == "mcp":
             close_mcp_process(session.id)
@@ -3284,18 +3218,15 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             database.update_ticket(ticket.id, project_id=source_record.project_id)
             ticket = database.get_ticket(ticket.id) or ticket
         mapping_project_id = source_record.project_id if source_record else ticket.project_id
-        project_vm = database.get_project_vm_for_project(mapping_project_id)
         location_label = "none"
+        ticket_agent = database.get_agent(ticket.agent_id) if ticket.agent_id else None
         if session_running and session:
-            mapping = database.get_project_vm(session.project_vm_id)
-            vm_target = database.get_vm_target(mapping.vm_target_id) if mapping else None
+            session_agent = database.get_agent(session.agent_id)
+            vm_target = database.get_vm_target(session_agent.vm_target_id) if session_agent and session_agent.vm_target_id else None
             if vm_target:
                 location_label = vm_target.name
         start_ready = True
         start_reason = ""
-        if not project_vm:
-            start_ready = False
-            start_reason = "No VM mapping configured for this project."
         if is_github_ticket and not source_record:
             start_ready = False
             start_reason = "GitHub source is missing for this ticket."
@@ -3306,6 +3237,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not agent_id:
             start_ready = False
             start_reason = "No agent assigned to this ticket."
+        else:
+            check_agent = database.get_agent(agent_id)
+            if check_agent and not check_agent.vm_target_id:
+                start_ready = False
+                start_reason = "Agent has no VM target configured."
         if is_github_ticket and source_id and issue_number is not None:
             source = database.get_github_source(source_id)
             if source and source.token_id:
@@ -3347,7 +3283,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "is_github_ticket": is_github_ticket,
                 "is_gitlab_ticket": is_gitlab_ticket,
                 "is_external_ticket": is_external_ticket,
-                "project_vm": project_vm,
                 "start_ready": start_ready,
                 "start_reason": start_reason,
                 "location_label": location_label,
@@ -3523,12 +3458,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not resource:
             raise HTTPException(status_code=404, detail="Repo resource not found")
         projects = database.list_projects()
-        mappings = database.list_project_vms()
         project_lookup = {row.id: row.name for row in projects}
-        mapping_lookup = {
-            row.id: f"{project_lookup.get(row.project_id, row.project_id)} → {row.vm_target_id}"
-            for row in mappings
-        }
         return _render_template(
             request,
             "repo_resource_edit.html",
@@ -3538,7 +3468,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": _growl_message(request.query_params.get("saved")),
                 "resource": resource,
                 "project_lookup": project_lookup,
-                "mapping_lookup": mapping_lookup,
             },
         )
 
@@ -3619,6 +3548,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slug = str(form.get("slug", "")).strip()
         command = str(form.get("command", "")).strip()
         session_mode = str(form.get("session_mode", "tmux")).strip() or "tmux"
+        vm_target_id = str(form.get("vm_target_id", "")).strip() or None
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
         env_vars = str(form.get("env_vars", "")).strip() or None
         mcp_config = str(form.get("mcp_config", "")).strip() or None
@@ -3639,6 +3569,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             slug,
             command,
             session_mode,
+            vm_target_id,
             ssh_options,
             env_vars,
             mcp_config,
@@ -3657,6 +3588,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
         responses = database.list_agent_responses(agent_id=agent_id)
+        vm_targets = database.list_vm_targets()
         return _render_template(
             request,
             "agent_edit.html",
@@ -3666,6 +3598,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "agent": agent,
                 "responses": responses,
+                "vm_targets": vm_targets,
             },
         )
 
@@ -3676,6 +3609,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         slug = str(form.get("slug", "")).strip()
         command = str(form.get("command", "")).strip()
         session_mode = str(form.get("session_mode", "tmux")).strip() or "tmux"
+        vm_target_id = str(form.get("vm_target_id", "")).strip() or None
         ssh_options = str(form.get("required_ssh_options", "")).strip() or None
         env_vars = str(form.get("env_vars", "")).strip() or None
         mcp_config = str(form.get("mcp_config", "")).strip() or None
@@ -3693,6 +3627,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             slug=slug,
             command=command,
             session_mode=session_mode,
+            vm_target_id=vm_target_id,
             required_ssh_options=ssh_options,
             env_vars=env_vars,
             mcp_config=mcp_config,
@@ -3754,35 +3689,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.delete_agent_response(response_id)
         return RedirectResponse("/ui/agent-responses?saved=agent_response_deleted", status_code=303)
 
+    # Legacy project_vms POST handlers - no longer functional
     @app.post("/project_vms")
-    async def create_project_vm(
+    async def create_project_vm_legacy(
         request: Request, user: str = Depends(_require_login)
     ) -> RedirectResponse:
-        form = await request.form()
-        project_id = str(form.get("project_id", "")).strip()
-        vm_target_id = str(form.get("vm_target_id", "")).strip()
-        repo_mode = str(form.get("repo_mode", "mirror")).strip()
-        repo_path = str(form.get("repo_path", "")).strip() or None
-        repo_url = str(form.get("repo_url", "")).strip() or None
-        return_to = str(form.get("return_to", "/ui/project-vms")).strip() or "/ui/project-vms"
-        if not return_to.startswith("/ui"):
-            return_to = "/ui/project-vms"
-        if not project_id or not vm_target_id:
-            raise HTTPException(status_code=400, detail="Missing project or VM")
-        database.insert_project_vm(
-            project_vm_id=str(uuid.uuid4()),
-            project_id=project_id,
-            vm_target_id=vm_target_id,
-            repo_mode=repo_mode,
-            repo_path=repo_path,
-            repo_url=repo_url,
-        )
-        return RedirectResponse(f"{return_to}?saved=mapping_created", status_code=303)
+        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
 
     @app.post("/project_vms/{mapping_id}/delete")
-    async def delete_project_vm(mapping_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
-        database.delete_project_vm(mapping_id)
-        return RedirectResponse("/ui/project-vms?saved=mapping_deleted", status_code=303)
+    async def delete_project_vm_legacy(mapping_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
 
     @app.get("/ui/sessions")
     def sessions_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -3819,12 +3735,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         project = database.get_project(session.project_id)
-        mapping = database.get_project_vm(session.project_vm_id)
         agent = database.get_agent(session.agent_id)
         project_name = project.name if project else session.project_id
-        mapping_label = (
-            f"{project_name} -> {mapping.vm_target_id}" if mapping else session.project_vm_id
-        )
+        vm = database.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+        vm_label = f"{project_name} -> {vm.name}" if vm else "No VM"
         agent_name = agent.name if agent else session.agent_id
         return _render_template(
             request,
@@ -3835,7 +3749,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "session": session,
                 "project_name": project_name,
-                "mapping_label": mapping_label,
+                "vm_label": vm_label,
                 "agent_name": agent_name,
             },
         )
@@ -3950,7 +3864,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         vm_targets = database.list_vm_targets()
         agents = database.list_agents()
         agent_responses = database.list_agent_responses()
-        project_vms = database.list_project_vms()
         sessions = database.list_sessions()
         slack_source = database.get_task_source("slack")
         slack_config = slack_source.config if slack_source else {}
@@ -3983,7 +3896,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "vm_targets": vm_targets,
                 "agents": agents,
                 "agent_responses": agent_responses,
-                "project_vms": project_vms,
                 "sessions": sessions,
                 "slack_source": slack_source,
                 "slack_channels": slack_channels,
@@ -4168,6 +4080,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = request.query_params.get("return_to", "/ui/agents")
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
+        vm_targets = database.list_vm_targets()
         return _render_template(
             request,
             "agent_create.html",
@@ -4176,6 +4089,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "active_nav": "agents",
                 "growl_message": None,
                 "return_to": return_to,
+                "vm_targets": vm_targets,
             },
         )
 
@@ -4253,54 +4167,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             },
         )
 
+    # Legacy project-vms routes - VMs are now linked directly to agents
     @app.get("/ui/project-vms")
-    def project_vms_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        project_vms = database.list_project_vms()
-        growl_message = _growl_message(request.query_params.get("saved"))
-        project_lookup = {project.id: project.name for project in database.list_projects()}
-        vm_lookup = {vm.id: vm.name for vm in database.list_vm_targets()}
-        table_context = _build_table_context(
-            database=database,
-            request=request,
-            user=user,
-            model="project_vms",
-            title="Project VM Mappings",
-            description="Map projects to VM targets with repo configuration.",
-            create_label="Attach VM",
-            create_url="/ui/project-vms/create?return_to=/ui/project-vms",
-            rows=_build_project_vm_rows(project_vms, project_lookup, vm_lookup),
-            empty_message="No mappings yet.",
-        )
-        return _render_template(
-            request,
-            "project_vms.html",
-            {
-                "title": "Mappings",
-                "active_nav": "mappings",
-                "growl_message": growl_message,
-                **table_context,
-            },
-        )
+    def project_vms_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/agents", status_code=302)
 
     @app.get("/ui/project-vms/create")
-    def project_vms_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        projects = database.list_projects()
-        vm_targets = database.list_vm_targets()
-        return_to = request.query_params.get("return_to", "/ui/project-vms")
-        if not return_to.startswith("/ui"):
-            return_to = "/ui/project-vms"
-        return _render_template(
-            request,
-            "project_vm_create.html",
-            {
-                "title": "Attach VM",
-                "active_nav": "mappings",
-                "growl_message": None,
-                "projects": projects,
-                "vm_targets": vm_targets,
-                "return_to": return_to,
-            },
-        )
+    def project_vms_create_ui_redirect(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/agents", status_code=302)
 
     # Legacy routes - redirect to unified issue sources
     @app.get("/ui/github-sources")
@@ -4604,46 +4478,15 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/issue-sources?saved=issue_source_deleted", status_code=303)
 
     @app.get("/ui/project-vms/{mapping_id}/edit")
-    def project_vms_edit_ui(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
-        mapping = database.get_project_vm(mapping_id)
-        if not mapping:
-            raise HTTPException(status_code=404, detail="Mapping not found")
-        projects = database.list_projects()
-        vm_targets = database.list_vm_targets()
-        return _render_template(
-            request,
-            "project_vm_edit.html",
-            {
-                "title": "Edit Mapping",
-                "active_nav": "mappings",
-                "growl_message": None,
-                "mapping": mapping,
-                "projects": projects,
-                "vm_targets": vm_targets,
-            },
-        )
+    def project_vms_edit_ui_redirect(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        return RedirectResponse("/ui/agents", status_code=302)
 
     @app.post("/project_vms/{mapping_id}/edit")
-    async def project_vms_update(
+    async def project_vms_update_legacy(
         mapping_id: str, request: Request, user: str = Depends(_require_login)
     ) -> RedirectResponse:
-        form = await request.form()
-        project_id = str(form.get("project_id", "")).strip()
-        vm_target_id = str(form.get("vm_target_id", "")).strip()
-        repo_mode = str(form.get("repo_mode", "mirror")).strip()
-        repo_path = str(form.get("repo_path", "")).strip() or None
-        repo_url = str(form.get("repo_url", "")).strip() or None
-        if not project_id or not vm_target_id:
-            raise HTTPException(status_code=400, detail="Missing project or VM")
-        database.update_project_vm(
-            mapping_id,
-            project_id=project_id,
-            vm_target_id=vm_target_id,
-            repo_mode=repo_mode,
-            repo_path=repo_path,
-            repo_url=repo_url,
-        )
-        return RedirectResponse("/ui/project-vms?saved=mapping_updated", status_code=303)
+        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
+
     @app.get("/ui/tickets")
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         tickets = database.list_tickets()

@@ -14,6 +14,7 @@ import uuid
 
 from wintermute.db import Database, AgentSessionRecord, utc_now
 from wintermute.claude_client import close_claude_process, poll_claude, run_claude_prompt
+from wintermute.gemini_client import close_gemini_process, poll_gemini, run_gemini_prompt
 from wintermute.mcp_client import close_mcp_process, poll_codex_mcp, run_codex_mcp
 from wintermute.runner import (
     build_ssh_spec,
@@ -41,16 +42,18 @@ class SessionWorkItem(WorkItem):
         if not session:
             return
         project = ctx.db.get_project(session.project_id)
-        project_vm = ctx.db.get_project_vm(session.project_vm_id)
         agent = ctx.db.get_agent(session.agent_id)
-        vm = ctx.db.get_vm_target(project_vm.vm_target_id) if project_vm else None
-        if not (project and project_vm and agent and vm):
+        vm = ctx.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+        if not (project and agent and vm):
             return
         if agent.session_mode == "mcp":
-            await _run_mcp_session(ctx, session, project, agent, project_vm, vm)
+            await _run_mcp_session(ctx, session, project, agent, vm)
             return
         if agent.session_mode == "claude":
-            await _run_claude_session(ctx, session, project, agent, project_vm, vm)
+            await _run_claude_session(ctx, session, project, agent, vm)
+            return
+        if agent.session_mode == "gemini":
+            await _run_gemini_session(ctx, session, project, agent, vm)
             return
         if session.status != "running":
             ctx.db.release_repo_resource_for_session(session.id)
@@ -172,7 +175,6 @@ async def _run_mcp_session(
     session: AgentSessionRecord,
     project: Any,
     agent: Any,
-    project_vm: Any,
     vm: Any,
 ) -> None:
     logger = logging.getLogger(__name__)
@@ -309,7 +311,6 @@ async def _run_claude_session(
     session: AgentSessionRecord,
     project: Any,
     agent: Any,
-    project_vm: Any,
     vm: Any,
 ) -> None:
     """Run a Claude Code CLI session.
@@ -448,6 +449,153 @@ async def _run_claude_session(
         ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
     else:
         logger.info("Claude reply returned no response for session %s", session.id)
+        ctx.db.update_session(session.id, awaiting_response=1)
+
+
+async def _run_gemini_session(
+    ctx: WorkItemContext,
+    session: AgentSessionRecord,
+    project: Any,
+    agent: Any,
+    vm: Any,
+) -> None:
+    """Run a Gemini CLI session.
+
+    Uses a persistent subprocess with streaming JSON I/O, similar to Claude.
+    The Gemini process stays alive and prompts are sent via stdin.
+    """
+    logger = logging.getLogger(__name__)
+    keepalive_seconds = int(os.environ.get("WINTERMUTE_GEMINI_KEEPALIVE_SECONDS", "600"))
+
+    if session.status != "running":
+        close_gemini_process(session.id)
+        ctx.db.release_repo_resource_for_session(session.id)
+        return
+
+    base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
+    spec = build_ssh_spec_with_options(vm, base_options)
+
+    def _send_prompt(prompt: str) -> Any:
+        result = run_gemini_prompt(
+            spec,
+            agent,
+            session_id=session.id,
+            prompt=prompt,
+            cwd=session.repo_path,
+            timeout_seconds=int(os.environ.get("WINTERMUTE_GEMINI_TIMEOUT_SECONDS", "300")),
+        )
+        # Gemini uses session_id from stream, store it if available
+        if result.session_id:
+            ctx.db.update_session(session.id, claude_session_id=result.session_id)
+        return result
+
+    def _handle_gemini_error(error: Optional[str]) -> bool:
+        if not error:
+            return False
+        lowered = error.lower()
+        # Check for fatal errors that should end the session
+        if "exited" in lowered or "closed" in lowered:
+            logger.warning("Gemini process error for session %s: %s", session.id, error)
+            close_gemini_process(session.id)
+            ctx.db.update_session(session.id, status="done", awaiting_response=0)
+            ctx.db.release_repo_resource_for_session(session.id)
+            return True
+        return False
+
+    # Handle pending prompt
+    if session.prompt_pending:
+        prompt = session.prompt_pending.strip()
+        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
+        if prompt:
+            logger.info("Gemini prompt queued for session %s", session.id)
+            result = _send_prompt(prompt)
+            if _handle_gemini_error(result.error):
+                return
+            if result.error:
+                logger.warning("Gemini prompt error for session %s: %s", session.id, result.error)
+            if result.response_text:
+                logger.info("Gemini prompt response received for session %s", session.id)
+                await _emit_output(ctx, session, project, agent, result.response_text, force_comment=True)
+                await _handle_session_markers(ctx, session, result.response_text)
+                await _apply_agent_responses(
+                    ctx,
+                    session,
+                    result.response_text,
+                    sender=lambda text: _send_prompt(text),
+                )
+                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+            else:
+                logger.info("Gemini prompt returned no response for session %s", session.id)
+                ctx.db.update_session(session.id, awaiting_response=1)
+
+    # Handle queued user messages
+    raw_queue = session.queued_user_messages or "[]"
+    try:
+        queue = json.loads(raw_queue)
+        if not isinstance(queue, list):
+            queue = []
+    except json.JSONDecodeError:
+        queue = []
+
+    if not queue:
+        # Poll for any pending output (Gemini may still be working)
+        if session.awaiting_response:
+            poll_result = poll_gemini(session.id, timeout_seconds=5)
+            if _handle_gemini_error(poll_result.error):
+                return
+            if poll_result.error:
+                logger.warning("Gemini poll error for session %s: %s", session.id, poll_result.error)
+            if poll_result.response_text:
+                logger.info("Gemini poll response received for session %s", session.id)
+                await _emit_output(ctx, session, project, agent, poll_result.response_text, force_comment=True)
+                await _handle_session_markers(ctx, session, poll_result.response_text)
+                await _apply_agent_responses(
+                    ctx,
+                    session,
+                    poll_result.response_text,
+                    sender=lambda text: _send_prompt(text),
+                )
+                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+        else:
+            # Check for keepalive
+            last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
+            if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
+                logger.info("Gemini keepalive for session %s", session.id)
+                keepalive_text = "[keepalive] Reply with a single '.' and nothing else."
+                keepalive_result = _send_prompt(keepalive_text)
+                if keepalive_result.error or not keepalive_result.response_text:
+                    logger.warning("Gemini keepalive failed for session %s", session.id)
+                    close_gemini_process(session.id)
+                    ctx.db.update_session(session.id, status="done", awaiting_response=0)
+                    ctx.db.release_repo_resource_for_session(session.id)
+                else:
+                    ctx.db.update_session(session.id, last_output_at=utc_now())
+        return
+
+    message = str(queue.pop(0))
+    ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
+    if not message.strip():
+        return
+
+    logger.info("Gemini reply queued for session %s", session.id)
+    result = _send_prompt(message)
+    if _handle_gemini_error(result.error):
+        return
+    if result.error:
+        logger.warning("Gemini reply error for session %s: %s", session.id, result.error)
+    if result.response_text:
+        logger.info("Gemini reply response received for session %s", session.id)
+        await _emit_output(ctx, session, project, agent, result.response_text, force_comment=True)
+        await _handle_session_markers(ctx, session, result.response_text)
+        await _apply_agent_responses(
+            ctx,
+            session,
+            result.response_text,
+            sender=lambda text: _send_prompt(text),
+        )
+        ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+    else:
+        logger.info("Gemini reply returned no response for session %s", session.id)
         ctx.db.update_session(session.id, awaiting_response=1)
 
 

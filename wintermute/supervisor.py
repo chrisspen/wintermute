@@ -292,9 +292,9 @@ class Supervisor:
         if not resources:
             return
         for resource in resources:
-            project_vm = self.db.get_project_vm(resource.project_vm_id)
-            vm = self.db.get_vm_target(project_vm.vm_target_id) if project_vm else None
-            if not (project_vm and vm):
+            agent = self.db.get_agent(resource.agent_id) if resource.agent_id else None
+            vm = self.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+            if not vm:
                 logger.info("Repo cleanup dropping stale resource %s", resource.id)
                 self.db.delete_repo_resource(resource.id)
                 continue

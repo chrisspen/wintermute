@@ -170,13 +170,15 @@ Daily standup
 
 Session modes
 -------------
-Agents support three session modes:
+Agents support four session modes:
 - `tmux`: runs the agent inside tmux on the VM (attachable for live debugging).
 - `mcp`: runs the agent via `codex mcp-server` (stdio MCP transport) and stores the conversation id
   on the session.
-- `claude`: runs Claude Code CLI via the streaming JSON API.
+- `claude`: runs Claude Code CLI via the streaming JSON API (`--output-format stream-json`).
+- `gemini`: runs Gemini CLI via the streaming JSON API (`--output-format stream-json`).
 
 For MCP mode, ensure the Codex CLI on the VM supports `mcp-server`.
+For Claude/Gemini modes, ensure the respective CLI is installed and authenticated.
 
 Agent LLM configuration
 -----------------------

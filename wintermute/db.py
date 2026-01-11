@@ -126,6 +126,9 @@ class ProjectRecord:
     slack_channel_id: Optional[str]
     prompt_template: Optional[str]
     max_repo_resources: int
+    repo_mode: Optional[str]
+    repo_path: Optional[str]
+    repo_url: Optional[str]
     created_at: str
     updated_at: str
 
@@ -256,12 +259,11 @@ class CommentRecord:
 class RepoResourceRecord:
     id: str
     project_id: str
-    project_vm_id: str
+    agent_id: Optional[str]
     repo_mode: str
     path: str
     status: str
     session_id: Optional[str]
-    agent_id: Optional[str]
     last_used_at: Optional[str]
     created_at: str
     updated_at: str
@@ -279,24 +281,13 @@ class VMTargetRecord:
 
 
 @dataclass(frozen=True)
-class ProjectVMRecord:
-    id: str
-    project_id: str
-    vm_target_id: str
-    repo_mode: str
-    repo_path: Optional[str]
-    repo_url: Optional[str]
-    created_at: str
-    updated_at: str
-
-
-@dataclass(frozen=True)
 class AgentRecord:
     id: str
     name: str
     slug: str
     command: str
     session_mode: str
+    vm_target_id: Optional[str]
     required_ssh_options: Optional[str]
     env_vars: Optional[str]
     mcp_config: Optional[str]
@@ -314,7 +305,6 @@ class AgentRecord:
 class AgentSessionRecord:
     id: str
     project_id: str
-    project_vm_id: str
     agent_id: str
     ticket_id: Optional[str]
     status: str
@@ -454,6 +444,9 @@ class ProjectModel(Base):
     slack_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     prompt_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     max_repo_resources: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    repo_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    repo_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -503,12 +496,11 @@ class RepoResourceModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
-    project_vm_id: Mapped[str] = mapped_column(String, nullable=False)
+    agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     repo_mode: Mapped[str] = mapped_column(String, nullable=False)
     path: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     last_used_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -522,19 +514,6 @@ class VMTargetModel(Base):
     host: Mapped[str] = mapped_column(String, nullable=False)
     user: Mapped[str] = mapped_column(String, nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[str] = mapped_column(String, nullable=False)
-    updated_at: Mapped[str] = mapped_column(String, nullable=False)
-
-
-class ProjectVMModel(Base):
-    __tablename__ = "project_vms"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    project_id: Mapped[str] = mapped_column(String, nullable=False)
-    vm_target_id: Mapped[str] = mapped_column(String, nullable=False)
-    repo_mode: Mapped[str] = mapped_column(String, nullable=False)
-    repo_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -602,6 +581,7 @@ class AgentModel(Base):
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     command: Mapped[str] = mapped_column(String, nullable=False)
     session_mode: Mapped[str] = mapped_column(String, nullable=False, default="tmux")
+    vm_target_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     required_ssh_options: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     env_vars: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     mcp_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -620,7 +600,6 @@ class AgentSessionModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
-    project_vm_id: Mapped[str] = mapped_column(String, nullable=False)
     agent_id: Mapped[str] = mapped_column(String, nullable=False)
     ticket_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
@@ -1266,6 +1245,9 @@ class Database:
                 slack_channel_id=row.slack_channel_id,
                 prompt_template=row.prompt_template,
                 max_repo_resources=row.max_repo_resources,
+                repo_mode=row.repo_mode,
+                repo_path=row.repo_path,
+                repo_url=row.repo_url,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -1284,6 +1266,9 @@ class Database:
             slack_channel_id=row.slack_channel_id,
             prompt_template=row.prompt_template,
             max_repo_resources=row.max_repo_resources,
+            repo_mode=row.repo_mode,
+            repo_path=row.repo_path,
+            repo_url=row.repo_url,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1300,6 +1285,9 @@ class Database:
             slack_channel_id=row.slack_channel_id,
             prompt_template=row.prompt_template,
             max_repo_resources=row.max_repo_resources,
+            repo_mode=row.repo_mode,
+            repo_path=row.repo_path,
+            repo_url=row.repo_url,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -1312,6 +1300,9 @@ class Database:
         slack_channel_id: Optional[str],
         prompt_template: Optional[str] = None,
         max_repo_resources: int = 3,
+        repo_mode: Optional[str] = None,
+        repo_path: Optional[str] = None,
+        repo_url: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1323,6 +1314,9 @@ class Database:
                     slack_channel_id=slack_channel_id,
                     prompt_template=prompt_template,
                     max_repo_resources=max_repo_resources,
+                    repo_mode=repo_mode,
+                    repo_path=repo_path,
+                    repo_url=repo_url,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1337,6 +1331,9 @@ class Database:
         slack_channel_id: Optional[str] = None,
         prompt_template: Optional[str] = None,
         max_repo_resources: Optional[int] = None,
+        repo_mode: Optional[str] = None,
+        repo_path: Optional[str] = None,
+        repo_url: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(ProjectModel, project_id)
@@ -1352,6 +1349,12 @@ class Database:
                 row.prompt_template = prompt_template
             if max_repo_resources is not None:
                 row.max_repo_resources = max_repo_resources
+            if repo_mode is not None:
+                row.repo_mode = repo_mode
+            if repo_path is not None:
+                row.repo_path = repo_path
+            if repo_url is not None:
+                row.repo_url = repo_url
             row.updated_at = utc_now()
 
     def delete_project(self, project_id: str) -> None:
@@ -1361,9 +1364,6 @@ class Database:
             ).delete()
             session.query(RepoResourceModel).filter(
                 RepoResourceModel.project_id == project_id
-            ).delete()
-            session.query(ProjectVMModel).filter(
-                ProjectVMModel.project_id == project_id
             ).delete()
             session.query(IssueSourceModel).filter(
                 IssueSourceModel.project_id == project_id
@@ -1412,12 +1412,11 @@ class Database:
             RepoResourceRecord(
                 id=row.id,
                 project_id=row.project_id,
-                project_vm_id=row.project_vm_id,
+                agent_id=row.agent_id,
                 repo_mode=row.repo_mode,
                 path=row.path,
                 status=row.status,
                 session_id=row.session_id,
-                agent_id=row.agent_id,
                 last_used_at=row.last_used_at,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
@@ -1433,12 +1432,11 @@ class Database:
         return RepoResourceRecord(
             id=row.id,
             project_id=row.project_id,
-            project_vm_id=row.project_vm_id,
+            agent_id=row.agent_id,
             repo_mode=row.repo_mode,
             path=row.path,
             status=row.status,
             session_id=row.session_id,
-            agent_id=row.agent_id,
             last_used_at=row.last_used_at,
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -1448,15 +1446,18 @@ class Database:
         self,
         *,
         project: ProjectRecord,
-        project_vm: ProjectVMRecord,
         session_id: str,
         agent_id: Optional[str],
     ) -> tuple[Optional[RepoResourceRecord], Optional[str]]:
+        """Acquire a repo resource for a session. Repo config comes from Project."""
         now = utc_now()
+        repo_mode = project.repo_mode or "mirror"
+        repo_path = project.repo_path
+
         with self.session() as session:
             rows = session.execute(
                 select(RepoResourceModel)
-                .where(RepoResourceModel.project_vm_id == project_vm.id)
+                .where(RepoResourceModel.project_id == project.id)
                 .order_by(RepoResourceModel.last_used_at.asc().nullsfirst(), RepoResourceModel.created_at.asc())
             ).scalars().all()
             for row in rows:
@@ -1469,10 +1470,10 @@ class Database:
                     row.agent_id = None
                     row.last_used_at = now
                     row.updated_at = now
-            if project_vm.repo_mode == "mirror":
-                if not project_vm.repo_path:
+            if repo_mode == "mirror":
+                if not repo_path:
                     return None, "mirror path not configured"
-                existing = next((row for row in rows if row.path == project_vm.repo_path), None)
+                existing = next((row for row in rows if row.path == repo_path), None)
                 if existing:
                     if existing.status == "in_use":
                         return None, "mirror repo already in use"
@@ -1488,12 +1489,11 @@ class Database:
                     RepoResourceModel(
                         id=resource_id,
                         project_id=project.id,
-                        project_vm_id=project_vm.id,
-                        repo_mode=project_vm.repo_mode,
-                        path=project_vm.repo_path,
+                        agent_id=agent_id,
+                        repo_mode=repo_mode,
+                        path=repo_path,
                         status="in_use",
                         session_id=session_id,
-                        agent_id=agent_id,
                         last_used_at=now,
                         created_at=now,
                         updated_at=now,
@@ -1514,23 +1514,22 @@ class Database:
                 return self.get_repo_resource(row.id), None
             if len(rows) >= max(project.max_repo_resources, 1):
                 return None, "repo resource limit reached"
-            if not project_vm.repo_path:
+            if not repo_path:
                 return None, "repo path not configured"
             safe_suffix = re.sub(r"[^a-zA-Z0-9]+", "-", session_id.strip().lower()).strip("-")
             if not safe_suffix:
                 safe_suffix = "session"
-            path = f"{project_vm.repo_path}-{safe_suffix}"
+            path = f"{repo_path}-{safe_suffix}"
             resource_id = str(uuid.uuid4())
             session.add(
                 RepoResourceModel(
                     id=resource_id,
                     project_id=project.id,
-                    project_vm_id=project_vm.id,
-                    repo_mode=project_vm.repo_mode,
+                    agent_id=agent_id,
+                    repo_mode=repo_mode,
                     path=path,
                     status="in_use",
                     session_id=session_id,
-                    agent_id=agent_id,
                     last_used_at=now,
                     created_at=now,
                     updated_at=now,
@@ -1570,12 +1569,11 @@ class Database:
             RepoResourceRecord(
                 id=row.id,
                 project_id=row.project_id,
-                project_vm_id=row.project_vm_id,
+                agent_id=row.agent_id,
                 repo_mode=row.repo_mode,
                 path=row.path,
                 status=row.status,
                 session_id=row.session_id,
-                agent_id=row.agent_id,
                 last_used_at=row.last_used_at,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
@@ -1591,7 +1589,6 @@ class Database:
         self,
         resource_id: str,
         project_id: str,
-        project_vm_id: str,
         repo_mode: str,
         path: str,
         status: str,
@@ -1605,12 +1602,11 @@ class Database:
                 RepoResourceModel(
                     id=resource_id,
                     project_id=project_id,
-                    project_vm_id=project_vm_id,
+                    agent_id=agent_id,
                     repo_mode=repo_mode,
                     path=path,
                     status=status,
                     session_id=session_id,
-                    agent_id=agent_id,
                     last_used_at=now,
                     created_at=now,
                     updated_at=now,
@@ -2670,119 +2666,6 @@ class Database:
             updated_at=row.updated_at,
         )
 
-    def list_project_vms(self, project_id: Optional[str] = None) -> list[ProjectVMRecord]:
-        with self.session() as session:
-            stmt = select(ProjectVMModel)
-            if project_id:
-                stmt = stmt.where(ProjectVMModel.project_id == project_id)
-            rows = session.execute(stmt.order_by(ProjectVMModel.created_at.desc())).scalars().all()
-        return [
-            ProjectVMRecord(
-                id=row.id,
-                project_id=row.project_id,
-                vm_target_id=row.vm_target_id,
-                repo_mode=row.repo_mode,
-                repo_path=row.repo_path,
-                repo_url=row.repo_url,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            for row in rows
-        ]
-
-    def insert_project_vm(
-        self,
-        project_vm_id: str,
-        project_id: str,
-        vm_target_id: str,
-        repo_mode: str,
-        repo_path: Optional[str],
-        repo_url: Optional[str],
-    ) -> None:
-        now = utc_now()
-        with self.session() as session:
-            session.add(
-                ProjectVMModel(
-                    id=project_vm_id,
-                    project_id=project_id,
-                    vm_target_id=vm_target_id,
-                    repo_mode=repo_mode,
-                    repo_path=repo_path,
-                    repo_url=repo_url,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-
-    def update_project_vm(
-        self,
-        project_vm_id: str,
-        *,
-        project_id: Optional[str] = None,
-        vm_target_id: Optional[str] = None,
-        repo_mode: Optional[str] = None,
-        repo_path: Optional[str] = None,
-        repo_url: Optional[str] = None,
-    ) -> None:
-        with self.session() as session:
-            row = session.get(ProjectVMModel, project_vm_id)
-            if not row:
-                return
-            if project_id is not None:
-                row.project_id = project_id
-            if vm_target_id is not None:
-                row.vm_target_id = vm_target_id
-            if repo_mode is not None:
-                row.repo_mode = repo_mode
-            if repo_path is not None:
-                row.repo_path = repo_path
-            if repo_url is not None:
-                row.repo_url = repo_url
-            row.updated_at = utc_now()
-
-    def delete_project_vm(self, project_vm_id: str) -> None:
-        with self.session() as session:
-            session.query(RepoResourceModel).filter(
-                RepoResourceModel.project_vm_id == project_vm_id
-            ).delete()
-            session.query(ProjectVMModel).filter(ProjectVMModel.id == project_vm_id).delete()
-
-    def get_project_vm(self, project_vm_id: str) -> Optional[ProjectVMRecord]:
-        with self.session() as session:
-            row = session.get(ProjectVMModel, project_vm_id)
-        if not row:
-            return None
-        return ProjectVMRecord(
-            id=row.id,
-            project_id=row.project_id,
-            vm_target_id=row.vm_target_id,
-            repo_mode=row.repo_mode,
-            repo_path=row.repo_path,
-            repo_url=row.repo_url,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-
-    def get_project_vm_for_project(self, project_id: str) -> Optional[ProjectVMRecord]:
-        with self.session() as session:
-            row = session.execute(
-                select(ProjectVMModel)
-                .where(ProjectVMModel.project_id == project_id)
-                .order_by(ProjectVMModel.created_at.asc())
-            ).scalars().first()
-        if not row:
-            return None
-        return ProjectVMRecord(
-            id=row.id,
-            project_id=row.project_id,
-            vm_target_id=row.vm_target_id,
-            repo_mode=row.repo_mode,
-            repo_path=row.repo_path,
-            repo_url=row.repo_url,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-
     def list_agents(self) -> list[AgentRecord]:
         with self.session() as session:
             rows = session.execute(select(AgentModel).order_by(AgentModel.name)).scalars().all()
@@ -2793,6 +2676,7 @@ class Database:
                 slug=row.slug,
                 command=row.command,
                 session_mode=row.session_mode,
+                vm_target_id=row.vm_target_id,
                 required_ssh_options=row.required_ssh_options,
                 env_vars=row.env_vars,
                 mcp_config=row.mcp_config,
@@ -2891,6 +2775,7 @@ class Database:
         slug: str,
         command: str,
         session_mode: str,
+        vm_target_id: Optional[str],
         required_ssh_options: Optional[str],
         env_vars: Optional[str],
         mcp_config: Optional[str],
@@ -2910,6 +2795,7 @@ class Database:
                     slug=slug,
                     command=command,
                     session_mode=session_mode,
+                    vm_target_id=vm_target_id,
                     required_ssh_options=required_ssh_options,
                     env_vars=env_vars,
                     mcp_config=mcp_config,
@@ -2932,6 +2818,7 @@ class Database:
         slug: Optional[str] = None,
         command: Optional[str] = None,
         session_mode: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
         required_ssh_options: Optional[str] = None,
         env_vars: Optional[str] = None,
         mcp_config: Optional[str] = None,
@@ -2954,6 +2841,8 @@ class Database:
                 row.command = command
             if session_mode is not None:
                 row.session_mode = session_mode
+            if vm_target_id is not None:
+                row.vm_target_id = vm_target_id
             if required_ssh_options is not None:
                 row.required_ssh_options = required_ssh_options
             if env_vars is not None:
@@ -2989,6 +2878,7 @@ class Database:
             slug=row.slug,
             command=row.command,
             session_mode=row.session_mode,
+            vm_target_id=row.vm_target_id,
             required_ssh_options=row.required_ssh_options,
             env_vars=row.env_vars,
             mcp_config=row.mcp_config,
@@ -3013,6 +2903,7 @@ class Database:
             slug=row.slug,
             command=row.command,
             session_mode=row.session_mode,
+            vm_target_id=row.vm_target_id,
             required_ssh_options=row.required_ssh_options,
             env_vars=row.env_vars,
             mcp_config=row.mcp_config,
@@ -3040,7 +2931,6 @@ class Database:
             AgentSessionRecord(
                 id=row.id,
                 project_id=row.project_id,
-                project_vm_id=row.project_vm_id,
                 agent_id=row.agent_id,
                 ticket_id=row.ticket_id,
                 status=row.status,
@@ -3081,7 +2971,6 @@ class Database:
         return AgentSessionRecord(
             id=row.id,
             project_id=row.project_id,
-            project_vm_id=row.project_vm_id,
             agent_id=row.agent_id,
             ticket_id=row.ticket_id,
             status=row.status,
@@ -3108,7 +2997,6 @@ class Database:
         self,
         session_id: str,
         project_id: str,
-        project_vm_id: str,
         agent_id: str,
         ticket_id: Optional[str],
         status: str,
@@ -3122,7 +3010,6 @@ class Database:
                 AgentSessionModel(
                     id=session_id,
                     project_id=project_id,
-                    project_vm_id=project_vm_id,
                     agent_id=agent_id,
                     ticket_id=ticket_id,
                     status=status,
@@ -3218,7 +3105,6 @@ class Database:
         return AgentSessionRecord(
             id=row.id,
             project_id=row.project_id,
-            project_vm_id=row.project_vm_id,
             agent_id=row.agent_id,
             ticket_id=row.ticket_id,
             status=row.status,
@@ -3249,7 +3135,6 @@ class Database:
         return AgentSessionRecord(
             id=row.id,
             project_id=row.project_id,
-            project_vm_id=row.project_vm_id,
             agent_id=row.agent_id,
             ticket_id=row.ticket_id,
             status=row.status,

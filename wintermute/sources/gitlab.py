@@ -187,13 +187,12 @@ class GitLabIssueWorkItem(WorkItem):
         if not agent:
             await self._notify(ctx, project.slack_channel_id, "GitLab source agent not found.")
             return
-        project_vm = ctx.db.get_project_vm_for_project(project.id)
-        if not project_vm:
-            await self._notify(ctx, project.slack_channel_id, "No VM mapping configured for this project.")
+        if not agent.vm_target_id:
+            await self._notify(ctx, project.slack_channel_id, "Agent has no VM target configured.")
             return
-        vm = ctx.db.get_vm_target(project_vm.vm_target_id)
+        vm = ctx.db.get_vm_target(agent.vm_target_id)
         if not vm:
-            await self._notify(ctx, project.slack_channel_id, "VM target not found for this project.")
+            await self._notify(ctx, project.slack_channel_id, "VM target not found for this agent.")
             return
         issue_number = self.checkpoint.get("issue_number")
         if issue_number is None:
@@ -228,12 +227,11 @@ class GitLabIssueWorkItem(WorkItem):
         if ctx.db.get_session_by_ticket(ticket_id):
             logger.info("Session already exists for ticket %s", ticket_id)
             return
-        if project_vm.repo_mode == "mirror":
+        if project.repo_mode == "mirror":
             running = ctx.db.list_sessions(project_id=project.id, status="running")
-            for session in running:
-                if session.project_vm_id == project_vm.id:
-                    logger.info("Project session already running for %s", project.id)
-                    raise WorkItemBlocked("Project session already running", delay_seconds=60)
+            if running:
+                logger.info("Project session already running for %s", project.id)
+                raise WorkItemBlocked("Project session already running", delay_seconds=60)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         base_spec = build_ssh_spec_with_options(vm, base_options)
@@ -257,7 +255,6 @@ class GitLabIssueWorkItem(WorkItem):
         session_id = f"{project.slug}-{agent.slug}-issue-{issue_number}"
         repo_resource, resource_error = ctx.db.acquire_repo_resource(
             project=project,
-            project_vm=project_vm,
             session_id=session_id,
             agent_id=agent.id,
         )
@@ -266,7 +263,7 @@ class GitLabIssueWorkItem(WorkItem):
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
         try:
-            repo_path = ensure_repo(base_spec, project_vm, repo_path=repo_resource.path)
+            repo_path = ensure_repo(base_spec, project, repo_path=repo_resource.path)
         except Exception as exc:
             ctx.db.release_repo_resource_for_session(session_id)
             message = f"Repo setup failed: {exc}"
@@ -274,14 +271,14 @@ class GitLabIssueWorkItem(WorkItem):
             raise WorkItemBlocked(message, delay_seconds=60) from exc
         if not repo_path:
             ctx.db.release_repo_resource_for_session(session_id)
-            message = "Repository not configured for this project VM."
+            message = "Repository not configured for this project."
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
-        if token_record and project_vm.repo_url:
+        if token_record and project.repo_url:
             configure_git_push_auth(
                 base_spec,
                 repo_path,
-                project_vm.repo_url,
+                project.repo_url,
                 token_record.token,
                 username="oauth2",
             )
@@ -297,7 +294,6 @@ class GitLabIssueWorkItem(WorkItem):
         ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,
-            project_vm_id=project_vm.id,
             agent_id=agent.id,
             ticket_id=ticket_id,
             status="running",

@@ -18,13 +18,21 @@
           <option value="tmux" selected>tmux</option>
           <option value="mcp">mcp (Codex)</option>
           <option value="claude">claude</option>
+          <option value="gemini">gemini</option>
+        </select>
+        <label>VM Target</label>
+        <select name="vm_target_id">
+          <option value="">(none)</option>
+          {% for vm in vm_targets %}
+          <option value="{{ vm.id }}">{{ vm.name }}</option>
+          {% endfor %}
         </select>
         <label>Required SSH Options</label>
-        <input type="text" name="required_ssh_options" placeholder="-L 1455:localhost:1455" />
+        <input type="text" name="required_ssh_options" placeholder="e.g. -L 1455:localhost:1455" />
         <label>Environment Variables</label>
-        <input type="text" name="env_vars" placeholder="TERM=dumb NO_COLOR=1" />
+        <input type="text" name="env_vars" placeholder="e.g. TERM=dumb NO_COLOR=1" />
         <label>MCP Config Overrides</label>
-        <textarea name="mcp_config" rows="3" placeholder="-c 'sandbox_permissions=[&quot;disk-full-read-access&quot;,&quot;disk-full-write-access&quot;,&quot;network-full-access&quot;]'"></textarea>
+        <textarea name="mcp_config" rows="3" placeholder="e.g. -c 'sandbox_permissions=[...]'"></textarea>
         <label>Trust Level</label>
         <select name="trust_level">
           <option value="">(none)</option>
@@ -32,16 +40,16 @@
           <option value="untrusted">untrusted</option>
         </select>
         <label>Input Echo Prefix</label>
-        <input type="text" name="input_echo_prefix" placeholder="›" />
+        <input type="text" name="input_echo_prefix" placeholder="e.g. ›" />
         <label>Response Prefix</label>
-        <input type="text" name="response_prefix" placeholder="•" />
+        <input type="text" name="response_prefix" placeholder="e.g. •" />
         <h4>LLM API Configuration (for decision path)</h4>
         <label>LLM Base URL</label>
-        <input type="text" name="llm_base_url" placeholder="http://localhost:11434/v1" />
+        <input type="text" name="llm_base_url" placeholder="e.g. http://localhost:11434/v1" />
         <label>LLM API Key</label>
-        <input type="text" name="llm_api_key" placeholder="ollama" />
+        <input type="text" name="llm_api_key" placeholder="e.g. ollama" />
         <label>LLM Model</label>
-        <input type="text" name="llm_model" placeholder="llama3.2" />
+        <input type="text" name="llm_model" placeholder="e.g. llama3.2" />
         <button type="submit">Add Agent</button>
       </form>
     </div>

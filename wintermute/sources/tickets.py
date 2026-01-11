@@ -69,23 +69,21 @@ class TicketAutoStartWorkItem(WorkItem):
         if not agent:
             await self._notify(ctx, project.slack_channel_id, "Ticket agent not found.")
             return
-        project_vm = ctx.db.get_project_vm_for_project(project.id)
-        if not project_vm:
-            await self._notify(ctx, project.slack_channel_id, "No VM mapping configured for this project.")
+        if not agent.vm_target_id:
+            await self._notify(ctx, project.slack_channel_id, "Agent has no VM target configured.")
             return
-        vm = ctx.db.get_vm_target(project_vm.vm_target_id)
+        vm = ctx.db.get_vm_target(agent.vm_target_id)
         if not vm:
-            await self._notify(ctx, project.slack_channel_id, "VM target not found for this project.")
+            await self._notify(ctx, project.slack_channel_id, "VM target not found for this agent.")
             return
         if ctx.db.get_session_by_ticket(ticket.id):
             logger.info("Session already exists for ticket %s", ticket.id)
             return
-        if project_vm.repo_mode == "mirror":
+        if project.repo_mode == "mirror":
             running = ctx.db.list_sessions(project_id=project.id, status="running")
-            for session in running:
-                if session.project_vm_id == project_vm.id:
-                    logger.info("Project session already running for %s", project.id)
-                    raise WorkItemBlocked("Project session already running", delay_seconds=60)
+            if running:
+                logger.info("Project session already running for %s", project.id)
+                raise WorkItemBlocked("Project session already running", delay_seconds=60)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         base_spec = build_ssh_spec_with_options(vm, base_options)
@@ -100,7 +98,6 @@ class TicketAutoStartWorkItem(WorkItem):
         session_id = f"{project.slug}-{agent.slug}-ticket-{short_id}"
         repo_resource, resource_error = ctx.db.acquire_repo_resource(
             project=project,
-            project_vm=project_vm,
             session_id=session_id,
             agent_id=agent.id,
         )
@@ -109,7 +106,7 @@ class TicketAutoStartWorkItem(WorkItem):
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
         try:
-            repo_path = ensure_repo(base_spec, project_vm, repo_path=repo_resource.path)
+            repo_path = ensure_repo(base_spec, project, repo_path=repo_resource.path)
         except Exception as exc:
             ctx.db.release_repo_resource_for_session(session_id)
             message = f"Repo setup failed: {exc}"
@@ -117,7 +114,7 @@ class TicketAutoStartWorkItem(WorkItem):
             raise WorkItemBlocked(message, delay_seconds=60) from exc
         if not repo_path:
             ctx.db.release_repo_resource_for_session(session_id)
-            message = "Repository not configured for this project VM."
+            message = "Repository not configured for this project."
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
         if is_codex_command(agent.command) and agent.trust_level:
@@ -132,7 +129,6 @@ class TicketAutoStartWorkItem(WorkItem):
         ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,
-            project_vm_id=project_vm.id,
             agent_id=agent.id,
             ticket_id=ticket.id,
             status="running",

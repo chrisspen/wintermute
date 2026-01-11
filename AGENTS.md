@@ -131,7 +131,13 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 - UI rule: no HTML or CSS embedded in Python files; use template files and static assets.
 - UI rule: never add margin-bottom directly to input/select/textarea; use container spacing.
 - Never run commands inside the user's `.venv` or upgrade it directly; use the restart/setup flow instead.
-- Ensure full network access before attempting to call the host API (e.g., `http://192.168.123.1:8000`).
+- Run tests with `.venv/bin/python -m pytest tests/ -x --tb=short` (do not activate the venv).
+
+## VM networking
+When running as an agent inside a VM, the web server runs on the host machine. Use the gateway IP (typically `192.168.123.1`) to reach host services:
+- Find gateway: `ip route | grep default | awk '{print $3}'`
+- API calls: `curl -H "Authorization: Bearer $TOKEN" http://192.168.123.1:8000/api/...`
+- API token: read from `.codex/token` (strip the `WINTERMUTE_ADMIN_API_TOKEN=` prefix)
 
 ## Minimal local run (dev)
 Run setup:

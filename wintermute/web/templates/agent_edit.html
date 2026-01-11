@@ -24,6 +24,16 @@
             <option value="tmux" {% if agent.session_mode == "tmux" %}selected{% endif %}>tmux</option>
             <option value="mcp" {% if agent.session_mode == "mcp" %}selected{% endif %}>mcp (Codex)</option>
             <option value="claude" {% if agent.session_mode == "claude" %}selected{% endif %}>claude</option>
+            <option value="gemini" {% if agent.session_mode == "gemini" %}selected{% endif %}>gemini</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>VM Target</label>
+          <select name="vm_target_id">
+            <option value="" {% if not agent.vm_target_id %}selected{% endif %}>(none)</option>
+            {% for vm in vm_targets %}
+            <option value="{{ vm.id }}" {% if agent.vm_target_id == vm.id %}selected{% endif %}>{{ vm.name }}</option>
+            {% endfor %}
           </select>
         </div>
         <div class="field-group">
@@ -32,11 +42,11 @@
         </div>
         <div class="field-group">
           <label>Environment Variables</label>
-          <input type="text" name="env_vars" value="{{ agent.env_vars or '' }}" placeholder="TERM=dumb NO_COLOR=1" />
+          <input type="text" name="env_vars" value="{{ agent.env_vars or '' }}" placeholder="e.g. TERM=dumb NO_COLOR=1" />
         </div>
         <div class="field-group">
           <label>MCP Config Overrides</label>
-          <textarea name="mcp_config" rows="3" placeholder="-c 'sandbox_permissions=[&quot;disk-full-read-access&quot;,&quot;disk-full-write-access&quot;,&quot;network-full-access&quot;]'">{{ agent.mcp_config or '' }}</textarea>
+          <textarea name="mcp_config" rows="3" placeholder="e.g. -c 'sandbox_permissions=[...]'">{{ agent.mcp_config or '' }}</textarea>
         </div>
         <div class="field-group">
           <label>Trust Level</label>
@@ -48,24 +58,24 @@
         </div>
         <div class="field-group">
           <label>Input Echo Prefix</label>
-          <input type="text" name="input_echo_prefix" value="{{ agent.input_echo_prefix or '' }}" placeholder="›" />
+          <input type="text" name="input_echo_prefix" value="{{ agent.input_echo_prefix or '' }}" placeholder="e.g. ›" />
         </div>
         <div class="field-group">
           <label>Response Prefix</label>
-          <input type="text" name="response_prefix" value="{{ agent.response_prefix or '' }}" placeholder="•" />
+          <input type="text" name="response_prefix" value="{{ agent.response_prefix or '' }}" placeholder="e.g. •" />
         </div>
         <h4>LLM API Configuration (for decision path)</h4>
         <div class="field-group">
           <label>LLM Base URL</label>
-          <input type="text" name="llm_base_url" value="{{ agent.llm_base_url or '' }}" placeholder="http://localhost:11434/v1" />
+          <input type="text" name="llm_base_url" value="{{ agent.llm_base_url or '' }}" placeholder="e.g. http://localhost:11434/v1" />
         </div>
         <div class="field-group">
           <label>LLM API Key</label>
-          <input type="text" name="llm_api_key" value="{{ agent.llm_api_key or '' }}" placeholder="ollama" />
+          <input type="text" name="llm_api_key" value="{{ agent.llm_api_key or '' }}" placeholder="e.g. ollama" />
         </div>
         <div class="field-group">
           <label>LLM Model</label>
-          <input type="text" name="llm_model" value="{{ agent.llm_model or '' }}" placeholder="llama3.2" />
+          <input type="text" name="llm_model" value="{{ agent.llm_model or '' }}" placeholder="e.g. llama3.2" />
         </div>
         <button type="submit">Save Agent</button>
       </form>

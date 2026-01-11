@@ -34,7 +34,7 @@
           <label>App Token (xapp-...)</label>
           <input type="password" name="app_token" placeholder="leave blank to keep existing" />
           <label>Slack User ID to Auto-Invite (U...)</label>
-          <input type="text" name="admin_user_id" placeholder="U0123456789" />
+          <input type="text" name="admin_user_id" placeholder="e.g. U0123456789" />
           <button type="submit">Save Slack Settings</button>
         </form>
       </div>
@@ -277,26 +277,6 @@
           </li>
           {% else %}
           <li class="muted">No response rules yet</li>
-          {% endfor %}
-        </ul>
-      </div>
-    </div>
-    <div class="group">
-      <p class="group-title">Project VM Mapping</p>
-      <div class="tile">
-        <h3>Mappings</h3>
-        <a href="/ui/project-vms/create?return_to=/ui">Attach VM</a>
-        <ul>
-          {% for mapping in project_vms[:10] %}
-          <li>
-            <a href="/ui/project-vms/{{ mapping.id }}/edit">
-              {{ project_lookup.get(mapping.project_id, mapping.project_id) }}
-              &rarr; {{ vm_lookup.get(mapping.vm_target_id, mapping.vm_target_id) }}
-            </a>
-            ({{ mapping.repo_mode }})
-          </li>
-          {% else %}
-          <li class="muted">No mappings yet</li>
           {% endfor %}
         </ul>
       </div>

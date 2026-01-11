@@ -13,7 +13,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Optional
 
-from wintermute.db import AgentRecord, AgentSessionRecord, ProjectVMRecord, VMTargetRecord
+from wintermute.db import AgentRecord, AgentSessionRecord, ProjectRecord, VMTargetRecord
 
 
 @dataclass(frozen=True)
@@ -206,28 +206,32 @@ def _stdout_text(value: object) -> str:
     return str(value)
 
 
-def _session_repo_path(project_vm: ProjectVMRecord, session_id: Optional[str]) -> Optional[str]:
-    if not project_vm.repo_path:
+def _session_repo_path(project: ProjectRecord, session_id: Optional[str]) -> Optional[str]:
+    """Compute the repo path for a session. Repo config comes from Project."""
+    if not project.repo_path:
         return None
-    if project_vm.repo_mode != "clone":
-        return project_vm.repo_path
+    repo_mode = project.repo_mode or "mirror"
+    if repo_mode != "clone":
+        return project.repo_path
     if not session_id:
-        return project_vm.repo_path
+        return project.repo_path
     safe_suffix = re.sub(r"[^a-zA-Z0-9]+", "-", session_id.strip().lower()).strip("-")
     if not safe_suffix:
-        return project_vm.repo_path
-    return f"{project_vm.repo_path}-{safe_suffix}"
+        return project.repo_path
+    return f"{project.repo_path}-{safe_suffix}"
 
 
 def ensure_repo(
     spec: SSHSpec,
-    project_vm: ProjectVMRecord,
+    project: ProjectRecord,
     session_id: Optional[str] = None,
     repo_path: Optional[str] = None,
 ) -> Optional[str]:
+    """Ensure the repo exists on the VM. Repo config comes from Project."""
     logger = logging.getLogger(__name__)
-    repo_path = repo_path or _session_repo_path(project_vm, session_id)
-    if project_vm.repo_mode == "mirror":
+    repo_path = repo_path or _session_repo_path(project, session_id)
+    repo_mode = project.repo_mode or "mirror"
+    if repo_mode == "mirror":
         if not repo_path:
             return None
         check_cmd = f"test -d {shlex.quote(repo_path)}"
@@ -235,15 +239,15 @@ def ensure_repo(
         if result.returncode != 0:
             raise RuntimeError(f"Mirror path not found on VM: {repo_path}")
         return repo_path
-    if project_vm.repo_mode == "clone":
-        if not repo_path or not project_vm.repo_url:
+    if repo_mode == "clone":
+        if not repo_path or not project.repo_url:
             return None
         parent_dir = os.path.dirname(repo_path)
         logger.info(
             "Ensuring repo clone path=%s parent=%s url=%s",
             repo_path,
             parent_dir,
-            project_vm.repo_url,
+            project.repo_url,
         )
         if not parent_dir:
             parent_dir = "."
@@ -270,7 +274,7 @@ def ensure_repo(
             "fi"
         ).format(
             path=shlex.quote(repo_path),
-            url=shlex.quote(project_vm.repo_url),
+            url=shlex.quote(project.repo_url),
         )
         logger.info("Repo clone command: %s", clone_cmd)
         result = _run_ssh_script(spec, f"{clone_cmd}\n", timeout=300)
