@@ -1228,9 +1228,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             static_version = int(os.path.getmtime(static_css_path))
         except OSError:
             static_version = 0
+        # Auto-inject user from session if not already in context
+        user = context.get("user") or request.session.get("user")
         response = templates.TemplateResponse(
             template_name,
-            {"request": request, "static_version": static_version, **context},
+            {"request": request, "static_version": static_version, "user": user, **context},
         )
         response.headers.update(
             {
