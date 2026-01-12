@@ -93,10 +93,12 @@ def _build_claude_shell(agent: AgentRecord, cwd: str) -> str:
             cmd_str = f"env {env_vars} {cmd_str}"
 
     # Wrap with profile sourcing and line buffering
+    # Source nvm directly since .bashrc exits early for non-interactive shells
     wrapped = (
         "source ~/.profile >/dev/null 2>&1; "
         "source ~/.bash_profile >/dev/null 2>&1; "
-        "source ~/.bashrc >/dev/null 2>&1; "
+        "export NVM_DIR=\"$HOME/.nvm\"; "
+        "[ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; "
         "if command -v stdbuf >/dev/null 2>&1; then "
         f"exec stdbuf -oL -eL {cmd_str}; "
         "else "

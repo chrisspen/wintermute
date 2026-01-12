@@ -1,10 +1,10 @@
 """Gemini CLI client for Wintermute agent sessions.
 
-This implementation uses a persistent subprocess with streaming JSON I/O,
-similar to the Claude client pattern. The Gemini process stays alive
-and prompts are sent via stdin with responses streamed via stdout.
+Unlike Claude, Gemini CLI doesn't support persistent subprocess mode with
+continuous JSON I/O. Each prompt requires a new process invocation where
+the prompt is piped via stdin.
 
-Launch: gemini --output-format stream-json
+Launch: echo "prompt" | gemini --output-format stream-json -y
 """
 
 from __future__ import annotations
@@ -38,16 +38,15 @@ class GeminiResult:
 
 
 @dataclass
-class GeminiProcess:
-    """Manages a persistent Gemini subprocess."""
+class GeminiSession:
+    """Tracks Gemini session state across invocations."""
 
-    proc: subprocess.Popen
     session_id: Optional[str] = None
     last_used: float = 0.0
 
 
 _GEMINI_LOCK = threading.Lock()
-_GEMINI_PROCESSES: dict[str, GeminiProcess] = {}
+_GEMINI_SESSIONS: dict[str, GeminiSession] = {}
 
 
 def _is_local_host(host: str) -> bool:
@@ -60,14 +59,16 @@ def _is_local_host(host: str) -> bool:
     return value in {hostname, fqdn, f"{hostname}.local", f"{fqdn}.local"}
 
 
-def _build_gemini_shell(agent: AgentRecord, cwd: str) -> str:
-    """Build the shell command to launch Gemini in streaming mode."""
+def _build_gemini_command(agent: AgentRecord, cwd: str, resume_session: Optional[str] = None) -> list[str]:
+    """Build the Gemini CLI command arguments."""
     cmd = agent.command.strip() if agent.command else "gemini"
 
-    # Core flags for streaming JSON mode
-    # Gemini uses positional prompts and --output-format for JSON streaming
-    # Use -i for interactive mode so it stays alive for multiple prompts
-    args = [cmd, "--output-format", "stream-json"]
+    # Core flags for streaming JSON mode with auto-approval
+    args = [cmd, "--output-format", "stream-json", "-y"]
+
+    # Resume previous session if we have one
+    if resume_session:
+        args.extend(["--resume", resume_session])
 
     # Parse additional config from agent.mcp_config
     if agent.mcp_config:
@@ -79,18 +80,26 @@ def _build_gemini_shell(agent: AgentRecord, cwd: str) -> str:
             except ValueError:
                 args.extend(config.split())
 
+    return args
+
+
+def _build_gemini_shell(agent: AgentRecord, cwd: str, resume_session: Optional[str] = None) -> str:
+    """Build the shell command to launch Gemini."""
+    args = _build_gemini_command(agent, cwd, resume_session)
     cmd_str = shlex.join(args)
+
     if agent.env_vars:
         env_vars = agent.env_vars.strip()
         if env_vars:
             cmd_str = f"env {env_vars} {cmd_str}"
 
-    # Wrap with profile sourcing and line buffering
-    # cd to cwd first since Gemini doesn't have a --cwd flag
+    # Wrap with profile sourcing for proper environment
+    # Source nvm directly since .bashrc exits early for non-interactive shells
     wrapped = (
         "source ~/.profile >/dev/null 2>&1; "
         "source ~/.bash_profile >/dev/null 2>&1; "
-        "source ~/.bashrc >/dev/null 2>&1; "
+        "export NVM_DIR=\"$HOME/.nvm\"; "
+        "[ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; "
         f"cd {shlex.quote(cwd)}; "
         "if command -v stdbuf >/dev/null 2>&1; then "
         f"exec stdbuf -oL -eL {cmd_str}; "
@@ -101,9 +110,15 @@ def _build_gemini_shell(agent: AgentRecord, cwd: str) -> str:
     return wrapped
 
 
-def _start_gemini_process(spec: SSHSpec, agent: AgentRecord, cwd: str) -> subprocess.Popen:
-    """Start a persistent Gemini subprocess."""
-    shell_cmd = _build_gemini_shell(agent, cwd)
+def _run_gemini_process(
+    spec: SSHSpec,
+    agent: AgentRecord,
+    cwd: str,
+    prompt: str,
+    resume_session: Optional[str] = None,
+) -> subprocess.Popen:
+    """Run a single Gemini invocation with the prompt piped to stdin."""
+    shell_cmd = _build_gemini_shell(agent, cwd, resume_session)
     logger = logging.getLogger(__name__)
     local_host = _is_local_host(spec.host)
     current_user = getpass.getuser()
@@ -116,7 +131,7 @@ def _start_gemini_process(spec: SSHSpec, agent: AgentRecord, cwd: str) -> subpro
             cwd,
         )
         logger.info("Gemini local command: %s", shell_cmd)
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             ["bash", "-lc", shell_cmd],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -124,6 +139,11 @@ def _start_gemini_process(spec: SSHSpec, agent: AgentRecord, cwd: str) -> subpro
             text=False,
             bufsize=0,
         )
+        # Write prompt to stdin and close to signal end of input
+        if proc.stdin:
+            proc.stdin.write((prompt + "\n").encode("utf-8"))
+            proc.stdin.close()
+        return proc
 
     logger.info(
         "Gemini SSH mode host=%s user=%s current_user=%s cwd=%s",
@@ -144,7 +164,7 @@ def _start_gemini_process(spec: SSHSpec, agent: AgentRecord, cwd: str) -> subpro
         f"cd {shlex.quote(cwd)} && bash -lc {shlex.quote(shell_cmd)}",
     ]
     logger.info("Gemini SSH command: %s", " ".join(ssh_cmd))
-    return subprocess.Popen(
+    proc = subprocess.Popen(
         ssh_cmd,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -152,20 +172,11 @@ def _start_gemini_process(spec: SSHSpec, agent: AgentRecord, cwd: str) -> subpro
         text=False,
         bufsize=0,
     )
-
-
-def _send_user_message(proc: subprocess.Popen, text: str) -> None:
-    """Send a user message to Gemini via stdin.
-
-    Gemini CLI in interactive mode reads prompts from stdin as plain text lines.
-    """
-    if not proc.stdin:
-        raise RuntimeError("Gemini process stdin closed")
-
-    # Gemini reads plain text prompts from stdin, one per line
-    data = (text + "\n").encode("utf-8")
-    proc.stdin.write(data)
-    proc.stdin.flush()
+    # Write prompt to stdin and close to signal end of input
+    if proc.stdin:
+        proc.stdin.write((prompt + "\n").encode("utf-8"))
+        proc.stdin.close()
+    return proc
 
 
 def _get_gemini_log_path(session_id: str) -> str:
@@ -188,7 +199,6 @@ def _read_stream_response(
     proc: subprocess.Popen,
     *,
     deadline: float,
-    idle_seconds: float = 2.0,
     log_path: Optional[str] = None,
 ) -> tuple[str, Optional[str], Optional[str], Optional[dict[str, Any]]]:
     """Read streaming JSON response from Gemini.
@@ -215,19 +225,15 @@ def _read_stream_response(
     session_id: Optional[str] = None
     error: Optional[str] = None
     usage: Optional[dict[str, Any]] = None
-    last_activity = time.time()
-    result_received = False
 
-    while time.time() < deadline:
+    done = False
+    while time.time() < deadline and not done:
         remaining = max(deadline - time.time(), 0.1)
         events = selector.select(timeout=remaining)
 
         if not events:
-            # If we got a result message and idle, we're done
-            if result_received and (time.time() - last_activity) >= idle_seconds:
-                break
-            # If we have texts and idle, we're done
-            if texts and (time.time() - last_activity) >= idle_seconds:
+            # Check if process has exited
+            if proc.poll() is not None:
                 break
             continue
 
@@ -237,17 +243,17 @@ def _read_stream_response(
 
             if not chunk:
                 selector.close()
-                return "\n".join(texts), session_id, error, usage
+                return "".join(texts), session_id, error, usage
 
             text = chunk.decode("utf-8", errors="ignore")
 
             if is_stderr:
                 if log_path:
                     _append_gemini_log(log_path, f"[stderr] {text.strip()}")
-                # Gemini outputs "Loaded cached credentials." to stderr, ignore it
-                if "credentials" not in text.lower():
+                # Gemini outputs info messages to stderr, ignore common ones
+                lowered = text.lower()
+                if "credentials" not in lowered and "yolo" not in lowered:
                     logger.warning("Gemini stderr: %s", text.strip())
-                last_activity = time.time()
                 continue
 
             buffer += text
@@ -267,7 +273,6 @@ def _read_stream_response(
                     logger.warning("Gemini non-JSON output: %s", line)
                     continue
 
-                last_activity = time.time()
                 msg_type = payload.get("type")
 
                 if msg_type == "init":
@@ -280,18 +285,15 @@ def _read_stream_response(
                         content = payload.get("content", "")
                         if content:
                             # Gemini sends delta messages, accumulate them
-                            if payload.get("delta"):
-                                texts.append(content)
-                            elif content not in texts:
-                                texts.append(content)
+                            texts.append(content)
 
                 elif msg_type == "result":
-                    result_received = True
                     usage = payload.get("stats")
                     status = payload.get("status")
                     if status != "success":
                         error = payload.get("error") or f"Gemini result status: {status}"
                     # Result message means the response is complete
+                    done = True
                     break
 
     selector.close()
@@ -299,89 +301,34 @@ def _read_stream_response(
     return "".join(texts), session_id, error, usage
 
 
-def get_gemini_process(
-    wintermute_session_id: str,
-    spec: SSHSpec,
-    agent: AgentRecord,
-    cwd: str,
-) -> GeminiProcess:
-    """Get or create a persistent Gemini process for a session."""
+def get_gemini_session(wintermute_session_id: str) -> GeminiSession:
+    """Get or create a Gemini session tracker."""
     with _GEMINI_LOCK:
-        existing = _GEMINI_PROCESSES.get(wintermute_session_id)
-        if existing and existing.proc.poll() is None:
-            return existing
+        existing = _GEMINI_SESSIONS.get(wintermute_session_id)
         if existing:
-            _GEMINI_PROCESSES.pop(wintermute_session_id, None)
+            return existing
 
-        proc = _start_gemini_process(spec, agent, cwd)
-        gemini = GeminiProcess(proc=proc, session_id=None, last_used=time.time())
-        _GEMINI_PROCESSES[wintermute_session_id] = gemini
-
-    return gemini
+        session = GeminiSession(session_id=None, last_used=time.time())
+        _GEMINI_SESSIONS[wintermute_session_id] = session
+        return session
 
 
 def close_gemini_process(wintermute_session_id: str) -> None:
-    """Close and cleanup a Gemini process."""
+    """Cleanup Gemini session state."""
     with _GEMINI_LOCK:
-        gemini = _GEMINI_PROCESSES.pop(wintermute_session_id, None)
-
-    if not gemini:
-        return
-
-    try:
-        if gemini.proc.stdin:
-            gemini.proc.stdin.close()
-    except Exception:
-        pass
-
-    try:
-        gemini.proc.terminate()
-    except Exception:
-        pass
-
-    try:
-        gemini.proc.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        gemini.proc.kill()
+        _GEMINI_SESSIONS.pop(wintermute_session_id, None)
 
 
 def poll_gemini(wintermute_session_id: str, timeout_seconds: int = 5) -> GeminiResult:
-    """Poll for any pending output from Gemini process."""
-    logger = logging.getLogger(__name__)
+    """Poll for any pending output from Gemini.
 
-    with _GEMINI_LOCK:
-        gemini = _GEMINI_PROCESSES.get(wintermute_session_id)
-
-    if not gemini:
-        return GeminiResult(
-            response_text="",
-            session_id=None,
-            error="Gemini process not found",
-        )
-
-    if gemini.proc.poll() is not None:
-        close_gemini_process(wintermute_session_id)
-        return GeminiResult(
-            response_text="",
-            session_id=None,
-            error="Gemini process exited",
-        )
-
-    log_path = _get_gemini_log_path(wintermute_session_id)
-    deadline = time.time() + timeout_seconds
-
-    response_text, session_id, error, usage = _read_stream_response(
-        gemini.proc,
-        deadline=deadline,
-        idle_seconds=0.5,
-        log_path=log_path,
-    )
-
+    Since Gemini uses per-invocation processes, there's nothing to poll.
+    This function exists for API compatibility with Claude/MCP clients.
+    """
     return GeminiResult(
-        response_text=response_text,
-        session_id=session_id or gemini.session_id,
-        usage=usage,
-        error=error,
+        response_text="",
+        session_id=None,
+        error=None,
     )
 
 
@@ -396,13 +343,14 @@ def run_gemini_prompt(
 ) -> GeminiResult:
     """Send a prompt to Gemini and wait for response.
 
-    Uses a persistent subprocess - the process stays alive between calls.
-    Session context is maintained automatically by Gemini.
+    Unlike Claude, Gemini CLI doesn't support persistent processes.
+    Each call spawns a new process with the prompt piped to stdin.
+    Session continuity is achieved using --resume flag with the Gemini session ID.
 
     Args:
         spec: SSH connection specification for the target VM
         agent: Agent configuration record
-        session_id: Wintermute session ID (for process management)
+        session_id: Wintermute session ID (for session management)
         prompt: The prompt to send to Gemini
         cwd: Working directory for the Gemini session
         timeout_seconds: Response timeout in seconds
@@ -413,52 +361,54 @@ def run_gemini_prompt(
     logger = logging.getLogger(__name__)
     log_path = _get_gemini_log_path(session_id)
 
-    # Get or create persistent process
-    gemini = get_gemini_process(session_id, spec, agent, cwd)
+    # Get session tracker for resume capability
+    gemini_session = get_gemini_session(session_id)
+    gemini_session.last_used = time.time()
 
-    if gemini.proc.poll() is not None:
-        error = "Gemini process exited unexpectedly"
-        logger.warning(error)
-        close_gemini_process(session_id)
-        return GeminiResult(response_text="", session_id=None, error=error)
-
-    gemini.last_used = time.time()
-
-    # Send the prompt
+    # Log the prompt
     _append_gemini_log(log_path, f"[prompt] {prompt}")
+
+    # Run a single Gemini invocation with the prompt
     try:
-        _send_user_message(gemini.proc, prompt)
+        proc = _run_gemini_process(
+            spec,
+            agent,
+            cwd,
+            prompt,
+            resume_session=gemini_session.session_id,
+        )
     except Exception as e:
-        error = f"Failed to send prompt: {e}"
+        error = f"Failed to start Gemini: {e}"
         logger.warning(error)
-        close_gemini_process(session_id)
-        return GeminiResult(response_text="", session_id=gemini.session_id, error=error)
+        return GeminiResult(response_text="", session_id=None, error=error)
 
     # Read response
     deadline = time.time() + timeout_seconds
     response_text, new_session_id, error, usage = _read_stream_response(
-        gemini.proc,
+        proc,
         deadline=deadline,
-        idle_seconds=2.0,
         log_path=log_path,
     )
 
+    # Wait for process to finish
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
     # Update session ID if we got one
     if new_session_id:
-        gemini.session_id = new_session_id
+        gemini_session.session_id = new_session_id
 
     if error:
         logger.warning("Gemini error: %s", error)
-
-    if gemini.proc.poll() is not None:
-        logger.warning("Gemini process exited after response")
-        close_gemini_process(session_id)
 
     duration_ms = usage.get("duration_ms") if usage else None
 
     return GeminiResult(
         response_text=response_text,
-        session_id=gemini.session_id,
+        session_id=gemini_session.session_id,
         usage=usage,
         duration_ms=duration_ms,
         error=error,
