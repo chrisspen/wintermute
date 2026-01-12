@@ -24,10 +24,11 @@
         </div>
         <div class="field-group">
           <label>Repo Mode</label>
-          <select name="repo_mode">
+          <select name="repo_mode" id="repo-mode">
             <option value="mirror" {% if project.repo_mode == 'mirror' or not project.repo_mode %}selected{% endif %}>mirror</option>
             <option value="clone" {% if project.repo_mode == 'clone' %}selected{% endif %}>clone</option>
           </select>
+          <p class="muted" id="repo-mode-help" style="font-size: 12px; margin-top: 4px; margin-left: 18px;">{% if project.repo_mode == 'clone' %}Clones repo from repo_url to repo_path. Each session gets its own copy.{% else %}Uses existing repo at repo_path. All sessions share the same directory.{% endif %}</p>
         </div>
         <div class="field-group">
           <label>Repo Path</label>
@@ -157,4 +158,18 @@
     </div>
   </div>
 </div>
+
+<script>
+(function() {
+  var repoModeSelect = document.getElementById('repo-mode');
+  var repoModeHelp = document.getElementById('repo-mode-help');
+  var helpText = {
+    mirror: 'Uses existing repo at repo_path. All sessions share the same directory.',
+    clone: 'Clones repo from repo_url to repo_path. Each session gets its own copy.'
+  };
+  repoModeSelect.addEventListener('change', function() {
+    repoModeHelp.textContent = helpText[repoModeSelect.value] || '';
+  });
+})();
+</script>
 {% endblock %}

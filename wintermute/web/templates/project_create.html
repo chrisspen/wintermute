@@ -16,10 +16,11 @@
         <label>Max Repo Resources</label>
         <input type="number" name="max_repo_resources" min="1" value="3" />
         <label>Repo Mode</label>
-        <select name="repo_mode">
+        <select name="repo_mode" id="repo-mode">
           <option value="mirror" selected>mirror</option>
           <option value="clone">clone</option>
         </select>
+        <p class="muted" id="repo-mode-help" style="font-size: 12px; margin-top: 4px; margin-left: 18px;">Uses existing repo at repo_path. All sessions share the same directory.</p>
         <label>Repo Path (optional)</label>
         <input type="text" name="repo_path" placeholder="e.g. /home/user/repos/project" />
         <label>Repo URL (optional)</label>
@@ -51,6 +52,16 @@
     if (!userEditedSlug) {
       slugInput.value = slugify(nameInput.value);
     }
+  });
+
+  var repoModeSelect = document.getElementById('repo-mode');
+  var repoModeHelp = document.getElementById('repo-mode-help');
+  var helpText = {
+    mirror: 'Uses existing repo at repo_path. All sessions share the same directory.',
+    clone: 'Clones repo from repo_url to repo_path. Each session gets its own copy.'
+  };
+  repoModeSelect.addEventListener('change', function() {
+    repoModeHelp.textContent = helpText[repoModeSelect.value] || '';
   });
 })();
 </script>
