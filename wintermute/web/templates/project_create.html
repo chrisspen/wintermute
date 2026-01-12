@@ -8,13 +8,22 @@
       <form method="post" action="/projects">
         <input type="hidden" name="return_to" value="{{ return_to }}" />
         <label>Name</label>
-        <input type="text" name="name" required />
+        <input type="text" name="name" id="project-name" required />
         <label>Slug (optional)</label>
-        <input type="text" name="slug" placeholder="e.g. proj-name" />
+        <input type="text" name="slug" id="project-slug" placeholder="e.g. proj-name" />
         <label>Slack Channel ID (optional)</label>
         <input type="text" name="slack_channel_id" placeholder="e.g. C0123456789" />
         <label>Max Repo Resources</label>
         <input type="number" name="max_repo_resources" min="1" value="3" />
+        <label>Repo Mode</label>
+        <select name="repo_mode">
+          <option value="mirror" selected>mirror</option>
+          <option value="clone">clone</option>
+        </select>
+        <label>Repo Path (optional)</label>
+        <input type="text" name="repo_path" placeholder="e.g. /home/user/repos/project" />
+        <label>Repo URL (optional)</label>
+        <input type="text" name="repo_url" placeholder="e.g. git@github.com:owner/repo.git" />
         <label>Prompt Template (optional)</label>
         <textarea name="prompt_template" rows="10">{{ default_prompt_template }}</textarea>
         <p class="muted">Use placeholders like {project_name}, {repo_path}, {branch_name}, {issue_number}, {title}, {description}, {comments}, {internal_notes}.</p>
@@ -23,4 +32,26 @@
     </div>
   </div>
 </div>
+
+<script>
+(function() {
+  var nameInput = document.getElementById('project-name');
+  var slugInput = document.getElementById('project-slug');
+  var userEditedSlug = false;
+
+  function slugify(value) {
+    return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+  }
+
+  slugInput.addEventListener('input', function() {
+    userEditedSlug = slugInput.value.trim() !== '';
+  });
+
+  nameInput.addEventListener('input', function() {
+    if (!userEditedSlug) {
+      slugInput.value = slugify(nameInput.value);
+    }
+  });
+})();
+</script>
 {% endblock %}

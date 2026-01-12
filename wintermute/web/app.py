@@ -1983,6 +1983,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload.get("slack_channel_id"),
                     payload.get("prompt_template"),
                     payload.get("max_repo_resources", 3),
+                    repo_mode=payload.get("repo_mode"),
+                    repo_path=payload.get("repo_path"),
+                    repo_url=payload.get("repo_url"),
                 ),
                 "update": lambda item_id, payload: database.update_project(
                     item_id,
@@ -1991,6 +1994,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     slack_channel_id=payload.get("slack_channel_id"),
                     prompt_template=payload.get("prompt_template"),
                     max_repo_resources=payload.get("max_repo_resources"),
+                    repo_mode=payload.get("repo_mode"),
+                    repo_path=payload.get("repo_path"),
+                    repo_url=payload.get("repo_url"),
                 ),
                 "delete": database.delete_project,
             },
@@ -3055,7 +3061,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/projects"
         if not name:
             raise HTTPException(status_code=400, detail="Missing project name")
-        slug = slug_raw or f"proj-{_slugify(name)}"
+        slug = slug_raw or _slugify(name)
         channel_name = slug
         channel_id = None
         prompt_template = str(form.get("prompt_template", "")).strip() or None
@@ -3067,6 +3073,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         channel_id_raw = str(form.get("slack_channel_id", "")).strip()
         if channel_id_raw:
             channel_id = channel_id_raw
+        repo_mode = str(form.get("repo_mode", "")).strip() or None
+        repo_path = str(form.get("repo_path", "")).strip() or None
+        repo_url = str(form.get("repo_url", "")).strip() or None
         slack_bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
         if not channel_id and slack_bot:
             client = _slack_client(database)
@@ -3114,7 +3123,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     text="Channel created. Please /join to receive updates.",
                 )
         project_id = str(uuid.uuid4())
-        database.insert_project(project_id, name, slug, channel_id, prompt_template, max_repo_resources)
+        database.insert_project(
+            project_id, name, slug, channel_id, prompt_template, max_repo_resources,
+            repo_mode=repo_mode, repo_path=repo_path, repo_url=repo_url
+        )
         _update_slack_channel_filter(database)
         return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
 
@@ -3222,6 +3234,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             max_repo_resources = int(max_repo_raw) if max_repo_raw else project.max_repo_resources
         except ValueError:
             max_repo_resources = project.max_repo_resources
+        repo_mode = str(form.get("repo_mode", "")).strip() or None
+        repo_path = str(form.get("repo_path", "")).strip() or None
+        repo_url = str(form.get("repo_url", "")).strip() or None
         if not name or not slug:
             raise HTTPException(status_code=400, detail="Missing name or slug")
         database.update_project(
@@ -3231,6 +3246,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             slack_channel_id=channel_id,
             prompt_template=prompt_template,
             max_repo_resources=max_repo_resources,
+            repo_mode=repo_mode,
+            repo_path=repo_path,
+            repo_url=repo_url,
         )
         _update_slack_channel_filter(database)
         return RedirectResponse("/ui/projects?saved=project_updated", status_code=303)
