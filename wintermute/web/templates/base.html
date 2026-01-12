@@ -123,6 +123,18 @@
             >
               Sessions
             </a>
+            <a
+              href="/ui/status"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'status' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Status
+            </a>
+            <a
+              href="/ui/slack"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'slack' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Slack
+            </a>
           </nav>
           {% if user %}
           <div class="mt-6 border-t border-slate-200 pt-4 text-sm relative dark:border-slate-800">

@@ -44,36 +44,9 @@
         <h3 style="margin: 0; white-space: nowrap;">Tickets in this Sprint</h3>
         <button type="button" class="ghost" id="add-ticket-btn" style="padding: 2px 8px; font-size: 12px; white-space: nowrap;">+ Add</button>
       </div>
-      <div id="sprint-tickets-list">
-        {% if tickets %}
-        <table class="data-table" style="width: 100%;">
-          <thead>
-            <tr>
-              <th style="text-align: left;">Title</th>
-              <th style="text-align: left;">Status</th>
-              <th style="text-align: left;">Priority</th>
-              <th style="text-align: left;">Points</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for ticket in tickets %}
-            <tr data-ticket-id="{{ ticket.id }}">
-              <td><a href="/ui/tickets/{{ ticket.id }}/edit">{{ ticket.title }}</a></td>
-              <td><span class="muted">{{ ticket.status }}</span></td>
-              <td><span class="muted">{{ ticket.priority or '-' }}</span></td>
-              <td><span class="muted">{{ ticket.story_points or '-' }}</span></td>
-              <td style="text-align: right;">
-                <button type="button" class="ghost danger-text remove-ticket-btn" data-ticket-id="{{ ticket.id }}" style="padding: 4px 8px; font-size: 12px;">Remove</button>
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-        {% else %}
-        <p class="muted" id="no-tickets-msg">No tickets in this sprint</p>
-        {% endif %}
-      </div>
+      {% set sprint_id = sprint.id %}
+      {% set show_remove_button = true %}
+      {% include "_sprint_tickets_table.html" %}
     </div>
   </div>
 </div>
@@ -214,9 +187,9 @@
     var tr = document.createElement('tr');
     tr.setAttribute('data-ticket-id', ticketId);
     tr.innerHTML = '<td><a href="/ui/tickets/' + ticketId + '/edit">' + escapeHtml(title) + '</a></td>' +
-      '<td><span class="muted">' + status + '</span></td>' +
-      '<td><span class="muted">' + (priority || '-') + '</span></td>' +
-      '<td><span class="muted">' + (points || '-') + '</span></td>' +
+      '<td class="editable-cell" data-field="status" data-value="' + status + '"><span class="cell-display muted">' + status + '</span></td>' +
+      '<td class="editable-cell" data-field="priority" data-value="' + (priority || '') + '"><span class="cell-display muted">' + (priority || '-') + '</span></td>' +
+      '<td class="editable-cell" data-field="story_points" data-value="' + (points || '') + '"><span class="cell-display muted">' + (points || '-') + '</span></td>' +
       '<td style="text-align: right;"><button type="button" class="ghost danger-text remove-ticket-btn" data-ticket-id="' + ticketId + '" style="padding: 4px 8px; font-size: 12px;">Remove</button></td>';
     tbody.appendChild(tr);
   }
@@ -293,23 +266,6 @@
     }
   });
 
-  // Delegate click for remove buttons in sprint list
-  sprintTicketsList.addEventListener('click', function(e) {
-    var btn = e.target.closest('.remove-ticket-btn');
-    if (btn) {
-      var ticketId = btn.getAttribute('data-ticket-id');
-      removeTicketFromSprint(ticketId);
-    }
-  });
 })();
 </script>
-
-<style>
-.danger-text {
-  color: #dc2626;
-}
-.danger-text:hover {
-  background: rgba(220, 38, 38, 0.1);
-}
-</style>
 {% endblock %}

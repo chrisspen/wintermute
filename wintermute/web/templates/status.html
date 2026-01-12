@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Supervisor</h3>
+      <p>Status: {{ status.status if status else 'unknown' }}</p>
+      <p>Current: {{ status.current_work_id if status else 'n/a' }}</p>
+      <p>Queue: {{ status.queue_depth if status else 'n/a' }}</p>
+      <p>Last action: {{ status.last_action if status else 'n/a' }}</p>
+    </div>
+    <div class="tile">
+      <h3>Queue</h3>
+      <p>Ready work items: {{ work_items|length }}</p>
+      <ul>
+        {% for item in work_items[:5] %}
+        <li>{{ item.work_id }} ({{ item.priority }})</li>
+        {% else %}
+        <li class="muted">No work items</li>
+        {% endfor %}
+      </ul>
+      {% if work_items|length > 5 %}
+      <p class="muted">... and {{ work_items|length - 5 }} more</p>
+      {% endif %}
+      <a href="/ui/work-items" class="muted" style="font-size: 12px;">View all work items</a>
+    </div>
+    {% if failed_work_items %}
+    <div class="tile">
+      <h3>Failed Work Items</h3>
+      <ul>
+        {% for item in failed_work_items[:5] %}
+        <li><a href="/ui/work-items/{{ item.work_id }}/edit">{{ item.work_id }}</a></li>
+        {% endfor %}
+      </ul>
+      {% if failed_work_items|length > 5 %}
+      <p class="muted">... and {{ failed_work_items|length - 5 }} more</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

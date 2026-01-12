@@ -3477,6 +3477,54 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.update_ticket(ticket_id, description=description)
         return {"ok": True, "html": _render_markdown(description)}
 
+    @app.patch("/api/tickets/{ticket_id}")
+    async def api_ticket_patch(
+        ticket_id: str, request: Request
+    ) -> dict[str, Any]:
+        _require_login_or_api(request, "tickets", "update")
+        ticket = database.get_ticket(ticket_id)
+        if not ticket:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        payload = await request.json()
+        updates: dict[str, Any] = {}
+        if "status" in payload:
+            status = str(payload["status"]).strip()
+            if status not in ("open", "in-progress", "needs-feedback", "done"):
+                raise HTTPException(status_code=400, detail="Invalid status")
+            updates["status"] = status
+        if "priority" in payload:
+            priority = payload["priority"]
+            if priority is not None:
+                priority = str(priority).strip() or None
+                if priority and priority not in ("low", "medium", "high"):
+                    raise HTTPException(status_code=400, detail="Invalid priority")
+            updates["priority"] = priority
+        if "story_points" in payload:
+            sp = payload["story_points"]
+            if sp is not None and sp != "":
+                try:
+                    updates["story_points"] = float(sp)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid story_points")
+            else:
+                updates["clear_story_points"] = True
+        if "priority" in payload and updates.get("priority") is None:
+            updates["clear_priority"] = True
+            del updates["priority"]
+        if not updates:
+            raise HTTPException(status_code=400, detail="No valid fields to update")
+        database.update_ticket(ticket_id, **updates)
+        updated = database.get_ticket(ticket_id)
+        return {
+            "ok": True,
+            "ticket": {
+                "id": updated.id,
+                "status": updated.status,
+                "priority": updated.priority,
+                "story_points": updated.story_points,
+            },
+        }
+
     @app.get("/ui/comments")
     def comments_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         comments = database.list_comments()
@@ -3984,63 +4032,79 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.get("/ui")
     def ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = _growl_message(request.query_params.get("saved"))
+        # Find current active sprint
+        sprints = database.list_sprints()
+        current_sprint = None
+        for sprint in sprints:
+            if sprint.status == "active":
+                current_sprint = sprint
+                break
+        # Get tickets in current sprint, sorted by priority (high first)
+        tickets: list[Any] = []
+        if current_sprint:
+            tickets = database.list_tickets_in_sprint(current_sprint.id)
+            priority_order = {"high": 0, "medium": 1, "low": 2}
+            tickets.sort(key=lambda t: priority_order.get(t.priority, 3))
+        # Build project lookup for display
+        projects = database.list_projects()
+        project_lookup = {p.id: p.name for p in projects}
+        return _render_template(
+            request,
+            "admin.html",
+            {
+                "title": "Home",
+                "active_nav": "home",
+                "growl_message": growl_message,
+                "user": user,
+                "current_sprint": current_sprint,
+                "tickets": tickets,
+                "project_lookup": project_lookup,
+            },
+        )
+
+    @app.get("/ui/status")
+    def status_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         status = database.get_supervisor_state()
         work_items = database.fetch_ready_work_items(utc_now())
         failed_work_items = database.list_work_items(status="failed")
-        projects = database.list_projects()
-        tickets = database.list_tickets()
-        comments = database.list_comments()
-        vm_targets = database.list_vm_targets()
-        agents = database.list_agents()
-        agent_responses = database.list_agent_responses()
-        sessions = database.list_sessions()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "status.html",
+            {
+                "title": "Status",
+                "active_nav": "status",
+                "growl_message": growl_message,
+                "user": user,
+                "status": status,
+                "work_items": work_items,
+                "failed_work_items": failed_work_items,
+            },
+        )
+
+    @app.get("/ui/slack")
+    def slack_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         slack_source = database.get_task_source("slack")
         slack_config = slack_source.config if slack_source else {}
         slack_channels = ", ".join(slack_config.get("channels", []))
         slack_bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
         slack_app = database.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
         slack_admin = database.get_credential_by_name(SLACK_PROVIDER, "admin_user_id")
-        github_tokens = database.list_github_tokens()
-        github_sources = database.list_github_sources()
-        gitlab_tokens = database.list_gitlab_tokens()
-        gitlab_sources = database.list_gitlab_sources()
-        ticket_auto_start_source = database.get_task_source(TicketAutoStartSource.id)
-        standup_source = database.get_task_source(StandupSource.id)
-        api_tokens = database.list_api_tokens()
         growl_message = _growl_message(request.query_params.get("saved"))
         return _render_template(
             request,
-            "admin.html",
+            "slack.html",
             {
-                "title": "Admin",
-                "active_nav": "home",
+                "title": "Slack",
+                "active_nav": "slack",
                 "growl_message": growl_message,
                 "user": user,
-                "status": status,
-                "work_items": work_items,
-                "failed_work_items": failed_work_items,
-                "projects": projects,
-                "tickets": tickets,
-                "comments": comments,
-                "vm_targets": vm_targets,
-                "agents": agents,
-                "agent_responses": agent_responses,
-                "sessions": sessions,
                 "slack_source": slack_source,
                 "slack_channels": slack_channels,
                 "slack_bot": slack_bot,
                 "slack_app": slack_app,
                 "slack_admin": slack_admin,
-                "github_tokens": github_tokens,
-                "github_sources": github_sources,
-                "gitlab_tokens": gitlab_tokens,
-                "gitlab_sources": gitlab_sources,
-                "ticket_auto_start_source": ticket_auto_start_source,
-                "standup_source": standup_source,
-                "api_tokens": api_tokens,
-                "project_lookup": {project.id: project.name for project in projects},
-                "vm_lookup": {vm.id: vm.name for vm in vm_targets},
-                "agent_lookup": {agent.id: agent.name for agent in agents},
             },
         )
 
@@ -4797,6 +4861,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         projects = database.list_projects()
         agents = database.list_agents()
         sprints = database.list_sprints(status="active")
+        users = database.list_users()
         return_to = request.query_params.get("return_to", "/ui/tickets")
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"

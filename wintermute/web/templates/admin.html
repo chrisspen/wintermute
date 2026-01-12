@@ -2,57 +2,24 @@
 
 {% block content %}
 <div class="panel">
-  <div class="grid">
-    <div class="tile">
-      <h3>Supervisor</h3>
-      <p>Status: {{ status.status if status else 'unknown' }}</p>
-      <p>Current: {{ status.current_work_id if status else 'n/a' }}</p>
-      <p>Queue: {{ status.queue_depth if status else 'n/a' }}</p>
-      <p>Last action: {{ status.last_action if status else 'n/a' }}</p>
-    </div>
-    <div class="tile">
-      <h3>Queue</h3>
-      <p>Ready work items: {{ work_items|length }}</p>
-      <ul>
-        {% for item in work_items[:5] %}
-        <li>{{ item.work_id }} ({{ item.priority }})</li>
-        {% else %}
-        <li class="muted">No work items</li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div class="group">
-      <p class="group-title">Slack</p>
-      <div class="tile">
-        <h3>Slack Tokens</h3>
-        <p>Bot token: {{ 'configured' if slack_bot else 'missing' }}</p>
-        <p>App token: {{ 'configured' if slack_app else 'missing' }}</p>
-        <p>Admin user: {{ 'configured' if slack_admin else 'missing' }}</p>
-        <form method="post" action="/slack/credentials">
-          <label>Bot Token (xoxb-...)</label>
-          <input type="password" name="bot_token" placeholder="leave blank to keep existing" />
-          <label>App Token (xapp-...)</label>
-          <input type="password" name="app_token" placeholder="leave blank to keep existing" />
-          <label>Slack User ID to Auto-Invite (U...)</label>
-          <input type="text" name="admin_user_id" placeholder="e.g. U0123456789" />
-          <button type="submit">Save Slack Settings</button>
-        </form>
+  <div class="grid section-gap">
+    {% if current_sprint %}
+    <div class="tile wide">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+        <h3 style="margin: 0;">Current Sprint: {{ current_sprint.name }}</h3>
+        <span class="muted" style="font-size: 12px;">({{ current_sprint.start_date[:10] }} to {{ current_sprint.end_date[:10] }})</span>
+        <a href="/ui/sprints/{{ current_sprint.id }}/edit" class="muted" style="font-size: 12px;">edit</a>
       </div>
-      <div class="tile">
-        <h3>Slack Source</h3>
-        <form method="post" action="/sources/slack/ui_update">
-          <div class="checkbox-row">
-            <input type="checkbox" name="enabled" {% if slack_source and slack_source.enabled %}checked{% endif %} />
-            <label>Enabled</label>
-          </div>
-          <label>Poll Interval (seconds)</label>
-          <input type="number" name="poll_interval_seconds" min="1" value="{{ slack_source.poll_interval_seconds if slack_source else 2 }}" />
-          <label>Channels (auto-managed)</label>
-          <input type="text" name="channels" value="{{ slack_channels }}" readonly />
-          <button type="submit">Update Slack Source</button>
-        </form>
-      </div>
+      {% set sprint_id = current_sprint.id %}
+      {% include "_sprint_tickets_table.html" %}
     </div>
+    {% else %}
+    <div class="tile wide">
+      <h3>No Active Sprint</h3>
+      <p class="muted">Create a sprint to start tracking work.</p>
+      <a href="/ui/sprints/create">Create Sprint</a>
+    </div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}
