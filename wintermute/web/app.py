@@ -44,6 +44,7 @@ from wintermute.runner import (
     is_session_running,
     parse_ssh_options,
     prepare_issue_branch,
+    prepare_local_ticket_branch,
     prepare_ticket_branch,
     send_input,
     set_codex_trust,
@@ -2702,8 +2703,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         )
             if is_codex_command(agent.command) and agent.trust_level:
                 set_codex_trust(base_spec, repo_path, agent.trust_level)
+            repo_mode = project.repo_mode or "mirror"
             if issue_number is not None:
                 branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
+            elif repo_mode == "local":
+                branch_name = prepare_local_ticket_branch(base_spec, repo_path, ticket_id)
             else:
                 branch_name = prepare_ticket_branch(base_spec, repo_path, ticket_id)
         except Exception as exc:

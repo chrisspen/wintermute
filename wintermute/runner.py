@@ -233,19 +233,27 @@ def ensure_repo(
 ) -> Optional[str]:
     """Ensure the repo exists on the VM. Repo config comes from Project."""
     logger = logging.getLogger(__name__)
-    repo_path = repo_path or _session_repo_path(project, session_id, user=spec.user)
     repo_mode = project.repo_mode or "mirror"
+    # For local mode, always compute the path from project.id and user
+    if repo_mode == "local":
+        repo_path = _session_repo_path(project, session_id, user=spec.user)
+    else:
+        repo_path = repo_path or _session_repo_path(project, session_id, user=spec.user)
     if repo_mode == "local":
         if not repo_path:
             return None
-        # Create the directory if it doesn't exist
-        mkdir_cmd = f"mkdir -p {shlex.quote(repo_path)}"
-        logger.info("Local repo mkdir command: %s", mkdir_cmd)
-        result = _run_ssh_script(spec, f"{mkdir_cmd}\n", timeout=30)
+        # Create the directory and initialize as git repo if needed
+        init_script = (
+            f"mkdir -p {shlex.quote(repo_path)} && "
+            f"cd {shlex.quote(repo_path)} && "
+            f"if [ ! -d .git ]; then git init && git commit --allow-empty -m 'Initial commit'; fi"
+        )
+        logger.info("Local repo init command: %s", init_script)
+        result = _run_ssh_script(spec, f"{init_script}\n", timeout=30)
         if result.returncode != 0:
             stderr = _stderr_text(result.stderr).strip()
-            logger.error("Local repo mkdir failed: %s", stderr or "unknown error")
-            raise RuntimeError(f"Failed to create local repo path: {repo_path}")
+            logger.error("Local repo init failed: %s", stderr or "unknown error")
+            raise RuntimeError(f"Failed to initialize local repo: {repo_path}")
         return repo_path
     if repo_mode == "mirror":
         if not repo_path:
@@ -419,6 +427,31 @@ def prepare_ticket_branch(spec: SSHSpec, repo_path: str, ticket_id: str) -> str:
         stderr = _stderr_text(result.stderr).strip()
         logger.error("Branch prep failed: %s", stderr or "unknown error")
         raise RuntimeError(stderr or "Branch prep failed")
+    return branch
+
+
+def prepare_local_ticket_branch(spec: SSHSpec, repo_path: str, ticket_id: str) -> str:
+    """Prepare a ticket branch for a local repo (no remote origin)."""
+    logger = logging.getLogger(__name__)
+    safe_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")
+    short_id = safe_id[:10] if safe_id else "ticket"
+    branch = f"ticket-{short_id}"
+    cmd = (
+        "set -e; cd {repo}; "
+        "if git show-ref --verify --quiet refs/heads/{branch}; then "
+        "  git checkout {branch}; "
+        "else "
+        "  git checkout -b {branch}; "
+        "fi"
+    ).format(
+        repo=shlex.quote(repo_path),
+        branch=shlex.quote(branch),
+    )
+    result = _run_ssh_script(spec, f"{cmd}\n", timeout=30)
+    if result.returncode != 0:
+        stderr = _stderr_text(result.stderr).strip()
+        logger.error("Local branch prep failed: %s", stderr or "unknown error")
+        raise RuntimeError(stderr or "Local branch prep failed")
     return branch
 
 

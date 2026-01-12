@@ -1499,6 +1499,20 @@ class Database:
         repo_mode = project.repo_mode or "mirror"
         repo_path = project.repo_path
 
+        def _to_record(row: RepoResourceModel) -> RepoResourceRecord:
+            return RepoResourceRecord(
+                id=row.id,
+                project_id=row.project_id,
+                agent_id=row.agent_id,
+                repo_mode=row.repo_mode,
+                path=row.path,
+                status=row.status,
+                session_id=row.session_id,
+                last_used_at=row.last_used_at,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+
         with self.session() as session:
             rows = session.execute(
                 select(RepoResourceModel)
@@ -1528,24 +1542,53 @@ class Database:
                     existing.last_used_at = now
                     existing.updated_at = now
                     session.flush()
-                    return self.get_repo_resource(existing.id), None
-                resource_id = str(uuid.uuid4())
-                session.add(
-                    RepoResourceModel(
-                        id=resource_id,
-                        project_id=project.id,
-                        agent_id=agent_id,
-                        repo_mode=repo_mode,
-                        path=repo_path,
-                        status="in_use",
-                        session_id=session_id,
-                        last_used_at=now,
-                        created_at=now,
-                        updated_at=now,
-                    )
+                    return _to_record(existing), None
+                new_resource = RepoResourceModel(
+                    id=str(uuid.uuid4()),
+                    project_id=project.id,
+                    agent_id=agent_id,
+                    repo_mode=repo_mode,
+                    path=repo_path,
+                    status="in_use",
+                    session_id=session_id,
+                    last_used_at=now,
+                    created_at=now,
+                    updated_at=now,
                 )
+                session.add(new_resource)
                 session.flush()
-                return self.get_repo_resource(resource_id), None
+                return _to_record(new_resource), None
+
+            if repo_mode == "local":
+                # Local mode: path is /home/<user>/git/<project-id> but we don't know user here
+                # Use a placeholder path that will be resolved by runner.ensure_repo
+                local_path = f"local:{project.id}"
+                existing = next((row for row in rows if row.path == local_path), None)
+                if existing:
+                    if existing.status == "in_use":
+                        return None, "local repo already in use"
+                    existing.status = "in_use"
+                    existing.session_id = session_id
+                    existing.agent_id = agent_id
+                    existing.last_used_at = now
+                    existing.updated_at = now
+                    session.flush()
+                    return _to_record(existing), None
+                new_resource = RepoResourceModel(
+                    id=str(uuid.uuid4()),
+                    project_id=project.id,
+                    agent_id=agent_id,
+                    repo_mode=repo_mode,
+                    path=local_path,
+                    status="in_use",
+                    session_id=session_id,
+                    last_used_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+                session.add(new_resource)
+                session.flush()
+                return _to_record(new_resource), None
 
             available = [row for row in rows if row.status != "in_use"]
             if available:
@@ -1556,7 +1599,7 @@ class Database:
                 row.last_used_at = now
                 row.updated_at = now
                 session.flush()
-                return self.get_repo_resource(row.id), None
+                return _to_record(row), None
             if len(rows) >= max(project.max_repo_resources, 1):
                 return None, "repo resource limit reached"
             if not repo_path:
@@ -1565,23 +1608,21 @@ class Database:
             if not safe_suffix:
                 safe_suffix = "session"
             path = f"{repo_path}-{safe_suffix}"
-            resource_id = str(uuid.uuid4())
-            session.add(
-                RepoResourceModel(
-                    id=resource_id,
-                    project_id=project.id,
-                    agent_id=agent_id,
-                    repo_mode=repo_mode,
-                    path=path,
-                    status="in_use",
-                    session_id=session_id,
-                    last_used_at=now,
-                    created_at=now,
-                    updated_at=now,
-                )
+            new_resource = RepoResourceModel(
+                id=str(uuid.uuid4()),
+                project_id=project.id,
+                agent_id=agent_id,
+                repo_mode=repo_mode,
+                path=path,
+                status="in_use",
+                session_id=session_id,
+                last_used_at=now,
+                created_at=now,
+                updated_at=now,
             )
+            session.add(new_resource)
             session.flush()
-            return self.get_repo_resource(resource_id), None
+            return _to_record(new_resource), None
 
     def release_repo_resource_for_session(self, session_id: str) -> None:
         now = utc_now()
