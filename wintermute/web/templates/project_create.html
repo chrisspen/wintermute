@@ -19,6 +19,7 @@
         <select name="repo_mode" id="repo-mode">
           <option value="mirror" selected>mirror</option>
           <option value="clone">clone</option>
+          <option value="local">local</option>
         </select>
         <p class="muted" id="repo-mode-help" style="font-size: 12px; margin-top: 4px; margin-left: 18px;">Uses existing repo at repo_path. All sessions share the same directory.</p>
         <label>Repo Path (optional)</label>
@@ -58,7 +59,8 @@
   var repoModeHelp = document.getElementById('repo-mode-help');
   var helpText = {
     mirror: 'Uses existing repo at repo_path. All sessions share the same directory.',
-    clone: 'Clones repo from repo_url to repo_path. Each session gets its own copy.'
+    clone: 'Clones repo from repo_url to repo_path. Each session gets its own copy.',
+    local: 'Creates empty directory at /home/<user>/git/<project-id>. No repo_path or repo_url needed.'
   };
   repoModeSelect.addEventListener('change', function() {
     repoModeHelp.textContent = helpText[repoModeSelect.value] || '';

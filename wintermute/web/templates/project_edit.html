@@ -27,8 +27,9 @@
           <select name="repo_mode" id="repo-mode">
             <option value="mirror" {% if project.repo_mode == 'mirror' or not project.repo_mode %}selected{% endif %}>mirror</option>
             <option value="clone" {% if project.repo_mode == 'clone' %}selected{% endif %}>clone</option>
+            <option value="local" {% if project.repo_mode == 'local' %}selected{% endif %}>local</option>
           </select>
-          <p class="muted" id="repo-mode-help" style="font-size: 12px; margin-top: 4px; margin-left: 18px;">{% if project.repo_mode == 'clone' %}Clones repo from repo_url to repo_path. Each session gets its own copy.{% else %}Uses existing repo at repo_path. All sessions share the same directory.{% endif %}</p>
+          <p class="muted" id="repo-mode-help" style="font-size: 12px; margin-top: 4px; margin-left: 18px;">{% if project.repo_mode == 'clone' %}Clones repo from repo_url to repo_path. Each session gets its own copy.{% elif project.repo_mode == 'local' %}Creates empty directory at /home/<user>/git/<project-id>. No repo_path or repo_url needed.{% else %}Uses existing repo at repo_path. All sessions share the same directory.{% endif %}</p>
         </div>
         <div class="field-group">
           <label>Repo Path</label>
@@ -165,7 +166,8 @@
   var repoModeHelp = document.getElementById('repo-mode-help');
   var helpText = {
     mirror: 'Uses existing repo at repo_path. All sessions share the same directory.',
-    clone: 'Clones repo from repo_url to repo_path. Each session gets its own copy.'
+    clone: 'Clones repo from repo_url to repo_path. Each session gets its own copy.',
+    local: 'Creates empty directory at /home/<user>/git/<project-id>. No repo_path or repo_url needed.'
   };
   repoModeSelect.addEventListener('change', function() {
     repoModeHelp.textContent = helpText[repoModeSelect.value] || '';

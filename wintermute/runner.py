@@ -206,11 +206,15 @@ def _stdout_text(value: object) -> str:
     return str(value)
 
 
-def _session_repo_path(project: ProjectRecord, session_id: Optional[str]) -> Optional[str]:
+def _session_repo_path(project: ProjectRecord, session_id: Optional[str], user: str = "root") -> Optional[str]:
     """Compute the repo path for a session. Repo config comes from Project."""
+    repo_mode = project.repo_mode or "mirror"
+    if repo_mode == "local":
+        # Local mode: /home/<user>/git/<project-id>
+        home = f"/home/{user}" if user != "root" else "/root"
+        return f"{home}/git/{project.id}"
     if not project.repo_path:
         return None
-    repo_mode = project.repo_mode or "mirror"
     if repo_mode != "clone":
         return project.repo_path
     if not session_id:
@@ -229,8 +233,20 @@ def ensure_repo(
 ) -> Optional[str]:
     """Ensure the repo exists on the VM. Repo config comes from Project."""
     logger = logging.getLogger(__name__)
-    repo_path = repo_path or _session_repo_path(project, session_id)
+    repo_path = repo_path or _session_repo_path(project, session_id, user=spec.user)
     repo_mode = project.repo_mode or "mirror"
+    if repo_mode == "local":
+        if not repo_path:
+            return None
+        # Create the directory if it doesn't exist
+        mkdir_cmd = f"mkdir -p {shlex.quote(repo_path)}"
+        logger.info("Local repo mkdir command: %s", mkdir_cmd)
+        result = _run_ssh_script(spec, f"{mkdir_cmd}\n", timeout=30)
+        if result.returncode != 0:
+            stderr = _stderr_text(result.stderr).strip()
+            logger.error("Local repo mkdir failed: %s", stderr or "unknown error")
+            raise RuntimeError(f"Failed to create local repo path: {repo_path}")
+        return repo_path
     if repo_mode == "mirror":
         if not repo_path:
             return None

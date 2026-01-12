@@ -133,7 +133,7 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
     },
     "projects": {
-        "default": ["name", "slug", "slack_channel_id"],
+        "default": ["name", "slug", "slack_channel_id", "actions"],
         "columns": [
             {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
             {"key": "name", "label": "Project"},
@@ -143,6 +143,7 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "prompt_template", "label": "Prompt Template"},
             {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
             {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "actions", "label": "Actions"},
         ],
     },
     "vms": {
@@ -616,6 +617,7 @@ def _build_project_rows(projects: list[Any]) -> list[dict[str, Any]]:
             "prompt_template": {"text": _truncate_text(project.prompt_template, 80)},
             "created_at": {"text": _format_timestamp(project.created_at)},
             "updated_at": {"text": _format_timestamp(project.updated_at)},
+            "actions": {"text": "Create Ticket", "href": f"/ui/tickets/create?project_id={project.id}"},
         }
         rows.append({"id": project.id, "cells": cells})
     return rows
@@ -4885,6 +4887,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = request.query_params.get("return_to", "/ui/tickets")
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
+        selected_project_id = request.query_params.get("project_id", "")
         return _render_template(
             request,
             "ticket_create.html",
@@ -4897,6 +4900,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "sprints": sprints,
                 "users": users,
                 "return_to": return_to,
+                "selected_project_id": selected_project_id,
             },
         )
 
