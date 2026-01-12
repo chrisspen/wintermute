@@ -223,6 +223,7 @@
               {% if comment.sent %}[sent]{% else %}[unsent]{% endif %}
             </span>
             <a href="/ui/comments/{{ comment.id }}/edit" class="inline-link small-link">edit</a>
+            <a href="#" class="inline-link small-link delete-comment" data-comment-id="{{ comment.id }}">delete</a>
           </div>
           <div class="comment-body">{{ comment.rendered_body | safe }}</div>
         </li>
@@ -325,14 +326,20 @@
         comment.approved ? "[approved]" : "[pending]",
         comment.sent ? "[sent]" : "[unsent]",
       ].join(" ");
-      const link = document.createElement("a");
-      link.href = `/ui/comments/${comment.id}/edit`;
-      link.textContent = "edit";
-      link.classList.add("inline-link", "small-link");
+      const editLink = document.createElement("a");
+      editLink.href = `/ui/comments/${comment.id}/edit`;
+      editLink.textContent = "edit";
+      editLink.classList.add("inline-link", "small-link");
+      const deleteLink = document.createElement("a");
+      deleteLink.href = "#";
+      deleteLink.textContent = "delete";
+      deleteLink.classList.add("inline-link", "small-link", "delete-comment");
+      deleteLink.dataset.commentId = comment.id;
       meta.appendChild(author);
       meta.appendChild(timestamp);
       meta.appendChild(flags);
-      meta.appendChild(link);
+      meta.appendChild(editLink);
+      meta.appendChild(deleteLink);
       const body = document.createElement("div");
       body.classList.add("comment-body");
       body.innerHTML = comment.rendered_body || "";
@@ -456,26 +463,34 @@
       });
     }
 
+    const copyToClipboard = (text) => {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+    };
+
     if (logCopyBtn && logTextEl) {
-      logCopyBtn.addEventListener("click", async () => {
+      logCopyBtn.addEventListener("click", () => {
         const text = (logTextEl.textContent || "").trim();
         if (!text) return;
-        try {
-          await navigator.clipboard.writeText(text);
-        } catch (err) {
-          window.prompt("Copy log command:", text);
-        }
+        copyToClipboard(text);
       });
     }
+
     if (repoCopyBtn && repoPathEl) {
-      repoCopyBtn.addEventListener("click", async () => {
+      repoCopyBtn.addEventListener("click", () => {
         const text = (repoPathEl.textContent || "").trim();
         if (!text || text === "none") return;
-        try {
-          await navigator.clipboard.writeText(text);
-        } catch (err) {
-          window.prompt("Copy repo path:", text);
-        }
+        copyToClipboard(text);
       });
     }
 
@@ -562,6 +577,37 @@
         }
       });
     }
+
+    // Handle comment deletion
+    document.addEventListener("click", async (event) => {
+      const deleteLink = event.target.closest(".delete-comment");
+      if (!deleteLink) return;
+      event.preventDefault();
+      const commentId = deleteLink.dataset.commentId;
+      if (!commentId) return;
+      const response = await fetch(`/comments/${encodeURIComponent(commentId)}/delete`, {
+        method: "POST",
+      });
+      if (response.ok || response.status === 303) {
+        const commentEntry = deleteLink.closest(".comment-entry");
+        if (commentEntry) {
+          commentEntry.style.transition = "opacity 1s ease-out";
+          commentEntry.style.opacity = "0";
+          setTimeout(() => {
+            commentEntry.remove();
+            // Show empty state if no comments left
+            if (listEl && !listEl.querySelector(".comment-entry")) {
+              const emptyItem = document.createElement("li");
+              emptyItem.classList.add("muted");
+              emptyItem.textContent = "No comments yet";
+              listEl.appendChild(emptyItem);
+            }
+          }, 1000);
+        }
+      } else {
+        alert("Failed to delete comment");
+      }
+    });
   })();
 </script>
 {% endblock %}

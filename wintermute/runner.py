@@ -396,8 +396,7 @@ def prepare_issue_branch(spec: SSHSpec, repo_path: str, issue_number: int) -> st
 def prepare_ticket_branch(spec: SSHSpec, repo_path: str, ticket_id: str) -> str:
     logger = logging.getLogger(__name__)
     safe_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")
-    short_id = safe_id[:10] if safe_id else "ticket"
-    branch = f"ticket-{short_id}"
+    branch = f"ticket-{safe_id}" if safe_id else "ticket"
     cmd = (
         "set -e; cd {repo}; "
         "git fetch origin --prune; "
@@ -434,8 +433,7 @@ def prepare_local_ticket_branch(spec: SSHSpec, repo_path: str, ticket_id: str) -
     """Prepare a ticket branch for a local repo (no remote origin)."""
     logger = logging.getLogger(__name__)
     safe_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")
-    short_id = safe_id[:10] if safe_id else "ticket"
-    branch = f"ticket-{short_id}"
+    branch = f"ticket-{safe_id}" if safe_id else "ticket"
     cmd = (
         "set -e; cd {repo}; "
         "if git show-ref --verify --quiet refs/heads/{branch}; then "

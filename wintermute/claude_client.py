@@ -66,10 +66,15 @@ def _build_claude_shell(agent: AgentRecord, cwd: str) -> str:
     cmd = agent.command.strip() if agent.command else "claude"
 
     # Core flags for persistent streaming mode
-    args = [cmd, "-p", "--input-format", "stream-json", "--output-format", "stream-json"]
-
-    if cwd:
-        args.extend(["--cwd", cwd])
+    # Note: cwd is handled by cd'ing to the directory before running claude
+    # --verbose is required when using --output-format=stream-json with -p
+    # --dangerously-skip-permissions allows full access within the repo
+    args = [
+        cmd, "-p", "--verbose",
+        "--dangerously-skip-permissions",
+        "--input-format", "stream-json",
+        "--output-format", "stream-json",
+    ]
 
     # Parse additional config from agent.mcp_config
     if agent.mcp_config:
@@ -115,9 +120,11 @@ def _start_claude_process(spec: SSHSpec, agent: AgentRecord, cwd: str) -> subpro
             spec.user,
             cwd,
         )
-        logger.info("Claude local command: %s", shell_cmd)
+        # cd to cwd first since we removed --cwd flag
+        full_cmd = f"cd {shlex.quote(cwd)} && {shell_cmd}"
+        logger.info("Claude local command: %s", full_cmd)
         return subprocess.Popen(
-            ["bash", "-lc", shell_cmd],
+            ["bash", "-lc", full_cmd],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -216,7 +223,8 @@ def _read_stream_response(
     last_activity = time.time()
     result_received = False
 
-    while time.time() < deadline:
+    done = False
+    while time.time() < deadline and not done:
         remaining = max(deadline - time.time(), 0.1)
         events = selector.select(timeout=remaining)
 
@@ -289,6 +297,7 @@ def _read_stream_response(
                         if result_text and result_text not in texts:
                             texts.append(result_text)
                     # Result message means the response is complete
+                    done = True
                     break
 
     selector.close()
