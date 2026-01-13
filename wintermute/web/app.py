@@ -3174,6 +3174,22 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     "edit_url": edit_url,
                 }
             )
+        # Compute external repo URL from first issue source
+        external_repo_url = None
+        external_repo_provider = None
+        if issue_sources:
+            first_source = issue_sources[0]
+            if first_source.provider == "github":
+                external_repo_url = f"https://github.com/{first_source.repo}"
+                external_repo_provider = "github"
+            elif first_source.provider == "gitlab":
+                gitlab_base = "https://gitlab.com"
+                if first_source.token_id:
+                    token = database.get_remote_token(first_source.token_id)
+                    if token and token.base_url:
+                        gitlab_base = token.base_url.rstrip("/")
+                external_repo_url = f"{gitlab_base}/{first_source.repo}"
+                external_repo_provider = "gitlab"
         return _render_template(
             request,
             "project_edit.html",
@@ -3187,6 +3203,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "github_tokens": github_tokens,
                 "gitlab_tokens": gitlab_tokens,
                 "agents": agents,
+                "external_repo_url": external_repo_url,
+                "external_repo_provider": external_repo_provider,
             },
         )
 
