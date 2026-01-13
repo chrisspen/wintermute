@@ -132,6 +132,10 @@
           </select>
         </div>
         <div class="field-group">
+          <label>Created By</label>
+          <span class="inline-value">{% if created_by_user %}{{ created_by_user.username }}{% else %}(unknown){% endif %}</span>
+        </div>
+        <div class="field-group">
           <label>Sprint</label>
           <select name="sprint_id">
             <option value="">(none)</option>

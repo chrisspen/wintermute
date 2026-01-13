@@ -121,6 +121,7 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "project_id", "label": "Project"},
             {"key": "agent_id", "label": "Agent"},
             {"key": "assigned_to", "label": "Assignee"},
+            {"key": "created_by_id", "label": "Created By"},
             {"key": "estimate", "label": "Estimate"},
             {"key": "status", "label": "Status"},
             {"key": "auto_start", "label": "Auto Start"},
@@ -569,12 +570,17 @@ def _safe_return_to(request: Request, fallback: str) -> str:
 
 
 def _build_ticket_rows(
-    tickets: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]
+    tickets: list[Any],
+    project_lookup: dict[str, str],
+    agent_lookup: dict[str, str],
+    user_lookup: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    user_lookup = user_lookup or {}
     for ticket in tickets:
         project_name = project_lookup.get(ticket.project_id, ticket.project_id)
         agent_name = agent_lookup.get(ticket.agent_id, ticket.agent_id) if ticket.agent_id else None
+        created_by_name = user_lookup.get(ticket.created_by_id) if ticket.created_by_id else None
         cells = {
             "id": {"text": _display_value(ticket.id)},
             "title": {"text": _display_value(ticket.title), "href": f"/ui/tickets/{ticket.id}/edit"},
@@ -587,6 +593,7 @@ def _build_ticket_rows(
                 "href": f"/ui/agents/{ticket.agent_id}/edit" if ticket.agent_id else None,
             },
             "assigned_to": {"text": _display_value(ticket.assigned_to)},
+            "created_by_id": {"text": _display_value(created_by_name)},
             "estimate": {"text": _display_value(ticket.estimate)},
             "status": {"text": _display_value(ticket.status)},
             "auto_start": {"text": "yes" if ticket.auto_start else "no"},
@@ -3305,6 +3312,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/tickets"
         if not project_id or not title:
             raise HTTPException(status_code=400, detail="Missing project or title")
+        user_record = database.get_user(user)
+        created_by_id = user_record.id if user_record else None
         database.insert_ticket(
             ticket_id=str(uuid.uuid4()),
             project_id=project_id,
@@ -3321,6 +3330,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             priority=priority,
             hours=hours,
             story_points=story_points,
+            created_by_id=created_by_id,
         )
         return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
 
@@ -3412,6 +3422,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             for row in comment_rows
         ]
         last_comment_ts = comment_rows[-1].created_at if comment_rows else None
+        created_by_user = database.get_user_by_id(ticket.created_by_id) if ticket.created_by_id else None
         return _render_template(
             request,
             "ticket_edit.html",
@@ -3443,6 +3454,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "source_record": source_record,
                 "source_label": source_label,
                 "source_href": source_href,
+                "created_by_user": created_by_user,
             },
         )
 
@@ -4856,8 +4868,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         tickets = database.list_tickets()
         projects = database.list_projects()
         agents = database.list_agents()
+        users = database.list_users()
         project_lookup = {project.id: project.name for project in projects}
         agent_lookup = {agent.id: agent.name for agent in agents}
+        user_lookup = {u.id: u.username for u in users}
         growl_message = _growl_message(request.query_params.get("saved"))
         table_context = _build_table_context(
             database=database,
@@ -4868,7 +4882,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             description=None,
             create_label="Create Ticket",
             create_url="/ui/tickets/create?return_to=/ui/tickets",
-            rows=_build_ticket_rows(tickets, project_lookup, agent_lookup),
+            rows=_build_ticket_rows(tickets, project_lookup, agent_lookup, user_lookup),
             empty_message="No tickets yet.",
         )
         return _render_template(

@@ -85,6 +85,7 @@ The web admin console provides:
 - GitLab session output: `BLOCKER:` lines mark sessions blocked and move tickets to needs-feedback.
 - Approved public comments are auto-dispatched to GitLab by the comment dispatch source.
 - Standup scheduling (daily standup source) with time, timezone, and optional Slack channel; agents reply with `STANDUP:` lines.
+- Wintermute action commands: `WM:REASSIGN:<target>` and `WM:STATUS:<status>` for ticket management.
 - API tokens with CRUD permissions and optional env export (`WINTERMUTE_ADMIN_API_TOKEN`).
 - Admin API endpoints can restart web/supervisor (requires Admin update permission).
 - Relaunchers (`run_web.sh`, `run_supervisor.sh`) keep processes alive and restart on SIGTERM (exit 143).
@@ -93,6 +94,32 @@ The web admin console provides:
 - PID/status endpoint: `GET /api/admin/pids`.
 - Log tail endpoint: `GET /api/admin/logs?service=web|supervisor&lines=200`.
 - `.codex/token` stores `WINTERMUTE_ADMIN_API_TOKEN=<token>`; strip the prefix when sending the bearer token.
+
+## Agent output markers
+Agents can include special markers in their output to trigger Wintermute actions:
+
+### Comment markers
+- `PUBLIC:<text>` — Create a public comment pending approval (sent to source when approved)
+- `GITHUB:<text>` — Alias for PUBLIC: (GitHub-specific)
+- `GITLAB:<text>` — Alias for PUBLIC: (GitLab-specific)
+- `NOTE:<text>` — Create an internal note (not sent externally)
+- `BLOCKER:<text>` — Mark session as blocked, move ticket to needs-feedback
+- `STANDUP:<text>` — Reply to daily standup prompt
+
+### Wintermute action commands (WM:)
+- `WM:REASSIGN:creator` — Reassign ticket to the user who created it
+- `WM:REASSIGN:<username>` — Reassign ticket to a specific user by username
+- `WM:STATUS:open` — Set ticket status to open
+- `WM:STATUS:in-progress` — Set ticket status to in-progress
+- `WM:STATUS:needs-feedback` — Set ticket status to needs-feedback
+- `WM:STATUS:done` — Set ticket status to done
+
+Example: When an agent completes a task, it should include:
+```
+WM:STATUS:done
+WM:REASSIGN:creator
+```
+This marks the ticket as complete and reassigns it to the original requester for review.
 
 ## Tooling boundaries (safety by construction)
 - No “shell access” tool by default; filesystem access is via explicit allowlisted operations.

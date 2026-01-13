@@ -250,6 +250,7 @@ class TicketRecord:
     github_comments_json: Optional[str]
     github_comments_fetched_at: Optional[str]
     auto_start: bool
+    created_by_id: Optional[str]
     created_at: str
     updated_at: str
 
@@ -510,6 +511,7 @@ class TicketModel(Base):
     github_comments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     github_comments_fetched_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     auto_start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_by_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -2223,6 +2225,7 @@ class Database:
                 github_comments_json=row.github_comments_json,
                 github_comments_fetched_at=row.github_comments_fetched_at,
                 auto_start=bool(row.auto_start),
+                created_by_id=row.created_by_id,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -2349,6 +2352,7 @@ class Database:
                     github_comments_json=row.github_comments_json,
                     github_comments_fetched_at=row.github_comments_fetched_at,
                     auto_start=bool(row.auto_start),
+                    created_by_id=row.created_by_id,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
                 )
@@ -2378,6 +2382,7 @@ class Database:
                 github_comments_json=row.github_comments_json,
                 github_comments_fetched_at=row.github_comments_fetched_at,
                 auto_start=bool(row.auto_start),
+                created_by_id=row.created_by_id,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -2399,6 +2404,7 @@ class Database:
         story_points: Optional[float] = None,
         priority: Optional[str] = None,
         auto_start: bool = False,
+        created_by_id: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -2421,6 +2427,7 @@ class Database:
                     github_comments_json=None,
                     github_comments_fetched_at=None,
                     auto_start=1 if auto_start else 0,
+                    created_by_id=created_by_id,
                     created_at=now,
                     updated_at=now,
                 )
@@ -2756,6 +2763,7 @@ class Database:
                     github_comments_json=row.github_comments_json,
                     github_comments_fetched_at=row.github_comments_fetched_at,
                     auto_start=bool(row.auto_start),
+                    created_by_id=row.created_by_id,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
                 )
@@ -2797,6 +2805,7 @@ class Database:
                     github_comments_json=row.github_comments_json,
                     github_comments_fetched_at=row.github_comments_fetched_at,
                     auto_start=bool(row.auto_start),
+                    created_by_id=row.created_by_id,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
                 )

@@ -602,8 +602,9 @@ async def _run_gemini_session(
 async def _handle_session_markers(
     ctx: WorkItemContext, session: AgentSessionRecord, output: str
 ) -> None:
-    public_lines, note_lines, blocker_lines, standup_lines = _extract_marked_lines(output)
-    if not (public_lines or note_lines or blocker_lines or standup_lines):
+    logger = logging.getLogger(__name__)
+    public_lines, note_lines, blocker_lines, standup_lines, wm_lines = _extract_marked_lines(output)
+    if not (public_lines or note_lines or blocker_lines or standup_lines or wm_lines):
         return
     ticket_id = session.ticket_id
     agent = ctx.db.get_agent(session.agent_id)
@@ -686,7 +687,7 @@ async def _handle_session_markers(
                     },
                 )
             except Exception as exc:
-                logging.getLogger(__name__).warning("Slack blocker notify failed: %s", exc)
+                logger.warning("Slack blocker notify failed: %s", exc)
     if standup_lines:
         standup_source = ctx.db.get_task_source("standup")
         standup_channel = None
@@ -706,14 +707,87 @@ async def _handle_session_markers(
                     },
                 )
             except Exception as exc:
-                logging.getLogger(__name__).warning("Slack standup notify failed: %s", exc)
+                logger.warning("Slack standup notify failed: %s", exc)
+    # Process WM: action commands
+    if wm_lines and ticket_id:
+        ticket = ctx.db.get_ticket(ticket_id)
+        for line in wm_lines:
+            _process_wm_action(ctx, session, ticket, line, logger)
 
 
-def _extract_marked_lines(output: str) -> tuple[list[str], list[str], list[str], list[str]]:
+def _process_wm_action(
+    ctx: WorkItemContext,
+    session: AgentSessionRecord,
+    ticket: Any,
+    action_line: str,
+    logger: logging.Logger,
+) -> None:
+    """Process a WM: action command from agent output.
+
+    Supported actions:
+    - REASSIGN:<target> - Reassign ticket to user (target can be 'creator' or username)
+    - STATUS:<status> - Update ticket status (open, in-progress, needs-feedback, done)
+    """
+    if not ticket:
+        return
+    parts = action_line.split(":", 1)
+    if not parts:
+        return
+    action = parts[0].strip().upper()
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if action == "REASSIGN":
+        if not arg:
+            logger.warning("WM:REASSIGN missing target for ticket %s", ticket.id)
+            return
+        target = arg.lower()
+        assigned_to = None
+
+        if target == "creator":
+            # Reassign to ticket creator
+            if ticket.created_by_id:
+                creator = ctx.db.get_user_by_id(ticket.created_by_id)
+                if creator:
+                    assigned_to = f"user:{creator.id}"
+                    logger.info("WM:REASSIGN ticket %s to creator %s", ticket.id, creator.username)
+                else:
+                    logger.warning("WM:REASSIGN creator not found for ticket %s", ticket.id)
+            else:
+                logger.warning("WM:REASSIGN ticket %s has no creator", ticket.id)
+        else:
+            # Reassign to specific username
+            user = ctx.db.get_user(target)
+            if user:
+                assigned_to = f"user:{user.id}"
+                logger.info("WM:REASSIGN ticket %s to user %s", ticket.id, user.username)
+            else:
+                logger.warning("WM:REASSIGN user '%s' not found for ticket %s", target, ticket.id)
+
+        if assigned_to:
+            ctx.db.update_ticket(ticket.id, assigned_to=assigned_to)
+
+    elif action == "STATUS":
+        if not arg:
+            logger.warning("WM:STATUS missing value for ticket %s", ticket.id)
+            return
+        status = arg.lower()
+        valid_statuses = {"open", "in-progress", "needs-feedback", "done"}
+        if status not in valid_statuses:
+            logger.warning("WM:STATUS invalid status '%s' for ticket %s", status, ticket.id)
+            return
+        ctx.db.update_ticket(ticket.id, status=status)
+        logger.info("WM:STATUS ticket %s set to %s", ticket.id, status)
+
+    else:
+        logger.warning("Unknown WM action '%s' for ticket %s", action, ticket.id)
+
+
+def _extract_marked_lines(output: str) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     public_lines: list[str] = []
     note_lines: list[str] = []
     blocker_lines: list[str] = []
     standup_lines: list[str] = []
+    wm_lines: list[str] = []
     markers = [
         ("PUBLIC:", public_lines),
         ("GITHUB:", public_lines),
@@ -721,6 +795,7 @@ def _extract_marked_lines(output: str) -> tuple[list[str], list[str], list[str],
         ("NOTE:", note_lines),
         ("BLOCKER:", blocker_lines),
         ("STANDUP:", standup_lines),
+        ("WM:", wm_lines),
     ]
     for raw_line in output.splitlines():
         line = raw_line.strip()
@@ -733,7 +808,7 @@ def _extract_marked_lines(output: str) -> tuple[list[str], list[str], list[str],
                 continue
             bucket.append(line[idx + len(marker):].strip())
             break
-    return public_lines, note_lines, blocker_lines, standup_lines
+    return public_lines, note_lines, blocker_lines, standup_lines, wm_lines
 
 
 def _store_output_comments(

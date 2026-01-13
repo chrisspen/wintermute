@@ -138,8 +138,7 @@ class TestBuildClaudeShell(unittest.TestCase):
         self.assertIn("--input-format", shell)
         self.assertIn("stream-json", shell)
         self.assertIn("--output-format", shell)
-        self.assertIn("--cwd", shell)
-        self.assertIn("/tmp/test", shell)
+        # Note: cwd is now handled by cd'ing to the directory instead of --cwd flag
 
     def test_with_permission_mode(self):
         agent = _make_agent(mcp_config="--permission-mode bypassPermissions")
