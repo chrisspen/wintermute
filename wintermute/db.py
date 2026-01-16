@@ -129,6 +129,16 @@ class ProjectRecord:
     repo_mode: Optional[str]
     repo_path: Optional[str]
     repo_url: Optional[str]
+    # Issue source fields (merged from IssueSource)
+    provider: Optional[str]  # github, gitlab, or None
+    source_token_id: Optional[str]
+    source_agent_id: Optional[str]
+    source_repo: Optional[str]  # owner/repo format
+    issue_state: Optional[str]  # open, closed, all
+    issue_labels: list[str]
+    source_enabled: bool
+    auto_start: bool
+    poll_interval_seconds: int
     created_at: str
     updated_at: str
 
@@ -258,10 +268,11 @@ class TicketRecord:
 @dataclass(frozen=True)
 class CommentRecord:
     id: str
-    ticket_id: str
+    ticket_id: Optional[str]  # nullable for standalone agent session comments
     session_id: Optional[str]
     project_id: Optional[str]
     agent_id: Optional[str]
+    agent_session_id: Optional[str]  # for standalone agent sessions
     author: Optional[str]
     source_id: Optional[str]
     issue_number: Optional[int]
@@ -270,6 +281,7 @@ class CommentRecord:
     approved: bool
     sent: bool
     sent_at: Optional[str]
+    origin: Optional[str]  # web, slack, telegram, discord, etc.
     created_at: str
     updated_at: str
 
@@ -316,6 +328,7 @@ class AgentRecord:
     llm_base_url: Optional[str]
     llm_api_key: Optional[str]
     llm_model: Optional[str]
+    session_file_config_id: Optional[str]
     created_at: str
     updated_at: str
 
@@ -323,7 +336,7 @@ class AgentRecord:
 @dataclass(frozen=True)
 class AgentSessionRecord:
     id: str
-    project_id: str
+    project_id: Optional[str]  # nullable for standalone sessions
     agent_id: str
     ticket_id: Optional[str]
     status: str
@@ -342,6 +355,8 @@ class AgentSessionRecord:
     last_user_message: Optional[str]
     queued_user_messages: Optional[str]
     awaiting_response_offset: int
+    initial_prompt: Optional[str]
+    workspace_path: Optional[str]
     created_at: str
     updated_at: str
 
@@ -352,6 +367,51 @@ class AgentResponseRecord:
     agent_id: str
     pattern: str
     response: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class SessionFileConfigRecord:
+    id: str
+    name: str
+    description: Optional[str]
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class SessionFileDefinitionRecord:
+    id: str
+    config_id: str
+    filename: str
+    description: Optional[str]
+    default_content: str
+    required: bool
+    sync_on_exit: bool
+    sort_order: int
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class SessionFileRecord:
+    id: str
+    agent_id: str
+    definition_id: str
+    content: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ChannelRecord:
+    id: str
+    agent_id: str
+    type: str  # slack, telegram, discord, etc.
+    name: str  # e.g. claude/boreas
+    external_channel_id: Optional[str]
+    enabled: bool
     created_at: str
     updated_at: str
 
@@ -466,6 +526,16 @@ class ProjectModel(Base):
     repo_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     repo_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # Issue source fields (merged from IssueSource)
+    provider: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_token_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_repo: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    issue_state: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    issue_labels_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    source_enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    auto_start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -520,10 +590,11 @@ class CommentModel(Base):
     __tablename__ = "comments"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    ticket_id: Mapped[str] = mapped_column(String, nullable=False)
+    ticket_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # nullable for standalone sessions
     session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     project_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    agent_session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     author: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     issue_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -532,6 +603,7 @@ class CommentModel(Base):
     approved: Mapped[int] = mapped_column(Integer, nullable=False)
     sent: Mapped[int] = mapped_column(Integer, nullable=False)
     sent_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    origin: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # web, slack, telegram, etc.
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -637,6 +709,7 @@ class AgentModel(Base):
     llm_base_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     llm_api_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     llm_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    session_file_config_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -645,7 +718,7 @@ class AgentSessionModel(Base):
     __tablename__ = "agent_sessions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    project_id: Mapped[str] = mapped_column(String, nullable=False)
+    project_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # nullable for standalone sessions
     agent_id: Mapped[str] = mapped_column(String, nullable=False)
     ticket_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
@@ -664,6 +737,8 @@ class AgentSessionModel(Base):
     last_user_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     queued_user_messages: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     awaiting_response_offset: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    initial_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    workspace_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -675,6 +750,55 @@ class AgentResponseModel(Base):
     agent_id: Mapped[str] = mapped_column(String, nullable=False)
     pattern: Mapped[str] = mapped_column(Text, nullable=False)
     response: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class SessionFileConfigModel(Base):
+    __tablename__ = "session_file_configs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class SessionFileDefinitionModel(Base):
+    __tablename__ = "session_file_definitions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    config_id: Mapped[str] = mapped_column(String, nullable=False)
+    filename: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    default_content: Mapped[str] = mapped_column(Text, nullable=False)
+    required: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sync_on_exit: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class SessionFileModel(Base):
+    __tablename__ = "session_files"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String, nullable=False)
+    definition_id: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class ChannelModel(Base):
+    __tablename__ = "channels"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, nullable=False)  # slack, telegram, discord
+    name: Mapped[str] = mapped_column(String, nullable=False)  # e.g. claude/boreas
+    external_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -1280,63 +1404,49 @@ class Database:
         with self.session() as session:
             session.query(ApiTokenModel).filter(ApiTokenModel.id == token_id).delete()
 
+    def _project_record_from_row(self, row: ProjectModel) -> ProjectRecord:
+        """Helper to build ProjectRecord from a model row."""
+        return ProjectRecord(
+            id=row.id,
+            name=row.name,
+            slug=row.slug,
+            slack_channel_id=row.slack_channel_id,
+            prompt_template=row.prompt_template,
+            max_repo_resources=row.max_repo_resources,
+            repo_mode=row.repo_mode,
+            repo_path=row.repo_path,
+            repo_url=row.repo_url,
+            provider=row.provider,
+            source_token_id=row.source_token_id,
+            source_agent_id=row.source_agent_id,
+            source_repo=row.source_repo,
+            issue_state=row.issue_state,
+            issue_labels=json_loads(row.issue_labels_json) or [],
+            source_enabled=bool(row.source_enabled),
+            auto_start=bool(row.auto_start),
+            poll_interval_seconds=row.poll_interval_seconds,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
     def list_projects(self) -> list[ProjectRecord]:
         with self.session() as session:
             rows = session.execute(select(ProjectModel).order_by(ProjectModel.name)).scalars().all()
-        return [
-            ProjectRecord(
-                id=row.id,
-                name=row.name,
-                slug=row.slug,
-                slack_channel_id=row.slack_channel_id,
-                prompt_template=row.prompt_template,
-                max_repo_resources=row.max_repo_resources,
-                repo_mode=row.repo_mode,
-                repo_path=row.repo_path,
-                repo_url=row.repo_url,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
-            for row in rows
-        ]
+        return [self._project_record_from_row(row) for row in rows]
 
     def get_project(self, project_id: str) -> Optional[ProjectRecord]:
         with self.session() as session:
             row = session.get(ProjectModel, project_id)
         if not row:
             return None
-        return ProjectRecord(
-            id=row.id,
-            name=row.name,
-            slug=row.slug,
-            slack_channel_id=row.slack_channel_id,
-            prompt_template=row.prompt_template,
-            max_repo_resources=row.max_repo_resources,
-            repo_mode=row.repo_mode,
-            repo_path=row.repo_path,
-            repo_url=row.repo_url,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return self._project_record_from_row(row)
 
     def get_project_by_slug(self, slug: str) -> Optional[ProjectRecord]:
         with self.session() as session:
             row = session.execute(select(ProjectModel).where(ProjectModel.slug == slug)).scalar_one_or_none()
         if not row:
             return None
-        return ProjectRecord(
-            id=row.id,
-            name=row.name,
-            slug=row.slug,
-            slack_channel_id=row.slack_channel_id,
-            prompt_template=row.prompt_template,
-            max_repo_resources=row.max_repo_resources,
-            repo_mode=row.repo_mode,
-            repo_path=row.repo_path,
-            repo_url=row.repo_url,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
+        return self._project_record_from_row(row)
 
     def insert_project(
         self,
@@ -1349,6 +1459,15 @@ class Database:
         repo_mode: Optional[str] = None,
         repo_path: Optional[str] = None,
         repo_url: Optional[str] = None,
+        provider: Optional[str] = None,
+        source_token_id: Optional[str] = None,
+        source_agent_id: Optional[str] = None,
+        source_repo: Optional[str] = None,
+        issue_state: Optional[str] = None,
+        issue_labels: Optional[list[str]] = None,
+        source_enabled: bool = False,
+        auto_start: bool = False,
+        poll_interval_seconds: int = 300,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -1363,6 +1482,15 @@ class Database:
                     repo_mode=repo_mode,
                     repo_path=repo_path,
                     repo_url=repo_url,
+                    provider=provider,
+                    source_token_id=source_token_id,
+                    source_agent_id=source_agent_id,
+                    source_repo=source_repo,
+                    issue_state=issue_state,
+                    issue_labels_json=json_dumps(issue_labels or []),
+                    source_enabled=1 if source_enabled else 0,
+                    auto_start=1 if auto_start else 0,
+                    poll_interval_seconds=poll_interval_seconds,
                     created_at=now,
                     updated_at=now,
                 )
@@ -1380,6 +1508,15 @@ class Database:
         repo_mode: Optional[str] = None,
         repo_path: Optional[str] = None,
         repo_url: Optional[str] = None,
+        provider: Optional[str] = None,
+        source_token_id: Optional[str] = None,
+        source_agent_id: Optional[str] = None,
+        source_repo: Optional[str] = None,
+        issue_state: Optional[str] = None,
+        issue_labels: Optional[list[str]] = None,
+        source_enabled: Optional[bool] = None,
+        auto_start: Optional[bool] = None,
+        poll_interval_seconds: Optional[int] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(ProjectModel, project_id)
@@ -1401,6 +1538,24 @@ class Database:
                 row.repo_path = repo_path
             if repo_url is not None:
                 row.repo_url = repo_url
+            if provider is not None:
+                row.provider = provider
+            if source_token_id is not None:
+                row.source_token_id = source_token_id
+            if source_agent_id is not None:
+                row.source_agent_id = source_agent_id
+            if source_repo is not None:
+                row.source_repo = source_repo
+            if issue_state is not None:
+                row.issue_state = issue_state
+            if issue_labels is not None:
+                row.issue_labels_json = json_dumps(issue_labels)
+            if source_enabled is not None:
+                row.source_enabled = 1 if source_enabled else 0
+            if auto_start is not None:
+                row.auto_start = 1 if auto_start else 0
+            if poll_interval_seconds is not None:
+                row.poll_interval_seconds = poll_interval_seconds
             row.updated_at = utc_now()
 
     def delete_project(self, project_id: str) -> None:
@@ -2092,30 +2247,58 @@ class Database:
             session.query(IssueSourceModel).filter(IssueSourceModel.id == source_id).delete()
 
     def list_github_sources(self, project_id: Optional[str] = None) -> list[GitHubSourceRecord]:
-        sources = self.list_issue_sources(project_id=project_id, provider="github")
+        """List GitHub sources from projects with provider='github'."""
+        projects = self.list_projects()
         results: list[GitHubSourceRecord] = []
-        for source in sources:
-            owner, repo = _split_repo(source.repo)
+        for project in projects:
+            if project.provider != "github":
+                continue
+            if project_id and project.id != project_id:
+                continue
+            if not project.source_repo:
+                continue
+            owner, repo = _split_repo(project.source_repo)
             results.append(
                 GitHubSourceRecord(
-                    id=source.id,
-                    token_id=source.token_id,
-                    agent_id=source.agent_id,
-                    project_id=source.project_id,
+                    id=project.id,  # Project ID is now the source ID
+                    token_id=project.source_token_id,
+                    agent_id=project.source_agent_id,
+                    project_id=project.id,
                     owner=owner,
                     repo=repo,
-                    state=source.state,
-                    labels=source.labels,
-                    enabled=source.enabled,
-                    auto_start=source.auto_start,
-                    poll_interval_seconds=source.poll_interval_seconds,
-                    created_at=source.created_at,
-                    updated_at=source.updated_at,
+                    state=project.issue_state or "open",
+                    labels=project.issue_labels,
+                    enabled=project.source_enabled,
+                    auto_start=project.auto_start,
+                    poll_interval_seconds=project.poll_interval_seconds,
+                    created_at=project.created_at,
+                    updated_at=project.updated_at,
                 )
             )
         return results
 
     def get_github_source(self, source_id: str) -> Optional[GitHubSourceRecord]:
+        """Get GitHub source by ID. Checks projects first, then legacy issue_sources."""
+        # First try to find a project with this ID
+        project = self.get_project(source_id)
+        if project and project.provider == "github" and project.source_repo:
+            owner, repo = _split_repo(project.source_repo)
+            return GitHubSourceRecord(
+                id=project.id,
+                token_id=project.source_token_id,
+                agent_id=project.source_agent_id,
+                project_id=project.id,
+                owner=owner,
+                repo=repo,
+                state=project.issue_state or "open",
+                labels=project.issue_labels,
+                enabled=project.source_enabled,
+                auto_start=project.auto_start,
+                poll_interval_seconds=project.poll_interval_seconds,
+                created_at=project.created_at,
+                updated_at=project.updated_at,
+            )
+        # Fall back to legacy issue_sources table for backward compatibility
         source = self.get_issue_source(source_id)
         if not source or source.provider != "github":
             return None
@@ -2233,26 +2416,54 @@ class Database:
         ]
 
     def list_gitlab_sources(self, project_id: Optional[str] = None) -> list[GitLabSourceRecord]:
-        sources = self.list_issue_sources(project_id=project_id, provider="gitlab")
-        return [
-            GitLabSourceRecord(
-                id=source.id,
-                token_id=source.token_id,
-                agent_id=source.agent_id,
-                project_id=source.project_id,
-                project_path=source.repo,
-                state=source.state,
-                labels=source.labels,
-                enabled=source.enabled,
-                auto_start=source.auto_start,
-                poll_interval_seconds=source.poll_interval_seconds,
-                created_at=source.created_at,
-                updated_at=source.updated_at,
+        """List GitLab sources from projects with provider='gitlab'."""
+        projects = self.list_projects()
+        results: list[GitLabSourceRecord] = []
+        for project in projects:
+            if project.provider != "gitlab":
+                continue
+            if project_id and project.id != project_id:
+                continue
+            if not project.source_repo:
+                continue
+            results.append(
+                GitLabSourceRecord(
+                    id=project.id,  # Project ID is now the source ID
+                    token_id=project.source_token_id,
+                    agent_id=project.source_agent_id,
+                    project_id=project.id,
+                    project_path=project.source_repo,
+                    state=project.issue_state or "open",
+                    labels=project.issue_labels,
+                    enabled=project.source_enabled,
+                    auto_start=project.auto_start,
+                    poll_interval_seconds=project.poll_interval_seconds,
+                    created_at=project.created_at,
+                    updated_at=project.updated_at,
+                )
             )
-            for source in sources
-        ]
+        return results
 
     def get_gitlab_source(self, source_id: str) -> Optional[GitLabSourceRecord]:
+        """Get GitLab source by ID. Checks projects first, then legacy issue_sources."""
+        # First try to find a project with this ID
+        project = self.get_project(source_id)
+        if project and project.provider == "gitlab" and project.source_repo:
+            return GitLabSourceRecord(
+                id=project.id,
+                token_id=project.source_token_id,
+                agent_id=project.source_agent_id,
+                project_id=project.id,
+                project_path=project.source_repo,
+                state=project.issue_state or "open",
+                labels=project.issue_labels,
+                enabled=project.source_enabled,
+                auto_start=project.auto_start,
+                poll_interval_seconds=project.poll_interval_seconds,
+                created_at=project.created_at,
+                updated_at=project.updated_at,
+            )
+        # Fall back to legacy issue_sources table for backward compatibility
         source = self.get_issue_source(source_id)
         if not source or source.provider != "gitlab":
             return None
@@ -2812,12 +3023,16 @@ class Database:
                 for row in rows
             ]
 
-    def list_comments(self, ticket_id: Optional[str] = None) -> list[CommentRecord]:
+    def list_comments(
+        self, ticket_id: Optional[str] = None, agent_session_id: Optional[str] = None
+    ) -> list[CommentRecord]:
         with self.session() as session:
             stmt = select(CommentModel)
             if ticket_id:
                 stmt = stmt.where(CommentModel.ticket_id == ticket_id)
-            rows = session.execute(stmt.order_by(CommentModel.created_at.desc())).scalars().all()
+            if agent_session_id:
+                stmt = stmt.where(CommentModel.agent_session_id == agent_session_id)
+            rows = session.execute(stmt.order_by(CommentModel.created_at.asc())).scalars().all()
         return [
             CommentRecord(
                 id=row.id,
@@ -2825,6 +3040,7 @@ class Database:
                 session_id=row.session_id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                agent_session_id=getattr(row, "agent_session_id", None),
                 author=row.author,
                 source_id=row.source_id,
                 issue_number=row.issue_number,
@@ -2833,15 +3049,25 @@ class Database:
                 approved=bool(row.approved),
                 sent=bool(row.sent),
                 sent_at=row.sent_at,
+                origin=getattr(row, "origin", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
             for row in rows
         ]
 
-    def list_comments_since(self, ticket_id: str, since: Optional[str]) -> list[CommentRecord]:
+    def list_comments_since(
+        self,
+        ticket_id: Optional[str] = None,
+        agent_session_id: Optional[str] = None,
+        since: Optional[str] = None,
+    ) -> list[CommentRecord]:
         with self.session() as session:
-            stmt = select(CommentModel).where(CommentModel.ticket_id == ticket_id)
+            stmt = select(CommentModel)
+            if ticket_id:
+                stmt = stmt.where(CommentModel.ticket_id == ticket_id)
+            if agent_session_id:
+                stmt = stmt.where(CommentModel.agent_session_id == agent_session_id)
             if since:
                 stmt = stmt.where(CommentModel.created_at > since)
             rows = session.execute(stmt.order_by(CommentModel.created_at.asc())).scalars().all()
@@ -2852,6 +3078,7 @@ class Database:
                 session_id=row.session_id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                agent_session_id=getattr(row, "agent_session_id", None),
                 author=row.author,
                 source_id=row.source_id,
                 issue_number=row.issue_number,
@@ -2860,6 +3087,7 @@ class Database:
                 approved=bool(row.approved),
                 sent=bool(row.sent),
                 sent_at=row.sent_at,
+                origin=getattr(row, "origin", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -2877,6 +3105,7 @@ class Database:
             session_id=row.session_id,
             project_id=row.project_id,
             agent_id=row.agent_id,
+            agent_session_id=getattr(row, "agent_session_id", None),
             author=row.author,
             source_id=row.source_id,
             issue_number=row.issue_number,
@@ -2885,6 +3114,7 @@ class Database:
             approved=bool(row.approved),
             sent=bool(row.sent),
             sent_at=row.sent_at,
+            origin=getattr(row, "origin", None),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -2892,7 +3122,7 @@ class Database:
     def insert_comment(
         self,
         comment_id: str,
-        ticket_id: str,
+        ticket_id: Optional[str],
         session_id: Optional[str],
         project_id: Optional[str],
         agent_id: Optional[str],
@@ -2902,6 +3132,8 @@ class Database:
         body: str,
         public: bool,
         approved: bool = False,
+        agent_session_id: Optional[str] = None,
+        origin: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -2922,6 +3154,8 @@ class Database:
                     sent_at=None,
                     created_at=now,
                     updated_at=now,
+                    agent_session_id=agent_session_id,
+                    origin=origin,
                 )
             )
 
@@ -2985,6 +3219,8 @@ class Database:
                 sent_at=row.sent_at,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
+                agent_session_id=getattr(row, "agent_session_id", None),
+                origin=getattr(row, "origin", None),
             )
             for row in rows
         ]
@@ -3091,6 +3327,7 @@ class Database:
                 llm_base_url=row.llm_base_url,
                 llm_api_key=row.llm_api_key,
                 llm_model=row.llm_model,
+                session_file_config_id=row.session_file_config_id,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -3233,6 +3470,7 @@ class Database:
         llm_base_url: Optional[str] = None,
         llm_api_key: Optional[str] = None,
         llm_model: Optional[str] = None,
+        session_file_config_id: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -3266,6 +3504,8 @@ class Database:
                 row.llm_api_key = llm_api_key
             if llm_model is not None:
                 row.llm_model = llm_model
+            if session_file_config_id is not None:
+                row.session_file_config_id = session_file_config_id
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -3293,6 +3533,7 @@ class Database:
             llm_base_url=row.llm_base_url,
             llm_api_key=row.llm_api_key,
             llm_model=row.llm_model,
+            session_file_config_id=row.session_file_config_id,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3318,12 +3559,16 @@ class Database:
             llm_base_url=row.llm_base_url,
             llm_api_key=row.llm_api_key,
             llm_model=row.llm_model,
+            session_file_config_id=row.session_file_config_id,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
 
     def list_sessions(
-        self, project_id: Optional[str] = None, status: Optional[str] = None
+        self,
+        project_id: Optional[str] = None,
+        status: Optional[str] = None,
+        agent_id: Optional[str] = None,
     ) -> list[AgentSessionRecord]:
         with self.session() as session:
             stmt = select(AgentSessionModel)
@@ -3331,6 +3576,8 @@ class Database:
                 stmt = stmt.where(AgentSessionModel.project_id == project_id)
             if status:
                 stmt = stmt.where(AgentSessionModel.status == status)
+            if agent_id:
+                stmt = stmt.where(AgentSessionModel.agent_id == agent_id)
             rows = session.execute(stmt.order_by(AgentSessionModel.created_at.desc())).scalars().all()
         return [
             AgentSessionRecord(
@@ -3354,6 +3601,8 @@ class Database:
                 last_user_message=row.last_user_message,
                 queued_user_messages=row.queued_user_messages,
                 awaiting_response_offset=row.awaiting_response_offset,
+                initial_prompt=getattr(row, "initial_prompt", None),
+                workspace_path=getattr(row, "workspace_path", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             )
@@ -3394,6 +3643,8 @@ class Database:
             last_user_message=row.last_user_message,
             queued_user_messages=row.queued_user_messages,
             awaiting_response_offset=row.awaiting_response_offset,
+            initial_prompt=getattr(row, "initial_prompt", None),
+            workspace_path=getattr(row, "workspace_path", None),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3401,13 +3652,15 @@ class Database:
     def insert_session(
         self,
         session_id: str,
-        project_id: str,
+        project_id: Optional[str],
         agent_id: str,
         ticket_id: Optional[str],
         status: str,
         repo_path: str,
         thread_ts: Optional[str],
         mcp_conversation_id: Optional[str] = None,
+        initial_prompt: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -3432,6 +3685,8 @@ class Database:
                     last_user_message=None,
                     queued_user_messages=None,
                     awaiting_response_offset=0,
+                    initial_prompt=initial_prompt,
+                    workspace_path=workspace_path,
                     created_at=now,
                     updated_at=now,
                 )
@@ -3528,6 +3783,8 @@ class Database:
             last_user_message=row.last_user_message,
             queued_user_messages=row.queued_user_messages,
             awaiting_response_offset=row.awaiting_response_offset,
+            initial_prompt=getattr(row, "initial_prompt", None),
+            workspace_path=getattr(row, "workspace_path", None),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3558,6 +3815,8 @@ class Database:
             last_user_message=row.last_user_message,
             queued_user_messages=row.queued_user_messages,
             awaiting_response_offset=row.awaiting_response_offset,
+            initial_prompt=getattr(row, "initial_prompt", None),
+            workspace_path=getattr(row, "workspace_path", None),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3576,3 +3835,458 @@ class Database:
             last_error=row.last_error,
             last_traceback=row.last_traceback,
         )
+
+    # -------------------------------------------------------------------------
+    # Channel CRUD
+    # -------------------------------------------------------------------------
+
+    def list_channels(self, agent_id: Optional[str] = None) -> list[ChannelRecord]:
+        with self.session() as session:
+            query = select(ChannelModel)
+            if agent_id:
+                query = query.where(ChannelModel.agent_id == agent_id)
+            query = query.order_by(ChannelModel.created_at.asc())
+            rows = session.execute(query).scalars().all()
+        return [
+            ChannelRecord(
+                id=row.id,
+                agent_id=row.agent_id,
+                type=row.type,
+                name=row.name,
+                external_channel_id=row.external_channel_id,
+                enabled=bool(row.enabled),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_channel(self, channel_id: str) -> Optional[ChannelRecord]:
+        with self.session() as session:
+            row = session.get(ChannelModel, channel_id)
+        if not row:
+            return None
+        return ChannelRecord(
+            id=row.id,
+            agent_id=row.agent_id,
+            type=row.type,
+            name=row.name,
+            external_channel_id=row.external_channel_id,
+            enabled=bool(row.enabled),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def get_channel_by_external_id(
+        self, channel_type: str, external_channel_id: str
+    ) -> Optional[ChannelRecord]:
+        with self.session() as session:
+            row = (
+                session.execute(
+                    select(ChannelModel)
+                    .where(ChannelModel.type == channel_type)
+                    .where(ChannelModel.external_channel_id == external_channel_id)
+                )
+                .scalar_one_or_none()
+            )
+        if not row:
+            return None
+        return ChannelRecord(
+            id=row.id,
+            agent_id=row.agent_id,
+            type=row.type,
+            name=row.name,
+            external_channel_id=row.external_channel_id,
+            enabled=bool(row.enabled),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_channel(
+        self,
+        channel_id: str,
+        agent_id: str,
+        channel_type: str,
+        name: str,
+        external_channel_id: Optional[str] = None,
+        enabled: bool = True,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                ChannelModel(
+                    id=channel_id,
+                    agent_id=agent_id,
+                    type=channel_type,
+                    name=name,
+                    external_channel_id=external_channel_id,
+                    enabled=1 if enabled else 0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_channel(
+        self,
+        channel_id: str,
+        *,
+        name: Optional[str] = None,
+        external_channel_id: Optional[str] = None,
+        enabled: Optional[bool] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(ChannelModel, channel_id)
+            if not row:
+                return
+            if name is not None:
+                row.name = name
+            if external_channel_id is not None:
+                row.external_channel_id = external_channel_id
+            if enabled is not None:
+                row.enabled = 1 if enabled else 0
+            row.updated_at = utc_now()
+
+    def delete_channel(self, channel_id: str) -> None:
+        with self.session() as session:
+            session.query(ChannelModel).filter(ChannelModel.id == channel_id).delete()
+
+    # -------------------------------------------------------------------------
+    # SessionFileConfig CRUD
+    # -------------------------------------------------------------------------
+
+    def list_session_file_configs(self) -> list[SessionFileConfigRecord]:
+        with self.session() as session:
+            rows = (
+                session.execute(
+                    select(SessionFileConfigModel).order_by(
+                        SessionFileConfigModel.name.asc()
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        return [
+            SessionFileConfigRecord(
+                id=row.id,
+                name=row.name,
+                description=row.description,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_session_file_config(
+        self, config_id: str
+    ) -> Optional[SessionFileConfigRecord]:
+        with self.session() as session:
+            row = session.get(SessionFileConfigModel, config_id)
+        if not row:
+            return None
+        return SessionFileConfigRecord(
+            id=row.id,
+            name=row.name,
+            description=row.description,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_session_file_config(
+        self,
+        config_id: str,
+        name: str,
+        description: Optional[str] = None,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                SessionFileConfigModel(
+                    id=config_id,
+                    name=name,
+                    description=description,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_session_file_config(
+        self,
+        config_id: str,
+        *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(SessionFileConfigModel, config_id)
+            if not row:
+                return
+            if name is not None:
+                row.name = name
+            if description is not None:
+                row.description = description
+            row.updated_at = utc_now()
+
+    def delete_session_file_config(self, config_id: str) -> None:
+        with self.session() as session:
+            # Also delete definitions and files
+            session.query(SessionFileModel).filter(
+                SessionFileModel.definition_id.in_(
+                    select(SessionFileDefinitionModel.id).where(
+                        SessionFileDefinitionModel.config_id == config_id
+                    )
+                )
+            ).delete(synchronize_session=False)
+            session.query(SessionFileDefinitionModel).filter(
+                SessionFileDefinitionModel.config_id == config_id
+            ).delete()
+            session.query(SessionFileConfigModel).filter(
+                SessionFileConfigModel.id == config_id
+            ).delete()
+
+    # -------------------------------------------------------------------------
+    # SessionFileDefinition CRUD
+    # -------------------------------------------------------------------------
+
+    def list_session_file_definitions(
+        self, config_id: str
+    ) -> list[SessionFileDefinitionRecord]:
+        with self.session() as session:
+            rows = (
+                session.execute(
+                    select(SessionFileDefinitionModel)
+                    .where(SessionFileDefinitionModel.config_id == config_id)
+                    .order_by(SessionFileDefinitionModel.sort_order.asc())
+                )
+                .scalars()
+                .all()
+            )
+        return [
+            SessionFileDefinitionRecord(
+                id=row.id,
+                config_id=row.config_id,
+                filename=row.filename,
+                description=row.description,
+                default_content=row.default_content,
+                required=bool(row.required),
+                sync_on_exit=bool(row.sync_on_exit),
+                sort_order=row.sort_order,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_session_file_definition(
+        self, definition_id: str
+    ) -> Optional[SessionFileDefinitionRecord]:
+        with self.session() as session:
+            row = session.get(SessionFileDefinitionModel, definition_id)
+        if not row:
+            return None
+        return SessionFileDefinitionRecord(
+            id=row.id,
+            config_id=row.config_id,
+            filename=row.filename,
+            description=row.description,
+            default_content=row.default_content,
+            required=bool(row.required),
+            sync_on_exit=bool(row.sync_on_exit),
+            sort_order=row.sort_order,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_session_file_definition(
+        self,
+        definition_id: str,
+        config_id: str,
+        filename: str,
+        default_content: str,
+        description: Optional[str] = None,
+        required: bool = False,
+        sync_on_exit: bool = True,
+        sort_order: int = 0,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                SessionFileDefinitionModel(
+                    id=definition_id,
+                    config_id=config_id,
+                    filename=filename,
+                    description=description,
+                    default_content=default_content,
+                    required=1 if required else 0,
+                    sync_on_exit=1 if sync_on_exit else 0,
+                    sort_order=sort_order,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_session_file_definition(
+        self,
+        definition_id: str,
+        *,
+        filename: Optional[str] = None,
+        description: Optional[str] = None,
+        default_content: Optional[str] = None,
+        required: Optional[bool] = None,
+        sync_on_exit: Optional[bool] = None,
+        sort_order: Optional[int] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(SessionFileDefinitionModel, definition_id)
+            if not row:
+                return
+            if filename is not None:
+                row.filename = filename
+            if description is not None:
+                row.description = description
+            if default_content is not None:
+                row.default_content = default_content
+            if required is not None:
+                row.required = 1 if required else 0
+            if sync_on_exit is not None:
+                row.sync_on_exit = 1 if sync_on_exit else 0
+            if sort_order is not None:
+                row.sort_order = sort_order
+            row.updated_at = utc_now()
+
+    def delete_session_file_definition(self, definition_id: str) -> None:
+        with self.session() as session:
+            # Also delete associated session files
+            session.query(SessionFileModel).filter(
+                SessionFileModel.definition_id == definition_id
+            ).delete()
+            session.query(SessionFileDefinitionModel).filter(
+                SessionFileDefinitionModel.id == definition_id
+            ).delete()
+
+    # -------------------------------------------------------------------------
+    # SessionFile CRUD
+    # -------------------------------------------------------------------------
+
+    def list_session_files(self, agent_id: str) -> list[SessionFileRecord]:
+        with self.session() as session:
+            rows = (
+                session.execute(
+                    select(SessionFileModel)
+                    .where(SessionFileModel.agent_id == agent_id)
+                    .order_by(SessionFileModel.created_at.asc())
+                )
+                .scalars()
+                .all()
+            )
+        return [
+            SessionFileRecord(
+                id=row.id,
+                agent_id=row.agent_id,
+                definition_id=row.definition_id,
+                content=row.content,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+            for row in rows
+        ]
+
+    def get_session_file(self, file_id: str) -> Optional[SessionFileRecord]:
+        with self.session() as session:
+            row = session.get(SessionFileModel, file_id)
+        if not row:
+            return None
+        return SessionFileRecord(
+            id=row.id,
+            agent_id=row.agent_id,
+            definition_id=row.definition_id,
+            content=row.content,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def get_session_file_by_definition(
+        self, agent_id: str, definition_id: str
+    ) -> Optional[SessionFileRecord]:
+        with self.session() as session:
+            row = (
+                session.execute(
+                    select(SessionFileModel)
+                    .where(SessionFileModel.agent_id == agent_id)
+                    .where(SessionFileModel.definition_id == definition_id)
+                )
+                .scalar_one_or_none()
+            )
+        if not row:
+            return None
+        return SessionFileRecord(
+            id=row.id,
+            agent_id=row.agent_id,
+            definition_id=row.definition_id,
+            content=row.content,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_session_file(
+        self,
+        file_id: str,
+        agent_id: str,
+        definition_id: str,
+        content: str,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                SessionFileModel(
+                    id=file_id,
+                    agent_id=agent_id,
+                    definition_id=definition_id,
+                    content=content,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_session_file(
+        self,
+        file_id: str,
+        *,
+        content: Optional[str] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(SessionFileModel, file_id)
+            if not row:
+                return
+            if content is not None:
+                row.content = content
+            row.updated_at = utc_now()
+
+    def upsert_session_file(
+        self,
+        agent_id: str,
+        definition_id: str,
+        content: str,
+    ) -> str:
+        """Create or update a session file. Returns the file id."""
+        existing = self.get_session_file_by_definition(agent_id, definition_id)
+        if existing:
+            self.update_session_file(existing.id, content=content)
+            return existing.id
+        else:
+            import uuid
+
+            file_id = str(uuid.uuid4())
+            self.insert_session_file(file_id, agent_id, definition_id, content)
+            return file_id
+
+    def delete_session_file(self, file_id: str) -> None:
+        with self.session() as session:
+            session.query(SessionFileModel).filter(
+                SessionFileModel.id == file_id
+            ).delete()
+
+    def delete_session_files_for_agent(self, agent_id: str) -> None:
+        with self.session() as session:
+            session.query(SessionFileModel).filter(
+                SessionFileModel.agent_id == agent_id
+            ).delete()

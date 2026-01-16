@@ -1,4 +1,4 @@
-"""Tests for per-IssueSource poll interval behavior."""
+"""Tests for per-project poll interval behavior (issue sources merged into projects)."""
 
 import tempfile
 import unittest
@@ -15,8 +15,7 @@ class GitHubIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
         self.temp_db = tempfile.NamedTemporaryFile(delete=False)
         self.db = Database(self.temp_db.name)
         self.db.initialize()
-        # Create project and token required for issue sources
-        self.db.insert_project("proj-1", "Test Project", "test-proj", None)
+        # Create token required for projects with sources
         self.db.insert_remote_token(
             token_id="gh-tok-1",
             provider="github",
@@ -28,19 +27,15 @@ class GitHubIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
         self.temp_db.close()
 
     async def test_respects_per_source_poll_interval(self) -> None:
-        """Each IssueSource should only poll after its own poll_interval_seconds."""
-        # Create issue source with 30 second interval
-        self.db.insert_issue_source(
-            "src-1",
+        """Each project with source should only poll after its poll_interval_seconds."""
+        # Create project with GitHub source and 30 second interval
+        self.db.insert_project(
+            "proj-1", "Test Project", "test-proj", None,
             provider="github",
-            token_id="gh-tok-1",
-            agent_id=None,
-            project_id="proj-1",
-            repo="testowner/testrepo",
-            state="open",
-            labels=[],
-            enabled=True,
-            auto_start=False,
+            source_token_id="gh-tok-1",
+            source_repo="testowner/testrepo",
+            issue_state="open",
+            source_enabled=True,
             poll_interval_seconds=30,
         )
         source = GitHubIssuesSource()
@@ -59,17 +54,13 @@ class GitHubIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_polls_after_interval_elapsed(self) -> None:
         """Source should poll again after its interval has elapsed."""
-        self.db.insert_issue_source(
-            "src-2",
+        self.db.insert_project(
+            "proj-2", "Test Project 2", "test-proj-2", None,
             provider="github",
-            token_id="gh-tok-1",
-            agent_id=None,
-            project_id="proj-1",
-            repo="owner/repo2",
-            state="open",
-            labels=[],
-            enabled=True,
-            auto_start=False,
+            source_token_id="gh-tok-1",
+            source_repo="owner/repo2",
+            issue_state="open",
+            source_enabled=True,
             poll_interval_seconds=60,
         )
         source = GitHubIssuesSource()
@@ -82,37 +73,29 @@ class GitHubIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
             await source.poll(ctx)
             self.assertEqual(mock_fetch.call_count, 1)
 
-            # Manually set last_poll to 61 seconds ago
-            source._last_poll["src-2"] = datetime.now(timezone.utc).timestamp() - 61
+            # Manually set last_poll to 61 seconds ago (project ID is now the source ID)
+            source._last_poll["proj-2"] = datetime.now(timezone.utc).timestamp() - 61
             await source.poll(ctx)
             self.assertEqual(mock_fetch.call_count, 2)
 
     async def test_multiple_sources_independent_intervals(self) -> None:
-        """Multiple issue sources should track their intervals independently."""
-        self.db.insert_issue_source(
-            "src-fast",
+        """Multiple projects with sources should track their intervals independently."""
+        self.db.insert_project(
+            "proj-fast", "Fast Project", "fast-proj", None,
             provider="github",
-            token_id="gh-tok-1",
-            agent_id=None,
-            project_id="proj-1",
-            repo="owner/fast",
-            state="open",
-            labels=[],
-            enabled=True,
-            auto_start=False,
+            source_token_id="gh-tok-1",
+            source_repo="owner/fast",
+            issue_state="open",
+            source_enabled=True,
             poll_interval_seconds=10,
         )
-        self.db.insert_issue_source(
-            "src-slow",
+        self.db.insert_project(
+            "proj-slow", "Slow Project", "slow-proj", None,
             provider="github",
-            token_id="gh-tok-1",
-            agent_id=None,
-            project_id="proj-1",
-            repo="owner/slow",
-            state="open",
-            labels=[],
-            enabled=True,
-            auto_start=False,
+            source_token_id="gh-tok-1",
+            source_repo="owner/slow",
+            issue_state="open",
+            source_enabled=True,
             poll_interval_seconds=300,
         )
         source = GitHubIssuesSource()
@@ -126,24 +109,20 @@ class GitHubIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_fetch.call_count, 2)
 
             # Set fast source to 11 seconds ago (past interval), slow source stays at 0
-            source._last_poll["src-fast"] = datetime.now(timezone.utc).timestamp() - 11
+            source._last_poll["proj-fast"] = datetime.now(timezone.utc).timestamp() - 11
             await source.poll(ctx)
             # Only fast should be polled again
             self.assertEqual(mock_fetch.call_count, 3)
 
     async def test_disabled_source_not_polled(self) -> None:
-        """Disabled issue sources should not be polled."""
-        self.db.insert_issue_source(
-            "src-disabled",
+        """Disabled project sources should not be polled."""
+        self.db.insert_project(
+            "proj-disabled", "Disabled Project", "disabled-proj", None,
             provider="github",
-            token_id="gh-tok-1",
-            agent_id=None,
-            project_id="proj-1",
-            repo="owner/disabled",
-            state="open",
-            labels=[],
-            enabled=False,
-            auto_start=False,
+            source_token_id="gh-tok-1",
+            source_repo="owner/disabled",
+            issue_state="open",
+            source_enabled=False,
             poll_interval_seconds=10,
         )
         source = GitHubIssuesSource()
@@ -160,7 +139,6 @@ class GitLabIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
         self.temp_db = tempfile.NamedTemporaryFile(delete=False)
         self.db = Database(self.temp_db.name)
         self.db.initialize()
-        self.db.insert_project("proj-1", "Test Project", "test-proj", None)
         self.db.insert_remote_token(
             token_id="gl-tok-1",
             provider="gitlab",
@@ -172,18 +150,14 @@ class GitLabIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
         self.temp_db.close()
 
     async def test_respects_per_source_poll_interval(self) -> None:
-        """GitLab source should respect per-source poll intervals."""
-        self.db.insert_issue_source(
-            "gl-src-1",
+        """GitLab project source should respect poll intervals."""
+        self.db.insert_project(
+            "proj-gl-1", "GitLab Project", "gitlab-proj", None,
             provider="gitlab",
-            token_id="gl-tok-1",
-            agent_id=None,
-            project_id="proj-1",
-            repo="group/project",
-            state="opened",
-            labels=[],
-            enabled=True,
-            auto_start=False,
+            source_token_id="gl-tok-1",
+            source_repo="group/project",
+            issue_state="opened",
+            source_enabled=True,
             poll_interval_seconds=45,
         )
         source = GitLabIssuesSource()
@@ -201,7 +175,7 @@ class GitLabIssuesSourcePollTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_fetch.call_count, 1)
 
             # After interval elapsed
-            source._last_poll["gl-src-1"] = datetime.now(timezone.utc).timestamp() - 46
+            source._last_poll["proj-gl-1"] = datetime.now(timezone.utc).timestamp() - 46
             await source.poll(ctx)
             self.assertEqual(mock_fetch.call_count, 2)
 

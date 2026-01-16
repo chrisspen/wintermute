@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>Edit File Definition</h3>
+      <form method="post" action="/session-file-definitions/{{ definition.id }}/edit">
+        <input type="hidden" name="config_id" value="{{ definition.config_id }}" />
+        <div class="field-group">
+          <label>Filename</label>
+          <input type="text" name="filename" value="{{ definition.filename }}" required />
+        </div>
+        <div class="field-group">
+          <label>Description</label>
+          <input type="text" name="description" value="{{ definition.description or '' }}" />
+        </div>
+        <div class="field-group">
+          <label>Default Content</label>
+          <textarea name="default_content" rows="12" style="font-family: monospace; font-size: 13px;">{{ definition.default_content }}</textarea>
+        </div>
+        <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+          <div class="checkbox-row field-group">
+            <input type="checkbox" name="required" id="defn_required" {% if definition.required %}checked{% endif %} />
+            <label for="defn_required">Required</label>
+          </div>
+          <div class="checkbox-row field-group">
+            <input type="checkbox" name="sync_on_exit" id="defn_sync" {% if definition.sync_on_exit %}checked{% endif %} />
+            <label for="defn_sync">Sync on Exit</label>
+          </div>
+        </div>
+        <div class="field-group" style="max-width: 120px;">
+          <label>Sort Order</label>
+          <input type="number" name="sort_order" value="{{ definition.sort_order }}" />
+        </div>
+        <button type="submit">Save Definition</button>
+      </form>
+      <div class="form-actions">
+        <form method="post" action="/session-file-definitions/{{ definition.id }}/delete">
+          <input type="hidden" name="config_id" value="{{ definition.config_id }}" />
+          <button type="button" class="danger" data-confirm data-confirm-message="Delete this file definition?">Delete Definition</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -311,6 +311,16 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
         ],
     },
+    "session_file_configs": {
+        "default": ["name", "description"],
+        "columns": [
+            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "name", "label": "Name"},
+            {"key": "description", "label": "Description"},
+            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+        ],
+    },
 }
 
 
@@ -1312,9 +1322,70 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             "approved": data.get("approved"),
             "sent": data.get("sent"),
             "sent_at": data.get("sent_at"),
+            "origin": getattr(record, "origin", None),
             "created_at": data.get("created_at"),
             "updated_at": data.get("updated_at"),
         }
+
+    async def _run_comment_websocket(
+        websocket: WebSocket,
+        get_comments: callable,
+        get_session: callable,
+        comment_to_dict: callable = _comment_to_dict,
+    ) -> None:
+        """Shared WebSocket handler for comment streams.
+
+        Args:
+            websocket: The WebSocket connection
+            get_comments: Function(since: str) -> list of comments
+            get_session: Function() -> session record or None
+            comment_to_dict: Function(comment) -> dict for JSON serialization
+        """
+        await websocket.accept()
+        session_data = getattr(websocket, "session", {})
+        if not session_data or not session_data.get("user"):
+            await websocket.close(code=1008)
+            return
+
+        def _recent_activity(iso_value: Optional[str], seconds: int = 45) -> bool:
+            if not iso_value:
+                return False
+            try:
+                ts = datetime.fromisoformat(iso_value)
+            except ValueError:
+                return False
+            now = datetime.now(timezone.utc)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return (now - ts).total_seconds() <= seconds
+
+        last_seen = websocket.query_params.get("since")
+        try:
+            while True:
+                rows = get_comments(last_seen)
+                if rows:
+                    last_seen = rows[-1].created_at
+                    for row in rows:
+                        await websocket.send_json(
+                            {"type": "comment", "data": comment_to_dict(row)}
+                        )
+                session = get_session()
+                if session and session.status == "running":
+                    last_activity = session.last_output_at or session.prompt_sent_at
+                    active = (
+                        bool(session.awaiting_response)
+                        and bool(session.last_user_message)
+                        and _recent_activity(last_activity)
+                    )
+                    await websocket.send_json({"type": "typing", "data": {"active": active}})
+                else:
+                    await websocket.send_json({"type": "typing", "data": {"active": False}})
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
+        except WebSocketDisconnect:
+            return
 
     def _normalize_permissions(payload: Any) -> dict[str, dict[str, bool]]:
         permissions: dict[str, dict[str, bool]] = {}
@@ -2867,56 +2938,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.websocket("/ws/tickets/{ticket_id}")
     async def ws_ticket_comments(websocket: WebSocket, ticket_id: str) -> None:
-        await websocket.accept()
-        session_data = getattr(websocket, "session", {})
-        if not session_data or not session_data.get("user"):
-            await websocket.close(code=1008)
-            return
-        def _recent_activity(iso_value: Optional[str], seconds: int = 45) -> bool:
-            if not iso_value:
-                return False
-            try:
-                ts = datetime.fromisoformat(iso_value)
-            except ValueError:
-                return False
-            now = datetime.now(timezone.utc)
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            return (now - ts).total_seconds() <= seconds
-        last_seen = websocket.query_params.get("since")
-        try:
-            while True:
-                rows = database.list_comments_since(ticket_id, last_seen)
-                if rows:
-                    last_seen = rows[-1].created_at
-                    for row in rows:
-                        await websocket.send_json(
-                            {"type": "comment", "data": _comment_to_dict(row)}
-                        )
-                session = database.get_session_by_ticket(ticket_id)
-                if session and session.status == "running":
-                    last_activity = session.last_output_at or session.prompt_sent_at
-                    active = (
-                        bool(session.awaiting_response)
-                        and bool(session.last_user_message)
-                        and _recent_activity(last_activity)
-                    )
-                    await websocket.send_json(
-                        {
-                            "type": "typing",
-                            "data": {"active": active},
-                        }
-                    )
-                else:
-                    await websocket.send_json(
-                        {"type": "typing", "data": {"active": False}}
-                    )
-                try:
-                    await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    pass
-        except WebSocketDisconnect:
-            return
+        await _run_comment_websocket(
+            websocket,
+            get_comments=lambda since: database.list_comments_since(ticket_id=ticket_id, since=since),
+            get_session=lambda: database.get_session_by_ticket(ticket_id),
+        )
 
     @app.get("/api/admin/pids")
     async def api_admin_pids(request: Request) -> dict[str, Any]:
@@ -3023,6 +3049,357 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         """Remove a ticket from a sprint."""
         removed = database.remove_ticket_from_sprint(ticket_id, sprint_id)
         return {"ok": True, "removed": removed, "ticket_id": ticket_id, "sprint_id": sprint_id}
+
+    # -------------------------------------------------------------------------
+    # Standalone session API (JSON endpoints for AJAX)
+    # -------------------------------------------------------------------------
+
+    @app.get("/api/agents/{agent_id}/session-status")
+    async def api_agent_session_status(
+        agent_id: str, user: str = Depends(_require_login)
+    ) -> dict:
+        import subprocess
+
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                # Try to get PID from tmux on VM
+                # pane_pid is the shell, so we get its child (the actual command)
+                pid = None
+                if agent.vm_target_id:
+                    vm = database.get_vm_target(agent.vm_target_id)
+                    if vm:
+                        spec = build_ssh_spec(vm, agent.required_ssh_options)
+                        session_name = f"wm_{sess.id}"
+                        # Get pane_pid (shell), then find its child process (claude)
+                        pid_script = (
+                            f"pane_pid=$(tmux list-panes -t {session_name} -F '#{{pane_pid}}' 2>/dev/null | head -1); "
+                            f"if [ -n \"$pane_pid\" ]; then "
+                            f"child=$(pgrep -P $pane_pid 2>/dev/null | head -1); "
+                            f"echo \"${{child:-$pane_pid}}\"; fi"
+                        )
+                        pid_cmd = ["ssh", "-p", str(spec.port), *spec.options,
+                                   f"{spec.user}@{spec.host}", pid_script]
+                        try:
+                            result = subprocess.run(pid_cmd, capture_output=True, text=True, timeout=10)
+                            if result.returncode == 0 and result.stdout.strip():
+                                pid = result.stdout.strip().split('\n')[0]
+                        except Exception:
+                            pass
+                log_path = f"/tmp/wintermute-{sess.id}.log"
+                return {
+                    "running": True,
+                    "session_id": sess.id,
+                    "location": sess.workspace_path or "",
+                    "pid": pid,
+                    "log_path": log_path,
+                }
+        return {"running": False, "session_id": None, "location": None, "pid": None, "log_path": None}
+
+    @app.post("/api/agents/{agent_id}/start-session")
+    async def api_start_agent_session(
+        agent_id: str, user: str = Depends(_require_login)
+    ) -> dict:
+        import subprocess
+        import tempfile
+        import shlex
+
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if not agent.vm_target_id:
+            raise HTTPException(status_code=400, detail="Agent has no VM target configured")
+        vm = database.get_vm_target(agent.vm_target_id)
+        if not vm:
+            raise HTTPException(status_code=400, detail="VM target not found")
+
+        # Check if a standalone session already exists
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                raise HTTPException(status_code=409, detail="Session already running")
+
+        # Build SSH spec
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+
+        # Create temp workspace on VM target
+        mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options,
+                      f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
+        result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Failed to create workspace: {result.stderr}")
+        workspace = result.stdout.strip()
+
+        # Create the session record
+        session_id = str(uuid.uuid4())
+        initial_prompt = "Read your AGENTS.md file and standby for further instructions."
+        database.insert_session(
+            session_id=session_id,
+            project_id=None,
+            agent_id=agent_id,
+            ticket_id=None,
+            status="running",
+            repo_path=workspace,
+            thread_ts=None,
+            mcp_conversation_id=None,
+            initial_prompt=initial_prompt,
+            workspace_path=workspace,
+        )
+
+        # Copy session files to workspace on VM
+        if agent.session_file_config_id:
+            definitions = database.list_session_file_definitions(agent.session_file_config_id)
+            session_files = database.list_session_files(agent_id)
+            file_map = {sf.definition_id: sf for sf in session_files}
+            # Create a local temp dir, write files, then scp them
+            with tempfile.TemporaryDirectory() as local_tmp:
+                for defn in definitions:
+                    content = file_map.get(defn.id, None)
+                    if content:
+                        file_content = content.content
+                    else:
+                        file_content = defn.default_content
+                    local_path = os.path.join(local_tmp, defn.filename)
+                    with open(local_path, "w") as f:
+                        f.write(file_content)
+                # SCP files to VM
+                scp_cmd = ["scp", "-P", str(spec.port), *spec.options,
+                           "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{workspace}/"]
+                scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
+                if scp_result.returncode != 0:
+                    logger.warning("Failed to copy session files: %s", scp_result.stderr)
+
+        # Start the tmux session
+        start_session(spec, session_id, agent, workspace)
+
+        return {"session_id": session_id, "location": workspace}
+
+    @app.post("/api/agents/{agent_id}/session/stop")
+    async def api_stop_agent_session(
+        agent_id: str, user: str = Depends(_require_login)
+    ) -> dict:
+        import subprocess
+        import tempfile
+
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        # Find the standalone session
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        standalone_session = None
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                standalone_session = sess
+                break
+        if not standalone_session:
+            raise HTTPException(status_code=404, detail="No running session")
+
+        # Sync files back from workspace on VM
+        if agent.session_file_config_id and standalone_session.workspace_path and agent.vm_target_id:
+            vm = database.get_vm_target(agent.vm_target_id)
+            if vm:
+                spec = build_ssh_spec(vm, agent.required_ssh_options)
+                definitions = database.list_session_file_definitions(agent.session_file_config_id)
+                # Create a local temp dir to receive files
+                with tempfile.TemporaryDirectory() as local_tmp:
+                    # SCP files from VM
+                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options,
+                               "-r", f"{spec.user}@{spec.host}:{standalone_session.workspace_path}/.",
+                               f"{local_tmp}/"]
+                    scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
+                    if scp_result.returncode == 0:
+                        for defn in definitions:
+                            if defn.sync_on_exit:
+                                local_path = os.path.join(local_tmp, defn.filename)
+                                if os.path.exists(local_path):
+                                    with open(local_path, "r") as f:
+                                        content = f.read()
+                                    database.upsert_session_file(agent_id, defn.id, content)
+                    else:
+                        logger.warning("Failed to sync session files back: %s", scp_result.stderr)
+
+        # Mark session as stopped
+        database.update_session(standalone_session.id, status="stopped")
+        return {"success": True}
+
+    @app.post("/api/agents/{agent_id}/comments")
+    async def api_add_agent_comment(
+        agent_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> dict:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        # Find the standalone session
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        standalone_session = None
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                standalone_session = sess
+                break
+        if not standalone_session:
+            raise HTTPException(status_code=404, detail="No running session")
+        data = await request.json()
+        message = str(data.get("body", "")).strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="Empty message")
+        comment_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+        database.insert_comment(
+            comment_id=comment_id,
+            ticket_id=None,
+            session_id=standalone_session.id,
+            project_id=None,
+            agent_id=agent_id,
+            author="user",
+            source_id=None,
+            issue_number=None,
+            body=message,
+            public=False,
+            approved=False,
+            agent_session_id=standalone_session.id,
+            origin="web",
+        )
+        # Queue message for supervisor to dispatch (same as ticket page)
+        if standalone_session.status == "running":
+            queued_message = message
+            if agent.response_prefix:
+                queued_message = (
+                    f"{message}\n\n"
+                    f"Please reply with lines starting with '{agent.response_prefix}'."
+                )
+            raw_queue = standalone_session.queued_user_messages or "[]"
+            try:
+                queue = json.loads(raw_queue)
+                if not isinstance(queue, list):
+                    queue = []
+            except json.JSONDecodeError:
+                queue = []
+            queue.append(queued_message)
+            database.update_session(
+                standalone_session.id,
+                queued_user_messages=json.dumps(queue),
+            )
+        return {
+            "comment": {
+                "id": comment_id,
+                "author": "user",
+                "body": message,
+                "origin": "web",
+                "created_at": now,
+            }
+        }
+
+    @app.get("/api/agents/{agent_id}/comments")
+    async def api_get_agent_comments(
+        agent_id: str,
+        since: Optional[str] = None,
+        user: str = Depends(_require_login),
+    ) -> dict:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        # Find the active or most recent standalone session
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        session_id = None
+        for sess in all_sessions:
+            if not sess.ticket_id:
+                if sess.status in ("running", "blocked"):
+                    session_id = sess.id
+                    break
+                elif session_id is None:
+                    session_id = sess.id
+        if not session_id:
+            return {"comments": []}
+        comments = database.list_comments_since(agent_session_id=session_id, since=since)
+        return {
+            "comments": [
+                {
+                    "id": c.id,
+                    "author": c.author,
+                    "body": c.body,
+                    "origin": c.origin,
+                    "created_at": c.created_at,
+                }
+                for c in comments
+            ]
+        }
+
+    @app.websocket("/ws/agents/{agent_id}/comments")
+    async def ws_agent_comments(websocket: WebSocket, agent_id: str) -> None:
+        def _find_standalone_session():
+            all_sessions = database.list_sessions(agent_id=agent_id)
+            for sess in all_sessions:
+                if not sess.ticket_id and sess.status in ("running", "blocked"):
+                    return sess
+            for sess in all_sessions:
+                if not sess.ticket_id:
+                    return sess
+            return None
+
+        def _get_comments(since):
+            session = _find_standalone_session()
+            if not session:
+                return []
+            return database.list_comments_since(agent_session_id=session.id, since=since)
+
+        await _run_comment_websocket(
+            websocket,
+            get_comments=_get_comments,
+            get_session=_find_standalone_session,
+        )
+
+    @app.post("/api/agents/{agent_id}/channels")
+    async def api_create_agent_channel(
+        agent_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> dict:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        data = await request.json()
+        channel_type = str(data.get("type", "")).strip()
+        name = str(data.get("name", "")).strip()
+        external_channel_id = str(data.get("external_channel_id", "")).strip() or None
+        if not channel_type or not name:
+            raise HTTPException(status_code=400, detail="Missing channel fields")
+        channel_id = str(uuid.uuid4())
+        database.insert_channel(
+            channel_id=channel_id,
+            agent_id=agent_id,
+            channel_type=channel_type,
+            name=name,
+            external_channel_id=external_channel_id,
+            enabled=True,
+        )
+        return {
+            "channel": {
+                "id": channel_id,
+                "type": channel_type,
+                "name": name,
+                "external_channel_id": external_channel_id,
+                "enabled": True,
+            }
+        }
+
+    @app.patch("/api/agents/{agent_id}/channels/{channel_id}")
+    async def api_update_agent_channel(
+        agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> dict:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        data = await request.json()
+        updates = {}
+        if "name" in data:
+            updates["name"] = str(data["name"]).strip() or None
+        if "external_channel_id" in data:
+            val = str(data["external_channel_id"]).strip()
+            updates["external_channel_id"] = val if val and val != "-" else None
+        if updates:
+            database.update_channel(channel_id, **updates)
+        return {"success": True}
 
     # Generic model API routes (catch-all, must be after specific routes)
     @app.get("/api/{model}/{item_id:path}")
@@ -3135,10 +3512,24 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     channel=channel_id,
                     text="Channel created. Please /join to receive updates.",
                 )
+        # Issue source fields
+        provider = str(form.get("provider", "")).strip() or None
+        source_repo_raw = str(form.get("source_repo", "")).strip()
+        source_repo = _normalize_source_repo(provider or "", source_repo_raw) if source_repo_raw else None
+        source_token_id = str(form.get("source_token_id", "")).strip() or None
+        source_agent_id = str(form.get("source_agent_id", "")).strip() or None
+        issue_state = str(form.get("issue_state", "")).strip() or None
+        issue_labels_raw = str(form.get("issue_labels", "")).strip()
+        issue_labels = [label.strip() for label in issue_labels_raw.split(",") if label.strip()] if issue_labels_raw else []
+        source_enabled = form.get("source_enabled") == "on"
+        auto_start = form.get("auto_start") == "on"
         project_id = str(uuid.uuid4())
         database.insert_project(
             project_id, name, slug, channel_id, prompt_template, max_repo_resources,
-            repo_mode=repo_mode, repo_path=repo_path, repo_url=repo_url
+            repo_mode=repo_mode, repo_path=repo_path, repo_url=repo_url,
+            provider=provider, source_token_id=source_token_id, source_agent_id=source_agent_id,
+            source_repo=source_repo, issue_state=issue_state, issue_labels=issue_labels,
+            source_enabled=source_enabled, auto_start=auto_start,
         )
         _update_slack_channel_filter(database)
         return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
@@ -3148,47 +3539,23 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         project = database.get_project(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
-        issue_sources = database.list_issue_sources(project_id=project_id)
-        github_tokens = database.list_github_tokens()
-        gitlab_tokens = database.list_gitlab_tokens()
+        remote_tokens = database.list_remote_tokens()
         agents = database.list_agents()
-        token_lookup = {
-            token.id: token.note or token.user_login or token.id for token in github_tokens + gitlab_tokens
-        }
-        agent_lookup = {agent.id: agent.name for agent in agents}
-        project_sources = []
-        for source in issue_sources:
-            provider = source.provider
-            edit_url = f"/ui/issue-sources/{source.id}/edit"
-            project_sources.append(
-                {
-                    "id": source.id,
-                    "provider": provider,
-                    "repo": source.repo,
-                    "state": source.state,
-                    "labels": ", ".join(source.labels) if source.labels else "n/a",
-                    "enabled": source.enabled,
-                    "auto_start": source.auto_start,
-                    "token_label": token_lookup.get(source.token_id, "n/a"),
-                    "agent_label": agent_lookup.get(source.agent_id, "n/a"),
-                    "edit_url": edit_url,
-                }
-            )
-        # Compute external repo URL from first issue source
+        mirror_repo_path_base = os.environ.get("WINTERMUTE_MIRROR_REPO_PATH_BASE", "/home/user/git")
+        # Compute external repo URL from project's source settings
         external_repo_url = None
         external_repo_provider = None
-        if issue_sources:
-            first_source = issue_sources[0]
-            if first_source.provider == "github":
-                external_repo_url = f"https://github.com/{first_source.repo}"
+        if project.provider and project.source_repo:
+            if project.provider == "github":
+                external_repo_url = f"https://github.com/{project.source_repo}"
                 external_repo_provider = "github"
-            elif first_source.provider == "gitlab":
+            elif project.provider == "gitlab":
                 gitlab_base = "https://gitlab.com"
-                if first_source.token_id:
-                    token = database.get_remote_token(first_source.token_id)
+                if project.source_token_id:
+                    token = database.get_remote_token(project.source_token_id)
                     if token and token.base_url:
                         gitlab_base = token.base_url.rstrip("/")
-                external_repo_url = f"{gitlab_base}/{first_source.repo}"
+                external_repo_url = f"{gitlab_base}/{project.source_repo}"
                 external_repo_provider = "gitlab"
         return _render_template(
             request,
@@ -3199,12 +3566,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "project": project,
                 "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
-                "project_sources": project_sources,
-                "github_tokens": github_tokens,
-                "gitlab_tokens": gitlab_tokens,
+                "remote_tokens": remote_tokens,
                 "agents": agents,
                 "external_repo_url": external_repo_url,
                 "external_repo_provider": external_repo_provider,
+                "mirror_repo_path_base": mirror_repo_path_base,
             },
         )
 
@@ -3268,6 +3634,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         repo_mode = str(form.get("repo_mode", "")).strip() or None
         repo_path = str(form.get("repo_path", "")).strip() or None
         repo_url = str(form.get("repo_url", "")).strip() or None
+        # Issue source fields
+        provider = str(form.get("provider", "")).strip() or None
+        source_repo_raw = str(form.get("source_repo", "")).strip()
+        source_repo = _normalize_source_repo(provider or "", source_repo_raw) if source_repo_raw else None
+        source_token_id = str(form.get("source_token_id", "")).strip() or None
+        source_agent_id = str(form.get("source_agent_id", "")).strip() or None
+        issue_state = str(form.get("issue_state", "")).strip() or None
+        issue_labels_raw = str(form.get("issue_labels", "")).strip()
+        issue_labels = [label.strip() for label in issue_labels_raw.split(",") if label.strip()] if issue_labels_raw else []
+        source_enabled = form.get("source_enabled") == "on"
+        auto_start = form.get("auto_start") == "on"
         if not name or not slug:
             raise HTTPException(status_code=400, detail="Missing name or slug")
         database.update_project(
@@ -3280,6 +3657,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             repo_mode=repo_mode,
             repo_path=repo_path,
             repo_url=repo_url,
+            provider=provider,
+            source_token_id=source_token_id,
+            source_agent_id=source_agent_id,
+            source_repo=source_repo,
+            issue_state=issue_state,
+            issue_labels=issue_labels,
+            source_enabled=source_enabled,
+            auto_start=auto_start,
         )
         _update_slack_channel_filter(database)
         return RedirectResponse("/ui/projects?saved=project_updated", status_code=303)
@@ -3822,6 +4207,35 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Agent not found")
         responses = database.list_agent_responses(agent_id=agent_id)
         vm_targets = database.list_vm_targets()
+        channels = database.list_channels(agent_id=agent_id)
+        session_file_configs = database.list_session_file_configs()
+        # Get session files for this agent
+        session_files = database.list_session_files(agent_id)
+        # Get file definitions if agent has a config
+        session_file_definitions = []
+        if agent.session_file_config_id:
+            session_file_definitions = database.list_session_file_definitions(
+                agent.session_file_config_id
+            )
+        # Build map of definition_id -> session file content
+        file_contents = {sf.definition_id: sf for sf in session_files}
+        # Get standalone sessions (no ticket_id)
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        standalone_session = None  # Active (running/blocked) session for controls
+        recent_standalone_session = None  # Most recent session for comments
+        for sess in all_sessions:
+            if not sess.ticket_id:
+                if sess.status in ("running", "blocked"):
+                    standalone_session = sess
+                    recent_standalone_session = sess
+                    break
+                elif recent_standalone_session is None:
+                    # Keep track of most recent stopped session
+                    recent_standalone_session = sess
+        # Get comments for the session (active or most recent stopped)
+        standalone_comments: list = []
+        if recent_standalone_session:
+            standalone_comments = database.list_comments(agent_session_id=recent_standalone_session.id)
         return _render_template(
             request,
             "agent_edit.html",
@@ -3832,6 +4246,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "agent": agent,
                 "responses": responses,
                 "vm_targets": vm_targets,
+                "channels": channels,
+                "session_file_configs": session_file_configs,
+                "session_file_definitions": session_file_definitions,
+                "file_contents": file_contents,
+                "standalone_session": standalone_session,
+                "standalone_comments": standalone_comments,
             },
         )
 
@@ -3852,6 +4272,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         llm_base_url = str(form.get("llm_base_url", "")).strip() or None
         llm_api_key = str(form.get("llm_api_key", "")).strip() or None
         llm_model = str(form.get("llm_model", "")).strip() or None
+        session_file_config_id = str(form.get("session_file_config_id", "")).strip() or None
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
         database.update_agent(
@@ -3870,13 +4291,208 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
             llm_model=llm_model,
+            session_file_config_id=session_file_config_id,
         )
-        return RedirectResponse("/ui/agents?saved=agent_updated", status_code=303)
+        # Auto-generate session file records if config is set
+        if session_file_config_id:
+            definitions = database.list_session_file_definitions(session_file_config_id)
+            existing_files = database.list_session_files(agent_id)
+            existing_def_ids = {sf.definition_id for sf in existing_files}
+            for defn in definitions:
+                if defn.id not in existing_def_ids:
+                    database.upsert_session_file(agent_id, defn.id, defn.default_content)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=agent_updated", status_code=303)
 
     @app.post("/agents/{agent_id}/delete")
     async def delete_agent(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_agent(agent_id)
         return RedirectResponse("/ui/agents?saved=agent_deleted", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Agent Channels CRUD
+    # -------------------------------------------------------------------------
+
+    @app.post("/agents/{agent_id}/channels")
+    async def create_agent_channel(
+        agent_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        channel_type = str(form.get("channel_type", "")).strip()
+        name = str(form.get("name", "")).strip()
+        external_channel_id = str(form.get("external_channel_id", "")).strip() or None
+        if not channel_type or not name:
+            raise HTTPException(status_code=400, detail="Missing channel fields")
+        database.insert_channel(
+            channel_id=str(uuid.uuid4()),
+            agent_id=agent_id,
+            channel_type=channel_type,
+            name=name,
+            external_channel_id=external_channel_id,
+            enabled=True,
+        )
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_created", status_code=303)
+
+    @app.post("/agents/{agent_id}/channels/{channel_id}/edit")
+    async def update_agent_channel(
+        agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip() or None
+        external_channel_id = str(form.get("external_channel_id", "")).strip() or None
+        enabled_str = str(form.get("enabled", "")).strip()
+        enabled = None if enabled_str == "" else enabled_str.lower() in ("true", "1", "yes")
+        database.update_channel(
+            channel_id,
+            name=name,
+            external_channel_id=external_channel_id,
+            enabled=enabled,
+        )
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_updated", status_code=303)
+
+    @app.post("/agents/{agent_id}/channels/{channel_id}/delete")
+    async def delete_agent_channel(
+        agent_id: str, channel_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_channel(channel_id)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_deleted", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Agent Session Files
+    # -------------------------------------------------------------------------
+
+    @app.post("/agents/{agent_id}/session-files")
+    async def save_agent_session_files(
+        agent_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        agent = database.get_agent(agent_id)
+        if not agent or not agent.session_file_config_id:
+            raise HTTPException(status_code=400, detail="Agent has no session file config")
+        definitions = database.list_session_file_definitions(agent.session_file_config_id)
+        form = await request.form()
+        for defn in definitions:
+            content = str(form.get(f"file_{defn.id}", ""))
+            database.upsert_session_file(agent_id, defn.id, content)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_files_saved", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Agent Standalone Session Control
+    # -------------------------------------------------------------------------
+
+    @app.post("/agents/{agent_id}/session/start")
+    async def start_agent_standalone_session(
+        agent_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        # Check if a standalone session already exists
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                return RedirectResponse(f"/ui/agents/{agent_id}/edit?error=session_already_running", status_code=303)
+        # Create a temp workspace
+        import tempfile
+        workspace = tempfile.mkdtemp(prefix=f"agent_{agent.slug}_")
+        # Create the session
+        session_id = str(uuid.uuid4())
+        initial_prompt = "Read your AGENTS.md file and standby for further instructions."
+        database.insert_session(
+            session_id=session_id,
+            project_id=None,
+            agent_id=agent_id,
+            ticket_id=None,
+            status="running",
+            repo_path=workspace,
+            thread_ts=None,
+            mcp_conversation_id=None,
+            initial_prompt=initial_prompt,
+            workspace_path=workspace,
+        )
+        # Copy session files to workspace if agent has a config
+        if agent.session_file_config_id:
+            definitions = database.list_session_file_definitions(agent.session_file_config_id)
+            session_files = database.list_session_files(agent_id)
+            file_map = {sf.definition_id: sf for sf in session_files}
+            import os
+            for defn in definitions:
+                content = file_map.get(defn.id, None)
+                if content:
+                    file_content = content.content
+                else:
+                    file_content = defn.default_content
+                file_path = os.path.join(workspace, defn.filename)
+                with open(file_path, "w") as f:
+                    f.write(file_content)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_started", status_code=303)
+
+    @app.post("/agents/{agent_id}/session/stop")
+    async def stop_agent_standalone_session(
+        agent_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        # Find the standalone session
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        standalone_session = None
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                standalone_session = sess
+                break
+        if not standalone_session:
+            return RedirectResponse(f"/ui/agents/{agent_id}/edit?error=no_session", status_code=303)
+        # Sync files back from workspace
+        if agent.session_file_config_id and standalone_session.workspace_path:
+            import os
+            definitions = database.list_session_file_definitions(agent.session_file_config_id)
+            for defn in definitions:
+                if defn.sync_on_exit:
+                    file_path = os.path.join(standalone_session.workspace_path, defn.filename)
+                    if os.path.exists(file_path):
+                        with open(file_path, "r") as f:
+                            content = f.read()
+                        database.upsert_session_file(agent_id, defn.id, content)
+        # Mark session as stopped
+        database.update_session(standalone_session.id, status="stopped")
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_stopped", status_code=303)
+
+    @app.post("/agents/{agent_id}/session/message")
+    async def send_agent_standalone_message(
+        agent_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        # Find the standalone session
+        all_sessions = database.list_sessions(agent_id=agent_id)
+        standalone_session = None
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                standalone_session = sess
+                break
+        if not standalone_session:
+            return RedirectResponse(f"/ui/agents/{agent_id}/edit?error=no_session", status_code=303)
+        form = await request.form()
+        message = str(form.get("message", "")).strip()
+        if not message:
+            return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
+        # Insert as comment
+        database.insert_comment(
+            comment_id=str(uuid.uuid4()),
+            ticket_id=None,
+            session_id=standalone_session.id,
+            project_id=None,
+            agent_id=agent_id,
+            author="user",
+            source_id=None,
+            issue_number=None,
+            body=message,
+            public=False,
+            approved=False,
+            agent_session_id=standalone_session.id,
+            origin="web",
+        )
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agent-responses")
     async def create_agent_response(
@@ -4257,6 +4873,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = request.query_params.get("return_to", "/ui/projects")
         if not return_to.startswith("/ui"):
             return_to = "/ui/projects"
+        remote_tokens = database.list_remote_tokens()
+        agents = database.list_agents()
+        mirror_repo_path_base = os.environ.get("WINTERMUTE_MIRROR_REPO_PATH_BASE", "/home/user/git")
         return _render_template(
             request,
             "project_create.html",
@@ -4266,6 +4885,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "return_to": return_to,
                 "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
+                "remote_tokens": remote_tokens,
+                "agents": agents,
+                "mirror_repo_path_base": mirror_repo_path_base,
             },
         )
 
@@ -4973,4 +5595,252 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.upsert_column_preferences(user_record.id, model, columns)
         separator = "&" if "?" in return_to else "?"
         return RedirectResponse(f"{return_to}{separator}saved=columns_updated", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Session File Configs
+    # -------------------------------------------------------------------------
+
+    def _build_session_file_config_rows(
+        configs: list,
+    ) -> list[dict[str, Any]]:
+        rows = []
+        for config in configs:
+            rows.append({
+                "cells": {
+                    "id": {"text": config.id[:8], "href": f"/ui/session-file-configs/{config.id}/edit"},
+                    "name": {"text": config.name, "href": f"/ui/session-file-configs/{config.id}/edit"},
+                    "description": {"text": config.description or "-"},
+                    "created_at": {"text": config.created_at[:16].replace("T", " ") if config.created_at else "-"},
+                    "updated_at": {"text": config.updated_at[:16].replace("T", " ") if config.updated_at else "-"},
+                },
+            })
+        return rows
+
+    @app.get("/ui/session-file-configs")
+    def session_file_configs_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        configs = database.list_session_file_configs()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="session_file_configs",
+            title="Session File Configs",
+            description="Define file sets for agent memory persistence.",
+            create_label="Add Config",
+            create_url="/ui/session-file-configs/create",
+            rows=_build_session_file_config_rows(configs),
+            empty_message="No session file configs yet.",
+        )
+        return _render_template(
+            request,
+            "session_file_configs.html",
+            {
+                "title": "Session File Configs",
+                "active_nav": "session_file_configs",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/session-file-configs/create")
+    def session_file_configs_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        return_to = request.query_params.get("return_to", "/ui/session-file-configs")
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/session-file-configs"
+        return _render_template(
+            request,
+            "session_file_config_create.html",
+            {
+                "title": "Create Session File Config",
+                "active_nav": "session_file_configs",
+                "growl_message": None,
+                "return_to": return_to,
+            },
+        )
+
+    @app.get("/ui/session-file-configs/{config_id}/edit")
+    def session_file_configs_edit_ui(config_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        config = database.get_session_file_config(config_id)
+        if not config:
+            raise HTTPException(status_code=404, detail="Config not found")
+        definitions = database.list_session_file_definitions(config_id)
+        return _render_template(
+            request,
+            "session_file_config_edit.html",
+            {
+                "title": "Edit Session File Config",
+                "active_nav": "session_file_configs",
+                "growl_message": _growl_message(request.query_params.get("saved")),
+                "config": config,
+                "definitions": definitions,
+            },
+        )
+
+    @app.post("/session-file-configs")
+    async def create_session_file_config(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip()
+        description = str(form.get("description", "")).strip() or None
+        return_to = str(form.get("return_to", "/ui/session-file-configs")).strip()
+        if not return_to.startswith("/ui"):
+            return_to = "/ui/session-file-configs"
+        if not name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        config_id = str(uuid.uuid4())
+        database.insert_session_file_config(config_id, name, description)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_created", status_code=303)
+
+    @app.post("/session-file-configs/{config_id}/edit")
+    async def update_session_file_config(
+        config_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        name = str(form.get("name", "")).strip() or None
+        description = str(form.get("description", "")).strip() or None
+        database.update_session_file_config(config_id, name=name, description=description)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_updated", status_code=303)
+
+    @app.post("/session-file-configs/{config_id}/delete")
+    async def delete_session_file_config(
+        config_id: str, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        database.delete_session_file_config(config_id)
+        return RedirectResponse("/ui/session-file-configs?saved=config_deleted", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Session File Definitions
+    # -------------------------------------------------------------------------
+
+    @app.get("/ui/session-file-definitions/{definition_id}/edit")
+    def session_file_definitions_edit_ui(
+        definition_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> Response:
+        definition = database.get_session_file_definition(definition_id)
+        if not definition:
+            raise HTTPException(status_code=404, detail="Definition not found")
+        return _render_template(
+            request,
+            "session_file_definition_edit.html",
+            {
+                "title": "Edit File Definition",
+                "active_nav": "session_file_configs",
+                "growl_message": _growl_message(request.query_params.get("saved")),
+                "definition": definition,
+            },
+        )
+
+    @app.post("/session-file-definitions")
+    async def create_session_file_definition(
+        request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        config_id = str(form.get("config_id", "")).strip()
+        filename = str(form.get("filename", "")).strip()
+        description = str(form.get("description", "")).strip() or None
+        default_content = str(form.get("default_content", ""))
+        required = "required" in form
+        sync_on_exit = "sync_on_exit" in form
+        sort_order = int(form.get("sort_order", 0) or 0)
+        if not config_id or not filename:
+            raise HTTPException(status_code=400, detail="Missing required fields")
+        definition_id = str(uuid.uuid4())
+        database.insert_session_file_definition(
+            definition_id, config_id, filename, default_content,
+            description=description, required=required, sync_on_exit=sync_on_exit, sort_order=sort_order
+        )
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_created", status_code=303)
+
+    @app.post("/session-file-definitions/{definition_id}/edit")
+    async def update_session_file_definition(
+        definition_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        config_id = str(form.get("config_id", "")).strip()
+        filename = str(form.get("filename", "")).strip() or None
+        description = str(form.get("description", "")).strip() or None
+        default_content = str(form.get("default_content", ""))
+        required = "required" in form
+        sync_on_exit = "sync_on_exit" in form
+        sort_order = int(form.get("sort_order", 0) or 0)
+        database.update_session_file_definition(
+            definition_id,
+            filename=filename,
+            description=description,
+            default_content=default_content,
+            required=required,
+            sync_on_exit=sync_on_exit,
+            sort_order=sort_order,
+        )
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_updated", status_code=303)
+
+    @app.post("/session-file-definitions/{definition_id}/delete")
+    async def delete_session_file_definition(
+        definition_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        config_id = str(form.get("config_id", "")).strip()
+        database.delete_session_file_definition(definition_id)
+        if config_id:
+            return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_deleted", status_code=303)
+        return RedirectResponse("/ui/session-file-configs?saved=definition_deleted", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Session Files (per-agent file content)
+    # -------------------------------------------------------------------------
+
+    @app.get("/ui/session-files/{file_id}/edit")
+    def edit_session_file_ui(
+        file_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> Response:
+        file = database.get_session_file(file_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="Session file not found")
+        agent = database.get_agent(file.agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        definition = database.get_session_file_definition(file.definition_id)
+        if not definition:
+            raise HTTPException(status_code=404, detail="Definition not found")
+        return _render_template(
+            request,
+            "session_file_edit.html",
+            {
+                "title": f"Edit {definition.filename}",
+                "active_nav": "agents",
+                "growl_message": None,
+                "file": file,
+                "agent": agent,
+                "definition": definition,
+            },
+        )
+
+    @app.post("/session-files/{file_id}/edit")
+    async def update_session_file(
+        file_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        content = str(form.get("content", ""))
+        agent_id = str(form.get("agent_id", "")).strip()
+        file = database.get_session_file(file_id)
+        if not file:
+            raise HTTPException(status_code=404, detail="Session file not found")
+        database.update_session_file(file_id, content=content)
+        if agent_id:
+            return RedirectResponse(f"/ui/session-files/{file_id}/edit?saved=file_updated", status_code=303)
+        return RedirectResponse(f"/ui/session-files/{file_id}/edit?saved=file_updated", status_code=303)
+
+    @app.post("/session-files/{file_id}/delete")
+    async def delete_session_file(
+        file_id: str, request: Request, user: str = Depends(_require_login)
+    ) -> RedirectResponse:
+        form = await request.form()
+        agent_id = str(form.get("agent_id", "")).strip()
+        database.delete_session_file(file_id)
+        if agent_id:
+            return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=file_deleted", status_code=303)
+        return RedirectResponse("/ui/agents?saved=file_deleted", status_code=303)
+
     return app

@@ -27,6 +27,7 @@ from wintermute.runner import (
 )
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 from wintermute.tickets import parse_issue_ticket
+from wintermute.chat import ChatDispatcher
 
 
 @dataclass
@@ -41,10 +42,11 @@ class SessionWorkItem(WorkItem):
         session = ctx.db.get_session(self.session_id)
         if not session:
             return
-        project = ctx.db.get_project(session.project_id)
+        project = ctx.db.get_project(session.project_id) if session.project_id else None
         agent = ctx.db.get_agent(session.agent_id)
         vm = ctx.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
-        if not (project and agent and vm):
+        # Require agent and vm; project is optional for standalone sessions
+        if not (agent and vm):
             return
         if agent.session_mode == "mcp":
             await _run_mcp_session(ctx, session, project, agent, vm)
@@ -78,7 +80,7 @@ class SessionWorkItem(WorkItem):
                 )
             ctx.db.update_session(session.id, status="done")
             ctx.db.release_repo_resource_for_session(session.id)
-            if project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
+            if project and project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
                 await ctx.tools.call(
                     "slack_post_message",
                     {
@@ -815,10 +817,15 @@ def _store_output_comments(
     ctx: WorkItemContext, session: AgentSessionRecord, agent: Any, chunks: list[str]
 ) -> None:
     ticket_id = session.ticket_id
-    if not ticket_id:
+    # For ticket-based sessions, parse ticket info
+    source_id = None
+    issue_number = None
+    if ticket_id:
+        _provider, source_id, issue_number = parse_issue_ticket(ticket_id)
+    elif not session.agent_id:
+        # No ticket and no agent - skip
         return
-    _provider, source_id, issue_number = parse_issue_ticket(ticket_id)
-    author = agent.name if agent else None
+    author = agent.name if agent else "agent"
     for chunk in chunks:
         text = chunk.strip()
         if not text:
@@ -835,6 +842,8 @@ def _store_output_comments(
             body=text,
             public=False,
             approved=False,
+            agent_session_id=session.id if not ticket_id else None,
+            origin="agent",
         )
 
 
@@ -984,7 +993,7 @@ async def _emit_output(
             sanitized = sanitized.replace(session.last_user_message, "").strip()
         if sanitized and len(sanitized) >= 5 and re.search(r"[A-Za-z]", sanitized):
             comment_chunks = _chunk_text(sanitized, 3000)
-    if project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
+    if project and project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
         for chunk in _chunk_text(cleaned, 3000):
             await ctx.tools.call(
                 "slack_post_message",
@@ -993,6 +1002,14 @@ async def _emit_output(
                     "thread_ts": session.thread_ts,
                     "text": prefix + chunk,
                 },
+            )
+    # For standalone sessions, dispatch to agent's configured channels
+    if not project and session.agent_id:
+        dispatcher = ChatDispatcher(ctx.db)
+        for chunk in _chunk_text(cleaned, 3000):
+            await dispatcher.broadcast_to_agent_channels(
+                session.agent_id,
+                prefix + chunk,
             )
     _store_output_comments(ctx, session, agent, comment_chunks)
     return bool(comment_chunks)

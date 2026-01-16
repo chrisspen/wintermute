@@ -422,13 +422,19 @@ class GitHubIssuesSource(TaskSource):
             token_record = db.get_github_token(repo_source.token_id)
             if not token_record:
                 continue
-            issues = await self._fetch_issues(
-                token_record.token,
-                repo_source.owner,
-                repo_source.repo,
-                repo_source.state,
-                repo_source.labels,
-            )
+            try:
+                issues = await self._fetch_issues(
+                    token_record.token,
+                    repo_source.owner,
+                    repo_source.repo,
+                    repo_source.state,
+                    repo_source.labels,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to fetch issues for %s/%s: %s", repo_source.owner, repo_source.repo, exc
+                )
+                continue
             logger.info("Fetched %d issues for %s/%s", len(issues), repo_source.owner, repo_source.repo)
             for issue in issues:
                 if issue.get("pull_request"):
@@ -500,8 +506,18 @@ class GitHubIssuesSource(TaskSource):
         url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/issues"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, params=params) as response:
-                payload = await response.json()
+                # Check status before parsing JSON to avoid crashes on HTML error pages
                 if response.status >= 400:
+                    logging.getLogger(__name__).warning(
+                        "GitHub API returned %d for %s/%s", response.status, owner, repo
+                    )
+                    return []
+                try:
+                    payload = await response.json()
+                except aiohttp.ContentTypeError as exc:
+                    logging.getLogger(__name__).warning(
+                        "GitHub API returned non-JSON response for %s/%s: %s", owner, repo, exc
+                    )
                     return []
                 if isinstance(payload, list):
                     return payload

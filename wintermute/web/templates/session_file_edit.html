@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile wide">
+      <h3>{{ definition.filename }}</h3>
+      {% if definition.description %}
+      <p class="muted" style="font-size: 12px; margin-bottom: 12px;">{{ definition.description }}</p>
+      {% endif %}
+      <form method="post" action="/session-files/{{ file.id }}/edit">
+        <input type="hidden" name="agent_id" value="{{ agent.id }}" />
+        <div class="field-group">
+          <label>Content</label>
+          <textarea name="content" rows="24" style="font-family: monospace; font-size: 13px;">{{ file.content }}</textarea>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button type="submit">Save</button>
+          <span class="muted" style="font-size: 12px;">Last updated: {{ file.updated_at[:16].replace('T', ' ') }}</span>
+        </div>
+      </form>
+      <div class="form-actions">
+        <form method="post" action="/session-files/{{ file.id }}/delete">
+          <input type="hidden" name="agent_id" value="{{ agent.id }}" />
+          <button type="button" class="danger" data-confirm data-confirm-message="Delete this session file? The content will be lost.">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

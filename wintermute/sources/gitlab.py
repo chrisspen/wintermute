@@ -448,13 +448,19 @@ class GitLabIssuesSource(TaskSource):
             token_record = db.get_gitlab_token(repo_source.token_id)
             if not token_record:
                 continue
-            issues = await self._fetch_issues(
-                token_record.token,
-                repo_source.project_path,
-                repo_source.state,
-                repo_source.labels,
-                base_url=token_record.base_url,
-            )
+            try:
+                issues = await self._fetch_issues(
+                    token_record.token,
+                    repo_source.project_path,
+                    repo_source.state,
+                    repo_source.labels,
+                    base_url=token_record.base_url,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to fetch issues for %s: %s", repo_source.project_path, exc
+                )
+                continue
             logger.info("Fetched %d issues for %s", len(issues), repo_source.project_path)
             for issue in issues:
                 updated_at = issue.get("updated_at") or ""
@@ -533,8 +539,18 @@ class GitLabIssuesSource(TaskSource):
         url = f"{api_base}/projects/{encoded}/issues"
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, params=params) as response:
-                payload = await response.json()
+                # Check status before parsing JSON to avoid crashes on HTML error pages
                 if response.status >= 400:
+                    logging.getLogger(__name__).warning(
+                        "GitLab API returned %d for %s", response.status, project_id
+                    )
+                    return []
+                try:
+                    payload = await response.json()
+                except aiohttp.ContentTypeError as exc:
+                    logging.getLogger(__name__).warning(
+                        "GitLab API returned non-JSON response for %s: %s", project_id, exc
+                    )
                     return []
                 if isinstance(payload, list):
                     return payload

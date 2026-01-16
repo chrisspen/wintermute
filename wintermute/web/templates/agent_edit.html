@@ -1,6 +1,37 @@
 {% extends "base.html" %}
 
 {% block content %}
+<div class="panel sticky-panel">
+  <div class="agent-panel">
+    <div class="agent-status">
+      <span class="status-label">Status</span>
+      <span id="agent-status" class="status-value">{% if standalone_session %}online{% else %}offline{% endif %}</span>
+    </div>
+    <div class="agent-status typing-indicator hidden" id="agent-typing">
+      <span class="status-label">Agent</span>
+      <span class="status-value">
+        <span class="typing-spinner" aria-hidden="true"></span>
+        thinking…
+      </span>
+    </div>
+    <div class="agent-status">
+      <span class="status-label">Workspace</span>
+      <span id="agent-location" class="status-value {% if not standalone_session %}muted{% endif %}">{% if standalone_session and standalone_session.workspace_path %}{{ standalone_session.workspace_path }}{% else %}none{% endif %}</span>
+    </div>
+    <div class="agent-status">
+      <span class="status-label">PID</span>
+      <span id="agent-pid" class="status-value muted">-</span>
+    </div>
+    <div class="agent-status">
+      <span class="status-label">Log</span>
+      <span id="agent-log" class="status-value muted">-</span>
+    </div>
+    <div class="agent-actions">
+      <button type="button" id="agent-start" {% if standalone_session %}disabled{% endif %}>Start</button>
+      <button type="button" id="agent-stop" class="danger" {% if not standalone_session %}disabled{% endif %}>Stop</button>
+    </div>
+  </div>
+</div>
 <div class="panel">
   <div class="grid section-gap">
     <div class="tile">
@@ -35,6 +66,16 @@
             <option value="{{ vm.id }}" {% if agent.vm_target_id == vm.id %}selected{% endif %}>{{ vm.name }}</option>
             {% endfor %}
           </select>
+        </div>
+        <div class="field-group">
+          <label>Session File Config</label>
+          <select name="session_file_config_id">
+            <option value="" {% if not agent.session_file_config_id %}selected{% endif %}>(none)</option>
+            {% for config in session_file_configs %}
+            <option value="{{ config.id }}" {% if agent.session_file_config_id == config.id %}selected{% endif %}>{{ config.name }}</option>
+            {% endfor %}
+          </select>
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Defines which session files are used for this agent's memory.</p>
         </div>
         <div class="field-group">
           <label>Required SSH Options</label>
@@ -86,6 +127,142 @@
       </div>
     </div>
   </div>
+
+  <div class="grid section-gap">
+    <div class="tile wide">
+      <h3>Channels</h3>
+      <p class="muted" style="font-size: 12px; margin-bottom: 12px;">Chat channels where this agent can receive messages (Slack, Telegram, Discord, etc.)</p>
+      <table class="data-table" style="width: 100%;">
+        <thead>
+          <tr>
+            <th style="width: 80px; text-align: left;">Type</th>
+            <th style="min-width: 120px; text-align: left;">Name</th>
+            <th style="min-width: 120px; text-align: left;">External ID</th>
+            <th style="width: 70px; text-align: left;">Enabled</th>
+            <th style="width: 60px; text-align: left;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="channels-tbody">
+          {% for channel in channels %}
+          <tr data-channel-id="{{ channel.id }}">
+            <td>{{ channel.type }}</td>
+            <td class="editable-cell" data-field="name">{{ channel.name }}</td>
+            <td class="editable-cell" data-field="external_channel_id">{{ channel.external_channel_id or '-' }}</td>
+            <td>{% if channel.enabled %}Yes{% else %}No{% endif %}</td>
+            <td>
+              <form method="post" action="/agents/{{ agent.id }}/channels/{{ channel.id }}/delete" style="display: inline;">
+                <button type="button" class="link danger" style="font-size: 11px;" data-confirm data-confirm-message="Delete this channel?">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="muted">No channels configured</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="divider"></div>
+      <h4>Add Channel</h4>
+      <form method="post" action="/agents/{{ agent.id }}/channels" id="add-channel-form">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;">
+          <div class="field-group" style="flex: 0 0 120px;">
+            <label>Type</label>
+            <select name="channel_type" required>
+              <option value="slack">Slack</option>
+              <option value="telegram">Telegram</option>
+              <option value="discord">Discord</option>
+              <option value="web">Web</option>
+            </select>
+          </div>
+          <div class="field-group" style="flex: 1; min-width: 150px;">
+            <label>Name</label>
+            {% set vm_name = namespace(value='default') %}
+            {% for vm in vm_targets %}{% if vm.id == agent.vm_target_id %}{% set vm_name.value = vm.name %}{% endif %}{% endfor %}
+            <input type="text" name="name" value="{{ agent.name }}/{{ vm_name.value }}" />
+          </div>
+          <div class="field-group" style="flex: 1; min-width: 150px;">
+            <label>External ID</label>
+            <input type="text" name="external_channel_id" placeholder="e.g. C0123456789" />
+          </div>
+          <button type="submit" style="flex: 0 0 auto;">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="grid section-gap">
+    <div class="tile wide">
+      <h3>Session Files</h3>
+      <p class="muted" style="font-size: 12px; margin-bottom: 12px;">Agent memory files that persist across sessions. Copied to agent workspace on start, synced back on exit.</p>
+      {% if session_file_definitions %}
+      <table class="data-table" style="width: 100%;">
+        <thead>
+          <tr>
+            <th style="text-align: left;">Name</th>
+            <th style="text-align: left; width: 180px;">Last Updated</th>
+            <th style="text-align: left; width: 80px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for def in session_file_definitions %}
+          {% set file = file_contents.get(def.id) %}
+          <tr>
+            <td>
+              {{ def.filename }}
+              {% if def.required %}<span class="muted">(required)</span>{% endif %}
+              {% if def.description %}<span class="muted" style="font-weight: normal;"> - {{ def.description }}</span>{% endif %}
+            </td>
+            <td class="muted">{% if file %}{{ file.updated_at[:16].replace('T', ' ') }}{% else %}-{% endif %}</td>
+            <td>
+              {% if file %}
+              <a href="/ui/session-files/{{ file.id }}/edit" target="_blank" style="font-size: 12px;">View</a>
+              {% else %}
+              <span class="muted" style="font-size: 12px;">Not created</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size: 11px; margin-top: 8px;">Files are auto-created when you save the agent with a config selected.</p>
+      {% else %}
+      <p class="muted">Select a Session File Config above and save to enable session files for this agent.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="grid section-gap">
+    <div class="tile wide">
+      <h3>Conversation</h3>
+      {% if standalone_session %}
+      <div class="conversation" id="conversation-list" style="max-height: 400px; overflow-y: auto; margin-bottom: 16px;">
+        {% for comment in standalone_comments %}
+        <div class="comment" data-id="{{ comment.id }}" style="padding: 8px 12px; margin-bottom: 8px; background: var(--bg-alt); border-radius: 4px; {% if comment.author != 'user' %}border-left: 3px solid var(--accent);{% else %}border-left: 3px solid var(--text-muted);{% endif %}">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">
+            <strong>{{ comment.author or 'user' }}</strong>
+            {% if comment.origin %}<span>({{ comment.origin }})</span>{% endif %}
+            <span style="float: right;">{{ comment.created_at[:16].replace('T', ' ') }}</span>
+          </div>
+          <div style="white-space: pre-wrap;">{{ comment.body }}</div>
+        </div>
+        {% else %}
+        <div class="muted">No messages yet</div>
+        {% endfor %}
+      </div>
+      <form id="message-form">
+        <div class="field-group">
+          <label>Send Message</label>
+          <textarea id="message-body" name="message" rows="3" placeholder="Type a message to send to the agent..."></textarea>
+        </div>
+        <button type="submit">Send</button>
+      </form>
+      {% else %}
+      <p class="muted">Start a session using the button above to begin a conversation.</p>
+      {% endif %}
+    </div>
+  </div>
+
   <div class="grid section-gap">
     <div class="tile wide">
       <h3>Response Rules</h3>
@@ -103,4 +280,318 @@
     </div>
   </div>
 </div>
+
+<style>
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.status-running { background: #22c55e33; color: #22c55e; }
+.status-blocked { background: #f59e0b33; color: #f59e0b; }
+.status-stopped { background: #6b728033; color: #6b7280; }
+.status-failed { background: #ef444433; color: #ef4444; }
+.editable-cell {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.editable-cell:hover {
+  background: var(--bg-alt);
+}
+.editable-cell input {
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: inherit;
+  font-family: inherit;
+}
+</style>
+
+<script src="/static/comment-stream.js"></script>
+<script>
+(function() {
+  var agentId = "{{ agent.id }}";
+  var sessionId = {% if standalone_session %}"{{ standalone_session.id }}"{% else %}null{% endif %};
+  var initialLastCommentTs = {% if standalone_comments %}"{{ standalone_comments[-1].created_at }}"{% else %}null{% endif %};
+
+  var statusEl = document.getElementById("agent-status");
+  var locationEl = document.getElementById("agent-location");
+  var pidEl = document.getElementById("agent-pid");
+  var logEl = document.getElementById("agent-log");
+  var startBtn = document.getElementById("agent-start");
+  var stopBtn = document.getElementById("agent-stop");
+  var typingEl = document.getElementById("agent-typing");
+  var listEl = document.getElementById("conversation-list");
+  var formEl = document.getElementById("message-form");
+  var bodyEl = document.getElementById("message-body");
+
+  var updateStatus = function(running, newSessionId, location, pid, logPath) {
+    sessionId = newSessionId;
+    if (statusEl) {
+      statusEl.textContent = running ? "online" : "offline";
+    }
+    if (locationEl) {
+      if (running) {
+        locationEl.textContent = location || locationEl.textContent || "";
+        locationEl.classList.remove("muted");
+      } else {
+        locationEl.textContent = "none";
+        locationEl.classList.add("muted");
+      }
+    }
+    if (pidEl) {
+      if (running && pid) {
+        pidEl.textContent = pid;
+        pidEl.classList.remove("muted");
+      } else {
+        pidEl.textContent = "-";
+        pidEl.classList.add("muted");
+      }
+    }
+    if (logEl) {
+      if (running && logPath) {
+        logEl.textContent = logPath;
+        logEl.classList.remove("muted");
+      } else {
+        logEl.textContent = "-";
+        logEl.classList.add("muted");
+      }
+    }
+    if (startBtn) {
+      startBtn.disabled = running;
+    }
+    if (stopBtn) {
+      stopBtn.disabled = !running;
+    }
+  };
+
+  var refreshStatus = async function() {
+    try {
+      var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/session-status");
+      if (!response.ok) return;
+      var payload = await response.json();
+      updateStatus(payload.running, payload.session_id, payload.location, payload.pid, payload.log_path);
+    } catch (err) {
+      console.warn("Status refresh failed", err);
+    }
+  };
+
+  refreshStatus();
+  setInterval(refreshStatus, 3000);
+
+  // WebSocket comment stream (uses shared module)
+  var commentStream = new CommentStream({
+    wsUrl: "/ws/agents/" + encodeURIComponent(agentId) + "/comments",
+    listEl: listEl,
+    typingEl: typingEl,
+    lastCommentTs: initialLastCommentTs
+  });
+  commentStream.connect();
+
+  // Helper to append comments (used by form submit)
+  var appendComment = function(c) {
+    commentStream.appendComment(c);
+  };
+
+  if (startBtn) {
+    startBtn.addEventListener("click", async function() {
+      if (startBtn.disabled) return;
+      startBtn.disabled = true;
+      try {
+        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/start-session", {
+          method: "POST"
+        });
+        if (!response.ok) {
+          var err = await response.json();
+          alert(err.detail || "Failed to start session");
+          startBtn.disabled = false;
+          return;
+        }
+        var payload = await response.json();
+        updateStatus(true, payload.session_id, payload.location, null, null);
+        window.location.reload();
+      } catch (err) {
+        alert("Failed to start session");
+        startBtn.disabled = false;
+      }
+    });
+  }
+
+  if (stopBtn) {
+    stopBtn.addEventListener("click", async function() {
+      stopBtn.disabled = true;
+      if (!sessionId) return;
+      try {
+        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/session/stop", {
+          method: "POST"
+        });
+        if (!response.ok) {
+          alert("Failed to stop session");
+          stopBtn.disabled = false;
+          return;
+        }
+        updateStatus(false, null, null, null);
+        window.location.reload();
+      } catch (err) {
+        alert("Failed to stop session");
+        stopBtn.disabled = false;
+      }
+    });
+  }
+
+  if (formEl && bodyEl) {
+    bodyEl.addEventListener("keydown", function(event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        formEl.dispatchEvent(new Event("submit", { cancelable: true }));
+      }
+    });
+    formEl.addEventListener("submit", async function(event) {
+      event.preventDefault();
+      var body = bodyEl.value.trim();
+      if (!body) return;
+      if (!sessionId) {
+        alert("No active session");
+        return;
+      }
+      try {
+        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/comments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: body })
+        });
+        if (response.ok) {
+          var payload = await response.json();
+          if (payload.comment) {
+            appendComment(payload.comment);
+          }
+          bodyEl.value = "";
+        } else {
+          alert("Failed to send message");
+        }
+      } catch (err) {
+        alert("Failed to send message");
+      }
+    });
+  }
+
+  // Handle add channel form
+  var addChannelForm = document.getElementById("add-channel-form");
+  var channelsTbody = document.getElementById("channels-tbody");
+  if (addChannelForm) {
+    addChannelForm.addEventListener("submit", async function(e) {
+      e.preventDefault();
+      var typeSelect = addChannelForm.querySelector("select[name='channel_type']");
+      var nameInput = addChannelForm.querySelector("input[name='name']");
+      var extIdInput = addChannelForm.querySelector("input[name='external_channel_id']");
+      var channelType = typeSelect.value;
+      var channelName = nameInput.value.trim();
+      var externalId = extIdInput.value.trim() || null;
+      if (!channelType || !channelName) {
+        alert("Type and name are required");
+        return;
+      }
+      try {
+        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/channels", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: channelType, name: channelName, external_channel_id: externalId })
+        });
+        if (!response.ok) {
+          var err = await response.json();
+          alert(err.detail || "Failed to add channel");
+          return;
+        }
+        var payload = await response.json();
+        var ch = payload.channel;
+        // Add row to table
+        if (channelsTbody) {
+          var emptyRow = channelsTbody.querySelector("td[colspan]");
+          if (emptyRow) emptyRow.parentElement.remove();
+          var tr = document.createElement("tr");
+          tr.dataset.channelId = ch.id;
+          tr.innerHTML = '<td>' + ch.type + '</td>' +
+            '<td class="editable-cell" data-field="name">' + ch.name + '</td>' +
+            '<td class="editable-cell" data-field="external_channel_id">' + (ch.external_channel_id || '-') + '</td>' +
+            '<td>' + (ch.enabled ? 'Yes' : 'No') + '</td>' +
+            '<td><form method="post" action="/agents/{{ agent.id }}/channels/' + ch.id + '/delete" style="display: inline;"><button type="button" class="link danger" style="font-size: 11px;" data-confirm data-confirm-message="Delete this channel?">Delete</button></form></td>';
+          channelsTbody.appendChild(tr);
+          bindEditableCells(tr);
+        }
+        // Reset form to defaults
+        typeSelect.selectedIndex = 0;
+        nameInput.value = nameInput.defaultValue;
+        extIdInput.value = "";
+      } catch (err) {
+        alert("Failed to add channel");
+      }
+    });
+  }
+
+  // Inline editing for channel cells
+  function bindEditableCells(container) {
+    container.querySelectorAll(".editable-cell").forEach(function(cell) {
+      cell.addEventListener("click", function() {
+        if (cell.querySelector("input")) return; // Already editing
+        var row = cell.closest("tr");
+        var channelId = row.dataset.channelId;
+        var field = cell.dataset.field;
+        var currentValue = cell.textContent.trim();
+        if (currentValue === "-") currentValue = "";
+
+        var input = document.createElement("input");
+        input.type = "text";
+        input.value = currentValue;
+        cell.textContent = "";
+        cell.appendChild(input);
+        input.focus();
+        input.select();
+
+        var saveEdit = async function() {
+          var newValue = input.value.trim();
+          var displayValue = newValue || "-";
+          cell.textContent = displayValue;
+          if (newValue !== currentValue) {
+            var payload = {};
+            payload[field] = newValue;
+            try {
+              await fetch("/api/agents/" + encodeURIComponent(agentId) + "/channels/" + encodeURIComponent(channelId), {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+              });
+            } catch (err) {
+              console.warn("Failed to save channel edit", err);
+            }
+          }
+        };
+
+        input.addEventListener("blur", saveEdit);
+        input.addEventListener("keydown", function(e) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            input.blur();
+          } else if (e.key === "Escape") {
+            cell.textContent = currentValue || "-";
+          }
+        });
+      });
+    });
+  }
+  if (channelsTbody) {
+    bindEditableCells(channelsTbody);
+  }
+
+  // Scroll conversation to bottom on load
+  if (listEl) {
+    listEl.scrollTop = listEl.scrollHeight;
+  }
+})();
+</script>
 {% endblock %}

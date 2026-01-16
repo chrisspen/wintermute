@@ -8,16 +8,82 @@
       <form method="post" action="/projects/{{ project.id }}">
         <div class="field-group">
           <label>Name</label>
-          <input type="text" name="name" value="{{ project.name }}" required />
+          <input type="text" name="name" id="project-name" value="{{ project.name }}" required />
         </div>
         <div class="field-group">
           <label>Slug</label>
-          <input type="text" name="slug" value="{{ project.slug }}" required />
+          <input type="text" name="slug" id="project-slug" value="{{ project.slug }}" required />
         </div>
         <div class="field-group">
           <label>Slack Channel ID</label>
           <input type="text" name="slack_channel_id" value="{{ project.slack_channel_id or '' }}" />
         </div>
+
+        <div class="divider"></div>
+        <h4>Issue Source</h4>
+
+        <div class="field-group">
+          <label>Provider</label>
+          <select name="provider" id="provider-select">
+            <option value="" {% if not project.provider %}selected{% endif %}>None</option>
+            <option value="github" {% if project.provider == 'github' %}selected{% endif %}>GitHub</option>
+            <option value="gitlab" {% if project.provider == 'gitlab' %}selected{% endif %}>GitLab</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Source Repo URL</label>
+          <input type="text" name="source_repo" id="source-repo" value="{{ project.source_repo or '' }}" placeholder="e.g. https://github.com/owner/repo" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Paste full URL or owner/repo format. Used for fetching issues.</p>
+        </div>
+        <div class="field-group">
+          <label>Clone URL</label>
+          <input type="text" name="repo_url" id="repo-url" value="{{ project.repo_url or '' }}" placeholder="e.g. git@github.com:owner/repo.git" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Git URL for cloning (SSH or HTTPS). Used in clone mode.</p>
+        </div>
+        <div class="field-group">
+          <label>Token</label>
+          <select name="source_token_id" id="source-token">
+            <option value="">None</option>
+            {% for token in remote_tokens %}
+            <option value="{{ token.id }}" data-provider="{{ token.provider }}" {% if project.source_token_id == token.id %}selected{% endif %}>
+              [{{ token.provider }}] {{ token.note or token.user_login or token.id }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Agent</label>
+          <select name="source_agent_id">
+            <option value="">None</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}" {% if project.source_agent_id == agent.id %}selected{% endif %}>{{ agent.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Issue State</label>
+          <select name="issue_state">
+            <option value="open" {% if project.issue_state == 'open' or not project.issue_state %}selected{% endif %}>open</option>
+            <option value="closed" {% if project.issue_state == 'closed' %}selected{% endif %}>closed</option>
+            <option value="all" {% if project.issue_state == 'all' %}selected{% endif %}>all</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Issue Labels (comma-separated)</label>
+          <input type="text" name="issue_labels" value="{{ project.issue_labels | join(', ') if project.issue_labels else '' }}" placeholder="e.g. bug, enhancement" />
+        </div>
+        <div class="checkbox-row field-group">
+          <input type="checkbox" name="source_enabled" id="source_enabled" {% if project.source_enabled %}checked{% endif %} />
+          <label for="source_enabled">Source Enabled</label>
+        </div>
+        <div class="checkbox-row field-group">
+          <input type="checkbox" name="auto_start" id="auto_start" {% if project.auto_start %}checked{% endif %} />
+          <label for="auto_start">Auto-start agent sessions for issues</label>
+        </div>
+
+        <div class="divider"></div>
+        <h4>Repository Settings</h4>
+
         <div class="field-group">
           <label>Max Repo Resources</label>
           <input type="number" name="max_repo_resources" min="1" value="{{ project.max_repo_resources }}" />
@@ -29,16 +95,17 @@
             <option value="clone" {% if project.repo_mode == 'clone' %}selected{% endif %}>clone</option>
             <option value="local" {% if project.repo_mode == 'local' %}selected{% endif %}>local</option>
           </select>
-          <p class="muted" id="repo-mode-help" style="font-size: 12px; margin-top: 4px; margin-left: 18px;">{% if project.repo_mode == 'clone' %}Clones repo from repo_url to repo_path. Each session gets its own copy.{% elif project.repo_mode == 'local' %}Creates empty directory at /home/<user>/git/<project-id>. No repo_path or repo_url needed.{% else %}Uses existing repo at repo_path. All sessions share the same directory.{% endif %}</p>
+          <p class="muted" id="repo-mode-help" style="font-size: 12px; margin-top: 4px;">{% if project.repo_mode == 'clone' %}Clones repo from repo_url to repo_path. Each session gets its own copy.{% elif project.repo_mode == 'local' %}Creates empty directory at /home/<user>/git/<project-id>. No repo_path or repo_url needed.{% else %}Uses existing repo at repo_path. All sessions share the same directory.{% endif %}</p>
         </div>
         <div class="field-group">
           <label>Repo Path</label>
-          <input type="text" name="repo_path" value="{{ project.repo_path or '' }}" placeholder="e.g. /home/user/repos/project" />
+          <input type="text" name="repo_path" id="repo-path" value="{{ project.repo_path or '' }}" placeholder="e.g. /home/user/repos/project" />
+          <p class="muted" id="repo-path-help" style="font-size: 12px; margin-top: 4px;">Auto-filled for mirror mode based on Clone URL.</p>
         </div>
-        <div class="field-group">
-          <label>Repo URL</label>
-          <input type="text" name="repo_url" value="{{ project.repo_url or '' }}" placeholder="e.g. git@github.com:owner/repo.git" />
-        </div>
+
+        <div class="divider"></div>
+        <h4>Prompt</h4>
+
         <div class="field-group">
           <label>Prompt Template</label>
           <textarea name="prompt_template" rows="10">{{ project.prompt_template if project.prompt_template and project.prompt_template | trim else default_prompt_template }}</textarea>
@@ -64,114 +131,195 @@
         </button>
       </form>
     </div>
-    <div class="tile">
-      <h3>Issue Sources</h3>
-      {% if project_sources %}
-      <ul class="muted">
-        {% for source in project_sources %}
-        <li>
-          <strong>{{ source.provider }}</strong> {{ source.repo }} ({{ source.state }})
-          {% if source.enabled %}
-          <span class="badge">enabled</span>
-          {% else %}
-          <span class="badge">disabled</span>
-          {% endif %}
-          {% if source.auto_start %}
-          <span class="badge">auto-start</span>
-          {% else %}
-          <span class="badge">manual</span>
-          {% endif %}
-          {% if source.edit_url %}
-          <a href="{{ source.edit_url }}">edit</a>
-          {% endif %}
-          <span class="muted">labels: {{ source.labels }}, token: {{ source.token_label }}, agent: {{ source.agent_label }}</span>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <p class="muted">No sources configured for this project yet.</p>
-      {% endif %}
-      <div class="divider"></div>
-      <form method="post" action="/projects/{{ project.id }}/sources">
-        <input type="hidden" name="return_to" value="/ui/projects/{{ project.id }}/edit" />
-        <div class="checkbox-row">
-          <input type="checkbox" name="enabled" checked />
-          <label>Enabled</label>
-        </div>
-        <div class="field-group">
-          <label>Provider</label>
-          <select name="provider" required>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <label>Repo URL or Path</label>
-          <input type="text" name="repo" placeholder="e.g. https://github.com/owner/repo" required />
-        </div>
-        <div class="field-group">
-          <label>Token</label>
-          <select name="token_id">
-            <option value="">None</option>
-            {% if github_tokens %}
-            <optgroup label="GitHub Tokens">
-              {% for token in github_tokens %}
-              <option value="{{ token.id }}">{{ token.note or token.user_login or token.id }}</option>
-              {% endfor %}
-            </optgroup>
-            {% endif %}
-            {% if gitlab_tokens %}
-            <optgroup label="GitLab Tokens">
-              {% for token in gitlab_tokens %}
-              <option value="{{ token.id }}">{{ token.note or token.user_login or token.id }}</option>
-              {% endfor %}
-            </optgroup>
-            {% endif %}
-          </select>
-        </div>
-        <div class="field-group">
-          <label>Agent</label>
-          <select name="agent_id">
-            <option value="">None</option>
-            {% for agent in agents %}
-            <option value="{{ agent.id }}">{{ agent.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="field-group">
-          <label>Issue State</label>
-          <select name="state">
-            <option value="open" selected>open</option>
-            <option value="closed">closed</option>
-            <option value="all">all</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <label>Labels (comma-separated)</label>
-          <input type="text" name="labels" />
-        </div>
-        <div class="checkbox-row">
-          <input type="checkbox" name="auto_start" />
-          <label>Auto-start agent sessions for issues</label>
-        </div>
-        <button type="submit">Add Source</button>
-      </form>
-    </div>
   </div>
 </div>
 
 <script>
 (function() {
+  var nameInput = document.getElementById('project-name');
+  var slugInput = document.getElementById('project-slug');
   var repoModeSelect = document.getElementById('repo-mode');
   var repoModeHelp = document.getElementById('repo-mode-help');
+  var repoPathInput = document.getElementById('repo-path');
+  var repoUrlInput = document.getElementById('repo-url');
+  var sourceRepoInput = document.getElementById('source-repo');
+  var sourceTokenSelect = document.getElementById('source-token');
+  var providerSelect = document.getElementById('provider-select');
+  var userEditedRepoPath = repoPathInput.value.trim() !== '';
+  var userEditedToken = sourceTokenSelect.value !== '';
+  var userEditedName = nameInput.value.trim() !== '';
+  var userEditedSlug = slugInput.value.trim() !== '';
+  var mirrorRepoPathBase = '{{ mirror_repo_path_base }}';
+
+  function slugify(value) {
+    return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+  }
+
+  nameInput.addEventListener('input', function() {
+    userEditedName = true;
+  });
+
+  slugInput.addEventListener('input', function() {
+    userEditedSlug = true;
+  });
+
   var helpText = {
     mirror: 'Uses existing repo at repo_path. All sessions share the same directory.',
     clone: 'Clones repo from repo_url to repo_path. Each session gets its own copy.',
     local: 'Creates empty directory at /home/<user>/git/<project-id>. No repo_path or repo_url needed.'
   };
+
+  function extractOwnerRepo(url) {
+    if (!url) return null;
+    url = url.trim();
+    var owner = null, repo = null;
+    // Handle git@github.com:owner/repo.git
+    if (url.indexOf('@') !== -1 && url.indexOf(':') !== -1) {
+      var parts = url.split(':');
+      if (parts.length >= 2) {
+        var path = parts[parts.length - 1];
+        if (path.endsWith('.git')) path = path.slice(0, -4);
+        var segments = path.split('/');
+        if (segments.length >= 2) {
+          owner = segments[segments.length - 2];
+          repo = segments[segments.length - 1];
+        }
+      }
+    }
+    // Handle https://github.com/owner/repo or https://github.com/owner/repo.git
+    else if (url.indexOf('://') !== -1) {
+      try {
+        var parsed = new URL(url);
+        var pathname = parsed.pathname.replace(/^\/+|\/+$/g, '');
+        if (pathname.endsWith('.git')) pathname = pathname.slice(0, -4);
+        var segments = pathname.split('/');
+        if (segments.length >= 2) {
+          owner = segments[segments.length - 2];
+          repo = segments[segments.length - 1];
+        }
+      } catch (e) {
+        return null;
+      }
+    }
+    // Handle owner/repo format
+    else {
+      var segments = url.replace(/\.git$/, '').split('/');
+      if (segments.length >= 2) {
+        owner = segments[segments.length - 2];
+        repo = segments[segments.length - 1];
+      }
+    }
+    if (owner && repo) {
+      return { owner: owner, repo: repo, full: owner + '/' + repo };
+    }
+    return null;
+  }
+
+  function extractRepoName(url) {
+    var info = extractOwnerRepo(url);
+    return info ? info.repo : null;
+  }
+
+  function detectProvider(url) {
+    if (!url) return null;
+    url = url.toLowerCase();
+    if (url.indexOf('github.com') !== -1 || url.indexOf('github:') !== -1) return 'github';
+    if (url.indexOf('gitlab.com') !== -1 || url.indexOf('gitlab:') !== -1 || url.indexOf('gitlab.') !== -1) return 'gitlab';
+    return null;
+  }
+
+  function autoSelectToken(provider) {
+    if (userEditedToken || !provider) return;
+    var options = sourceTokenSelect.options;
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].dataset.provider === provider) {
+        sourceTokenSelect.selectedIndex = i;
+        break;
+      }
+    }
+  }
+
+  function autoSelectProvider(provider) {
+    if (!provider) return;
+    for (var i = 0; i < providerSelect.options.length; i++) {
+      if (providerSelect.options[i].value === provider) {
+        providerSelect.selectedIndex = i;
+        break;
+      }
+    }
+  }
+
+  function autoFillNameSlug() {
+    var sourceUrl = sourceRepoInput.value.trim();
+    var cloneUrl = repoUrlInput.value.trim();
+    var info = extractOwnerRepo(sourceUrl) || extractOwnerRepo(cloneUrl);
+    if (info) {
+      if (!userEditedName && nameInput.value.trim() === '') {
+        nameInput.value = info.full;
+      }
+      if (!userEditedSlug && slugInput.value.trim() === '') {
+        slugInput.value = slugify(info.full);
+      }
+    }
+  }
+
+  function handleUrlChange() {
+    var sourceUrl = sourceRepoInput.value.trim();
+    var cloneUrl = repoUrlInput.value.trim();
+    var provider = detectProvider(sourceUrl) || detectProvider(cloneUrl);
+    if (provider) {
+      autoSelectToken(provider);
+      autoSelectProvider(provider);
+    }
+    autoFillNameSlug();
+  }
+
+  function autoFillRepoPath() {
+    if (userEditedRepoPath) return;
+    if (repoModeSelect.value !== 'mirror') return;
+    var repoName = extractRepoName(repoUrlInput.value) || extractRepoName(sourceRepoInput.value);
+    if (repoName) {
+      repoPathInput.value = mirrorRepoPathBase + '/' + repoName;
+    }
+  }
+
+  sourceTokenSelect.addEventListener('change', function() {
+    userEditedToken = sourceTokenSelect.value !== '';
+  });
+
+  repoPathInput.addEventListener('input', function() {
+    userEditedRepoPath = repoPathInput.value.trim() !== '';
+  });
+
   repoModeSelect.addEventListener('change', function() {
     repoModeHelp.textContent = helpText[repoModeSelect.value] || '';
+    autoFillRepoPath();
   });
+
+  repoUrlInput.addEventListener('input', function() {
+    autoFillRepoPath();
+    handleUrlChange();
+  });
+
+  repoUrlInput.addEventListener('blur', function() {
+    autoFillRepoPath();
+    handleUrlChange();
+  });
+
+  sourceRepoInput.addEventListener('input', function() {
+    handleUrlChange();
+    autoFillRepoPath();
+  });
+
+  sourceRepoInput.addEventListener('blur', function() {
+    handleUrlChange();
+    autoFillRepoPath();
+  });
+
+  // Initial auto-fill on page load (only if repo_path is blank)
+  if (!userEditedRepoPath) {
+    autoFillRepoPath();
+  }
 })();
 </script>
 {% endblock %}

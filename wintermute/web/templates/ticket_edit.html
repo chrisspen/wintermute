@@ -278,6 +278,7 @@
     </div>
   </div>
 </div>
+<script src="/static/comment-stream.js"></script>
 <script>
   (() => {
     const listEl = document.getElementById("comment-list");
@@ -299,22 +300,14 @@
     const descEditPanel = document.getElementById("desc-edit-panel");
     const descText = document.getElementById("desc-text");
     const descSave = document.getElementById("desc-save");
-    const since = listEl?.dataset?.since || "";
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = `${protocol}://${window.location.host}/ws/tickets/${encodeURIComponent(ticketId)}${since ? `?since=${encodeURIComponent(since)}` : ""}`;
-    let ws;
     let sessionId = "{{ session_id or '' }}";
     const githubRefresh = document.getElementById("github-refresh");
 
-    const appendComment = (comment) => {
-      if (!comment || !comment.id) {
-        return;
-      }
-      if (listEl && listEl.querySelector(`[data-comment-id="${comment.id}"]`)) {
-        return;
-      }
+    // Custom comment formatter for ticket page (includes flags, edit/delete links)
+    const formatTicketComment = (comment) => {
       const item = document.createElement("li");
       item.classList.add("comment-entry");
+      item.setAttribute("data-id", comment.id);
       item.dataset.commentId = comment.id;
       const meta = document.createElement("div");
       meta.classList.add("comment-meta");
@@ -349,44 +342,26 @@
       body.innerHTML = comment.rendered_body || "";
       item.appendChild(meta);
       item.appendChild(body);
-      listEl.appendChild(item);
+      return item;
     };
 
-    const connect = () => {
-      ws = new WebSocket(wsUrl);
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload.type === "comment") {
-            const emptyState = listEl.querySelector("li.muted");
-            if (emptyState && !listEl.querySelector(".comment-entry")) {
-              emptyState.remove();
-            }
-            appendComment(payload.data);
-            if (typingEl) {
-              typingEl.classList.add("hidden");
-            }
-          } else if (payload.type === "typing") {
-            if (typingEl) {
-              const online = (statusEl?.textContent || "").trim() === "online";
-              if (payload.data?.active && online) {
-                typingEl.classList.remove("hidden");
-              } else {
-                typingEl.classList.add("hidden");
-              }
-            }
-          }
-        } catch (err) {
-          console.warn("WS parse error", err);
-        }
-      };
-      ws.onclose = () => {
-        setTimeout(connect, 2000);
-      };
-    };
-
+    // Initialize comment stream with WebSocket
+    let commentStream = null;
     if (listEl) {
-      connect();
+      commentStream = new CommentStream({
+        wsUrl: "/ws/tickets/" + encodeURIComponent(ticketId),
+        listEl: listEl,
+        typingEl: typingEl,
+        lastCommentTs: listEl.dataset.since || null,
+        formatComment: formatTicketComment,
+        onComment: function() {
+          // Hide typing indicator when comment arrives
+          if (typingEl) {
+            typingEl.classList.add("hidden");
+          }
+        }
+      });
+      commentStream.connect();
     }
 
     const updateStatus = (running, newSessionId, location, repoPath) => {
@@ -453,12 +428,8 @@
         });
         if (response.ok) {
           const payload = await response.json();
-          if (payload.comment) {
-            const emptyState = listEl.querySelector("li.muted");
-            if (emptyState && !listEl.querySelector(".comment-entry")) {
-              emptyState.remove();
-            }
-            appendComment(payload.comment);
+          if (payload.comment && commentStream) {
+            commentStream.appendComment(payload.comment);
           }
           bodyEl.value = "";
         } else {
