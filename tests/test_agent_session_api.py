@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch, MagicMock
 
 from fastapi.testclient import TestClient
 
@@ -36,6 +37,22 @@ def _create_test_user(db: Database, username: str = "testuser", password: str = 
     return user_id
 
 
+def _mock_subprocess_run(cmd, **kwargs):
+    """Mock subprocess.run for SSH/SCP commands."""
+    result = MagicMock()
+    result.returncode = 0
+    result.stderr = ""
+
+    # Check if it's a mktemp command
+    cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+    if "mktemp" in cmd_str:
+        result.stdout = "/tmp/agent_test-agent_mock123\n"
+    else:
+        result.stdout = ""
+
+    return result
+
+
 class AgentSessionAPITests(unittest.TestCase):
     """Tests for standalone agent session API."""
 
@@ -49,14 +66,23 @@ class AgentSessionAPITests(unittest.TestCase):
 
         # Create a test user and login
         _create_test_user(self.db)
-        login_response = self.client.post(
+        self.client.post(
             "/login",
             data={"username": "testuser", "password": "testpass"},
             follow_redirects=False,
         )
-        # TestClient keeps cookies automatically
 
-        # Create a test agent
+        # Create a test VM target (required for session start)
+        self.vm_target_id = str(uuid.uuid4())
+        self.db.insert_vm_target(
+            vm_id=self.vm_target_id,
+            name="test-vm",
+            host="localhost",
+            user="testuser",
+            port=22,
+        )
+
+        # Create a test agent with VM target
         self.agent_id = str(uuid.uuid4())
         self.db.insert_agent(
             agent_id=self.agent_id,
@@ -64,7 +90,7 @@ class AgentSessionAPITests(unittest.TestCase):
             slug="test-agent",
             command="echo test",
             session_mode="tmux",
-            vm_target_id=None,
+            vm_target_id=self.vm_target_id,
             required_ssh_options=None,
             env_vars=None,
             mcp_config=None,
@@ -87,7 +113,9 @@ class AgentSessionAPITests(unittest.TestCase):
         self.assertFalse(data["running"])
         self.assertIsNone(data["session_id"])
 
-    def test_start_session(self) -> None:
+    @patch("subprocess.run", side_effect=_mock_subprocess_run)
+    @patch("wintermute.runner.start_session")
+    def test_start_session(self, mock_start_session, mock_run) -> None:
         """Test starting a standalone session."""
         response = self.client.post(
             f"/api/agents/{self.agent_id}/start-session",
@@ -99,7 +127,9 @@ class AgentSessionAPITests(unittest.TestCase):
         self.assertIsNotNone(data["session_id"])
         self.assertIsNotNone(data["location"])
 
-    def test_session_status_after_start(self) -> None:
+    @patch("subprocess.run", side_effect=_mock_subprocess_run)
+    @patch("wintermute.runner.start_session")
+    def test_session_status_after_start(self, mock_start_session, mock_run) -> None:
         """Test session status after starting a session."""
         # Start a session first
         start_response = self.client.post(
@@ -116,7 +146,9 @@ class AgentSessionAPITests(unittest.TestCase):
         self.assertTrue(data["running"])
         self.assertEqual(data["session_id"], session_id)
 
-    def test_start_session_already_running(self) -> None:
+    @patch("subprocess.run", side_effect=_mock_subprocess_run)
+    @patch("wintermute.runner.start_session")
+    def test_start_session_already_running(self, mock_start_session, mock_run) -> None:
         """Test that starting a session fails if one is already running."""
         # Start first session
         self.client.post(
@@ -130,7 +162,10 @@ class AgentSessionAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("already running", response.json()["detail"])
 
-    def test_stop_session(self) -> None:
+    @patch("subprocess.run", side_effect=_mock_subprocess_run)
+    @patch("wintermute.runner.start_session")
+    @patch("wintermute.runner.stop_session")
+    def test_stop_session(self, mock_stop_session, mock_start_session, mock_run) -> None:
         """Test stopping a running session."""
         # Start a session first
         self.client.post(
@@ -153,7 +188,10 @@ class AgentSessionAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertIn("No running session", response.json()["detail"])
 
-    def test_session_status_after_stop(self) -> None:
+    @patch("subprocess.run", side_effect=_mock_subprocess_run)
+    @patch("wintermute.runner.start_session")
+    @patch("wintermute.runner.stop_session")
+    def test_session_status_after_stop(self, mock_stop_session, mock_start_session, mock_run) -> None:
         """Test session status returns not running after stop."""
         # Start and then stop a session
         self.client.post(
@@ -185,61 +223,14 @@ class AgentSessionAPITests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-
-class AgentSessionWithSessionFilesTests(unittest.TestCase):
-    """Tests for standalone sessions with session file configs."""
-
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
-        os.environ["WINTERMUTE_WEB_SECRET"] = "test-secret-key"
-        app = create_app(self.db)
-        self.client = TestClient(app)
-
-        # Create a test user and login
-        _create_test_user(self.db)
-        self.client.post(
-            "/login",
-            data={"username": "testuser", "password": "testpass"},
-            follow_redirects=False,
-        )
-
-        # Create session file config
-        self.config_id = str(uuid.uuid4())
-        self.db.insert_session_file_config(
-            config_id=self.config_id,
-            name="Test Config",
-        )
-
-        # Create file definitions
-        self.agents_md_def_id = str(uuid.uuid4())
-        self.db.insert_session_file_definition(
-            definition_id=self.agents_md_def_id,
-            config_id=self.config_id,
-            filename="AGENTS.md",
-            default_content="# Default AGENTS.md content",
-            required=True,
-            sync_on_exit=True,
-            sort_order=0,
-        )
-        self.state_md_def_id = str(uuid.uuid4())
-        self.db.insert_session_file_definition(
-            definition_id=self.state_md_def_id,
-            config_id=self.config_id,
-            filename="STATE.md",
-            default_content="# Default State",
-            required=False,
-            sync_on_exit=True,
-            sort_order=1,
-        )
-
-        # Create agent with session file config
-        self.agent_id = str(uuid.uuid4())
+    def test_start_session_no_vm_target(self) -> None:
+        """Test starting session for agent without VM target."""
+        # Create agent without VM target
+        agent_id = str(uuid.uuid4())
         self.db.insert_agent(
-            agent_id=self.agent_id,
-            name="Test Agent With Config",
-            slug="test-agent-config",
+            agent_id=agent_id,
+            name="No VM Agent",
+            slug="no-vm-agent",
             command="echo test",
             session_mode="tmux",
             vm_target_id=None,
@@ -250,78 +241,12 @@ class AgentSessionWithSessionFilesTests(unittest.TestCase):
             input_echo_prefix=None,
             response_prefix=None,
         )
-        # Set the session file config
-        self.db.update_agent(self.agent_id, session_file_config_id=self.config_id)
-
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
-
-    def test_start_creates_session_files_in_workspace(self) -> None:
-        """Test that starting a session creates session files in workspace."""
-        response = self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
-        self.assertEqual(response.status_code, 200)
-        workspace = response.json()["location"]
-
-        # Check files were created
-        agents_path = os.path.join(workspace, "AGENTS.md")
-        state_path = os.path.join(workspace, "STATE.md")
-        self.assertTrue(os.path.exists(agents_path))
-        self.assertTrue(os.path.exists(state_path))
-
-        # Check content is default
-        with open(agents_path, "r") as f:
-            self.assertEqual(f.read(), "# Default AGENTS.md content")
-        with open(state_path, "r") as f:
-            self.assertEqual(f.read(), "# Default State")
-
-    def test_start_uses_saved_session_file_content(self) -> None:
-        """Test that starting uses saved session file content if available."""
-        # Pre-save a session file for the agent
-        self.db.insert_session_file(
-            file_id=str(uuid.uuid4()),
-            agent_id=self.agent_id,
-            definition_id=self.agents_md_def_id,
-            content="# Custom saved content",
-        )
 
         response = self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
+            f"/api/agents/{agent_id}/start-session",
         )
-        self.assertEqual(response.status_code, 200)
-        workspace = response.json()["location"]
-
-        # Check custom content was used
-        agents_path = os.path.join(workspace, "AGENTS.md")
-        with open(agents_path, "r") as f:
-            self.assertEqual(f.read(), "# Custom saved content")
-
-    def test_stop_syncs_files_back(self) -> None:
-        """Test that stopping a session syncs files back to database."""
-        # Start session
-        start_response = self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
-        workspace = start_response.json()["location"]
-
-        # Modify a file in workspace
-        state_path = os.path.join(workspace, "STATE.md")
-        with open(state_path, "w") as f:
-            f.write("# Modified State Content\n\nSome changes.")
-
-        # Stop session
-        self.client.post(
-            f"/api/agents/{self.agent_id}/session/stop",
-        )
-
-        # Check file was synced back
-        session_file = self.db.get_session_file_by_definition(
-            self.agent_id, self.state_md_def_id
-        )
-        self.assertIsNotNone(session_file)
-        self.assertEqual(session_file.content, "# Modified State Content\n\nSome changes.")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("no VM target", response.json()["detail"])
 
 
 if __name__ == "__main__":

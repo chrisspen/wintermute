@@ -494,7 +494,7 @@ class CommentStreamAPITests(unittest.TestCase):
         data = response.json()
         self.assertIn("comment", data)
         self.assertEqual(data["comment"]["body"], "User message to agent")
-        self.assertEqual(data["comment"]["author"], "user")  # Agent endpoint uses 'user'
+        self.assertEqual(data["comment"]["author"], "testuser")  # Uses logged-in username
         # Verify the comment was stored in the database with the session association
         comment_id = data["comment"]["id"]
         stored_comment = self.db.get_comment(comment_id)
