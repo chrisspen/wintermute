@@ -91,24 +91,78 @@ class WorkItemStatusUpdate(BaseModel):
 
 
 API_PERMISSION_MODELS = [
-    {"key": "admin", "label": "Admin"},
-    {"key": "agents", "label": "Agents"},
-    {"key": "agent_responses", "label": "Agent Responses"},
-    {"key": "comments", "label": "Comments"},
-    {"key": "credentials", "label": "Credentials"},
-    {"key": "github_sources", "label": "GitHub Sources"},
-    {"key": "github_tokens", "label": "GitHub Tokens"},
-    {"key": "gitlab_sources", "label": "GitLab Sources"},
-    {"key": "gitlab_tokens", "label": "GitLab Tokens"},
-    {"key": "projects", "label": "Projects"},
-    {"key": "repo_resources", "label": "Repo Resources"},
-    {"key": "sessions", "label": "Agent Sessions"},
-    {"key": "supervisor_state", "label": "Supervisor State"},
-    {"key": "task_sources", "label": "Task Sources"},
-    {"key": "tickets", "label": "Tickets"},
-    {"key": "users", "label": "Users"},
-    {"key": "vms", "label": "VM Targets"},
-    {"key": "work_items", "label": "Work Items"},
+    {
+        "key": "admin",
+        "label": "Admin"
+    },
+    {
+        "key": "agents",
+        "label": "Agents"
+    },
+    {
+        "key": "agent_responses",
+        "label": "Agent Responses"
+    },
+    {
+        "key": "comments",
+        "label": "Comments"
+    },
+    {
+        "key": "credentials",
+        "label": "Credentials"
+    },
+    {
+        "key": "github_sources",
+        "label": "GitHub Sources"
+    },
+    {
+        "key": "github_tokens",
+        "label": "GitHub Tokens"
+    },
+    {
+        "key": "gitlab_sources",
+        "label": "GitLab Sources"
+    },
+    {
+        "key": "gitlab_tokens",
+        "label": "GitLab Tokens"
+    },
+    {
+        "key": "projects",
+        "label": "Projects"
+    },
+    {
+        "key": "repo_resources",
+        "label": "Repo Resources"
+    },
+    {
+        "key": "sessions",
+        "label": "Agent Sessions"
+    },
+    {
+        "key": "supervisor_state",
+        "label": "Supervisor State"
+    },
+    {
+        "key": "task_sources",
+        "label": "Task Sources"
+    },
+    {
+        "key": "tickets",
+        "label": "Tickets"
+    },
+    {
+        "key": "users",
+        "label": "Users"
+    },
+    {
+        "key": "vms",
+        "label": "VM Targets"
+    },
+    {
+        "key": "work_items",
+        "label": "Work Items"
+    },
 ]
 API_PERMISSION_ACTIONS = ["create", "read", "update", "delete"]
 
@@ -116,209 +170,669 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
     "tickets": {
         "default": ["title", "project_id", "status"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "title", "label": "Ticket"},
-            {"key": "project_id", "label": "Project"},
-            {"key": "agent_id", "label": "Agent"},
-            {"key": "assigned_to", "label": "Assignee"},
-            {"key": "created_by_id", "label": "Created By"},
-            {"key": "estimate", "label": "Estimate"},
-            {"key": "status", "label": "Status"},
-            {"key": "auto_start", "label": "Auto Start"},
-            {"key": "source_url", "label": "Source"},
-            {"key": "description", "label": "Description"},
-            {"key": "internal_notes", "label": "Internal Notes"},
-            {"key": "github_comments_json", "label": "GitHub Comments"},
-            {"key": "github_comments_fetched_at", "label": "GitHub Cached At"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "title",
+                "label": "Ticket"
+            },
+            {
+                "key": "project_id",
+                "label": "Project"
+            },
+            {
+                "key": "agent_id",
+                "label": "Agent"
+            },
+            {
+                "key": "assigned_to",
+                "label": "Assignee"
+            },
+            {
+                "key": "created_by_id",
+                "label": "Created By"
+            },
+            {
+                "key": "estimate",
+                "label": "Estimate"
+            },
+            {
+                "key": "status",
+                "label": "Status"
+            },
+            {
+                "key": "auto_start",
+                "label": "Auto Start"
+            },
+            {
+                "key": "source_url",
+                "label": "Source"
+            },
+            {
+                "key": "description",
+                "label": "Description"
+            },
+            {
+                "key": "internal_notes",
+                "label": "Internal Notes"
+            },
+            {
+                "key": "github_comments_json",
+                "label": "GitHub Comments"
+            },
+            {
+                "key": "github_comments_fetched_at",
+                "label": "GitHub Cached At"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "projects": {
         "default": ["name", "slug", "slack_channel_id", "actions"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "name", "label": "Project"},
-            {"key": "slug", "label": "Slug"},
-            {"key": "slack_channel_id", "label": "Slack Channel"},
-            {"key": "max_repo_resources", "label": "Max Repo Resources"},
-            {"key": "prompt_template", "label": "Prompt Template"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "actions", "label": "Actions"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Project"
+            },
+            {
+                "key": "slug",
+                "label": "Slug"
+            },
+            {
+                "key": "slack_channel_id",
+                "label": "Slack Channel"
+            },
+            {
+                "key": "max_repo_resources",
+                "label": "Max Repo Resources"
+            },
+            {
+                "key": "prompt_template",
+                "label": "Prompt Template"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "actions",
+                "label": "Actions"
+            },
         ],
     },
     "vms": {
         "default": ["name", "host", "user"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "name", "label": "VM"},
-            {"key": "host", "label": "Host"},
-            {"key": "user", "label": "User"},
-            {"key": "port", "label": "Port"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "VM"
+            },
+            {
+                "key": "host",
+                "label": "Host"
+            },
+            {
+                "key": "user",
+                "label": "User"
+            },
+            {
+                "key": "port",
+                "label": "Port"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "agents": {
         "default": ["name", "slug", "session_mode"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "name", "label": "Agent"},
-            {"key": "slug", "label": "Slug"},
-            {"key": "session_mode", "label": "Session Mode"},
-            {"key": "vm_target_id", "label": "VM"},
-            {"key": "command", "label": "Command"},
-            {"key": "required_ssh_options", "label": "SSH Options"},
-            {"key": "env_vars", "label": "Env Vars"},
-            {"key": "mcp_config", "label": "MCP Config"},
-            {"key": "trust_level", "label": "Trust Level"},
-            {"key": "input_echo_prefix", "label": "Input Echo Prefix"},
-            {"key": "response_prefix", "label": "Response Prefix"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Agent"
+            },
+            {
+                "key": "slug",
+                "label": "Slug"
+            },
+            {
+                "key": "session_mode",
+                "label": "Session Mode"
+            },
+            {
+                "key": "vm_target_id",
+                "label": "VM"
+            },
+            {
+                "key": "command",
+                "label": "Command"
+            },
+            {
+                "key": "required_ssh_options",
+                "label": "SSH Options"
+            },
+            {
+                "key": "env_vars",
+                "label": "Env Vars"
+            },
+            {
+                "key": "mcp_config",
+                "label": "MCP Config"
+            },
+            {
+                "key": "trust_level",
+                "label": "Trust Level"
+            },
+            {
+                "key": "input_echo_prefix",
+                "label": "Input Echo Prefix"
+            },
+            {
+                "key": "response_prefix",
+                "label": "Response Prefix"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "api_tokens": {
         "default": ["name", "permissions", "created_at"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "name", "label": "Token Name"},
-            {"key": "token", "label": "Token", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "permissions", "label": "Permissions"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Token Name"
+            },
+            {
+                "key": "token",
+                "label": "Token",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "permissions",
+                "label": "Permissions"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "comments": {
         "default": ["body", "project_id", "public", "approved", "sent"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "body", "label": "Comment"},
-            {"key": "ticket_id", "label": "Ticket"},
-            {"key": "session_id", "label": "Session"},
-            {"key": "project_id", "label": "Project"},
-            {"key": "agent_id", "label": "Agent"},
-            {"key": "author", "label": "Author"},
-            {"key": "source_id", "label": "Source"},
-            {"key": "issue_number", "label": "Issue #"},
-            {"key": "public", "label": "Public"},
-            {"key": "approved", "label": "Approved"},
-            {"key": "sent", "label": "Sent"},
-            {"key": "sent_at", "label": "Sent At", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "body",
+                "label": "Comment"
+            },
+            {
+                "key": "ticket_id",
+                "label": "Ticket"
+            },
+            {
+                "key": "session_id",
+                "label": "Session"
+            },
+            {
+                "key": "project_id",
+                "label": "Project"
+            },
+            {
+                "key": "agent_id",
+                "label": "Agent"
+            },
+            {
+                "key": "author",
+                "label": "Author"
+            },
+            {
+                "key": "source_id",
+                "label": "Source"
+            },
+            {
+                "key": "issue_number",
+                "label": "Issue #"
+            },
+            {
+                "key": "public",
+                "label": "Public"
+            },
+            {
+                "key": "approved",
+                "label": "Approved"
+            },
+            {
+                "key": "sent",
+                "label": "Sent"
+            },
+            {
+                "key": "sent_at",
+                "label": "Sent At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "remote_tokens": {
         "default": ["provider", "note", "user_login"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "provider", "label": "Provider"},
-            {"key": "note", "label": "Note"},
-            {"key": "token", "label": "Token", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "user_id", "label": "User ID"},
-            {"key": "user_login", "label": "User Login"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "provider",
+                "label": "Provider"
+            },
+            {
+                "key": "note",
+                "label": "Note"
+            },
+            {
+                "key": "token",
+                "label": "Token",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "user_id",
+                "label": "User ID"
+            },
+            {
+                "key": "user_login",
+                "label": "User Login"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "issue_sources": {
         "default": ["provider", "project_id", "repo", "enabled", "poll_interval_seconds"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "provider", "label": "Provider"},
-            {"key": "project_id", "label": "Project"},
-            {"key": "repo", "label": "Repo"},
-            {"key": "token_id", "label": "Token"},
-            {"key": "agent_id", "label": "Agent"},
-            {"key": "state", "label": "State"},
-            {"key": "labels", "label": "Labels"},
-            {"key": "enabled", "label": "Enabled"},
-            {"key": "auto_start", "label": "Auto Start"},
-            {"key": "poll_interval_seconds", "label": "Poll Interval"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "provider",
+                "label": "Provider"
+            },
+            {
+                "key": "project_id",
+                "label": "Project"
+            },
+            {
+                "key": "repo",
+                "label": "Repo"
+            },
+            {
+                "key": "token_id",
+                "label": "Token"
+            },
+            {
+                "key": "agent_id",
+                "label": "Agent"
+            },
+            {
+                "key": "state",
+                "label": "State"
+            },
+            {
+                "key": "labels",
+                "label": "Labels"
+            },
+            {
+                "key": "enabled",
+                "label": "Enabled"
+            },
+            {
+                "key": "auto_start",
+                "label": "Auto Start"
+            },
+            {
+                "key": "poll_interval_seconds",
+                "label": "Poll Interval"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "agent_responses": {
         "default": ["agent_id", "pattern", "response"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "agent_id", "label": "Agent"},
-            {"key": "pattern", "label": "Pattern"},
-            {"key": "response", "label": "Response"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "agent_id",
+                "label": "Agent"
+            },
+            {
+                "key": "pattern",
+                "label": "Pattern"
+            },
+            {
+                "key": "response",
+                "label": "Response"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "repo_resources": {
         "default": ["path", "project_id", "status"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "path", "label": "Path"},
-            {"key": "project_id", "label": "Project"},
-            {"key": "repo_mode", "label": "Repo Mode"},
-            {"key": "status", "label": "Status"},
-            {"key": "session_id", "label": "Session"},
-            {"key": "agent_id", "label": "Agent"},
-            {"key": "last_used_at", "label": "Last Used", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "path",
+                "label": "Path"
+            },
+            {
+                "key": "project_id",
+                "label": "Project"
+            },
+            {
+                "key": "repo_mode",
+                "label": "Repo Mode"
+            },
+            {
+                "key": "status",
+                "label": "Status"
+            },
+            {
+                "key": "session_id",
+                "label": "Session"
+            },
+            {
+                "key": "agent_id",
+                "label": "Agent"
+            },
+            {
+                "key": "last_used_at",
+                "label": "Last Used",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "work_items": {
         "default": ["work_id", "source_id", "status", "priority"],
         "columns": [
-            {"key": "work_id", "label": "Work ID"},
-            {"key": "source_id", "label": "Source"},
-            {"key": "priority", "label": "Priority"},
-            {"key": "status", "label": "Status"},
-            {"key": "attempts", "label": "Attempts"},
-            {"key": "run_after", "label": "Run After", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "last_error", "label": "Last Error"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "work_id",
+                "label": "Work ID"
+            },
+            {
+                "key": "source_id",
+                "label": "Source"
+            },
+            {
+                "key": "priority",
+                "label": "Priority"
+            },
+            {
+                "key": "status",
+                "label": "Status"
+            },
+            {
+                "key": "attempts",
+                "label": "Attempts"
+            },
+            {
+                "key": "run_after",
+                "label": "Run After",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "last_error",
+                "label": "Last Error"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "sessions": {
         "default": ["id", "project_id", "agent_id", "status"],
         "columns": [
-            {"key": "id", "label": "Session ID"},
-            {"key": "project_id", "label": "Project"},
-            {"key": "agent_id", "label": "Agent"},
-            {"key": "ticket_id", "label": "Ticket"},
-            {"key": "status", "label": "Status"},
-            {"key": "repo_path", "label": "Repo Path"},
-            {"key": "thread_ts", "label": "Thread"},
-            {"key": "mcp_conversation_id", "label": "MCP Conv ID"},
-            {"key": "claude_session_id", "label": "Claude Session"},
-            {"key": "last_output_at", "label": "Last Output", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "Session ID"
+            },
+            {
+                "key": "project_id",
+                "label": "Project"
+            },
+            {
+                "key": "agent_id",
+                "label": "Agent"
+            },
+            {
+                "key": "ticket_id",
+                "label": "Ticket"
+            },
+            {
+                "key": "status",
+                "label": "Status"
+            },
+            {
+                "key": "repo_path",
+                "label": "Repo Path"
+            },
+            {
+                "key": "thread_ts",
+                "label": "Thread"
+            },
+            {
+                "key": "mcp_conversation_id",
+                "label": "MCP Conv ID"
+            },
+            {
+                "key": "claude_session_id",
+                "label": "Claude Session"
+            },
+            {
+                "key": "last_output_at",
+                "label": "Last Output",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "sprints": {
         "default": ["name", "start_date", "end_date", "status"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "name", "label": "Sprint"},
-            {"key": "start_date", "label": "Start Date"},
-            {"key": "end_date", "label": "End Date"},
-            {"key": "enabled", "label": "Auto-Cycle"},
-            {"key": "status", "label": "Status"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Sprint"
+            },
+            {
+                "key": "start_date",
+                "label": "Start Date"
+            },
+            {
+                "key": "end_date",
+                "label": "End Date"
+            },
+            {
+                "key": "enabled",
+                "label": "Auto-Cycle"
+            },
+            {
+                "key": "status",
+                "label": "Status"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
     "session_file_configs": {
         "default": ["name", "description"],
         "columns": [
-            {"key": "id", "label": "ID", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "name", "label": "Name"},
-            {"key": "description", "label": "Description"},
-            {"key": "created_at", "label": "Created", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
-            {"key": "updated_at", "label": "Updated", "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"},
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Name"
+            },
+            {
+                "key": "description",
+                "label": "Description"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
         ],
     },
 }
@@ -341,9 +855,7 @@ def _verify_password(password: str, salt_b64: str, stored_hash: str) -> bool:
     return hmac.compare_digest(candidate, stored_hash)
 
 
-async def _fetch_github_issue_comments(
-    token: str, owner: str, repo: str, issue_number: int
-) -> tuple[list[dict[str, Any]], Optional[str]]:
+async def _fetch_github_issue_comments(token: str, owner: str, repo: str, issue_number: int) -> tuple[list[dict[str, Any]], Optional[str]]:
     headers = {
         "Accept": "application/vnd.github+json",
         "Authorization": f"Bearer {token}",
@@ -505,7 +1017,7 @@ def _truncate_text(value: Optional[str], limit: int = 80) -> str:
         return text
     if limit <= 3:
         return text[:limit]
-    return text[: limit - 3] + "..."
+    return text[:limit - 3] + "..."
 
 
 def _format_timestamp(value: Optional[str]) -> str:
@@ -554,9 +1066,7 @@ def _format_url(value: Optional[str], limit: int = 48) -> str:
     return _truncate_text(trimmed, limit)
 
 
-def _resolve_table_columns(
-    database: Database, user: str, model: str, available_keys: list[str], default_keys: list[str]
-) -> list[str]:
+def _resolve_table_columns(database: Database, user: str, model: str, available_keys: list[str], default_keys: list[str]) -> list[str]:
     selected: list[str] = []
     user_record = database.get_user(user)
     if user_record:
@@ -592,8 +1102,13 @@ def _build_ticket_rows(
         agent_name = agent_lookup.get(ticket.agent_id, ticket.agent_id) if ticket.agent_id else None
         created_by_name = user_lookup.get(ticket.created_by_id) if ticket.created_by_id else None
         cells = {
-            "id": {"text": _display_value(ticket.id)},
-            "title": {"text": _display_value(ticket.title), "href": f"/ui/tickets/{ticket.id}/edit"},
+            "id": {
+                "text": _display_value(ticket.id)
+            },
+            "title": {
+                "text": _display_value(ticket.title),
+                "href": f"/ui/tickets/{ticket.id}/edit"
+            },
             "project_id": {
                 "text": _display_value(project_name),
                 "href": f"/ui/projects/{ticket.project_id}/edit" if ticket.project_id else None,
@@ -602,22 +1117,44 @@ def _build_ticket_rows(
                 "text": _display_value(agent_name),
                 "href": f"/ui/agents/{ticket.agent_id}/edit" if ticket.agent_id else None,
             },
-            "assigned_to": {"text": _display_value(ticket.assigned_to)},
-            "created_by_id": {"text": _display_value(created_by_name)},
-            "estimate": {"text": _display_value(ticket.estimate)},
-            "status": {"text": _display_value(ticket.status)},
-            "auto_start": {"text": "yes" if ticket.auto_start else "no"},
+            "assigned_to": {
+                "text": _display_value(ticket.assigned_to)
+            },
+            "created_by_id": {
+                "text": _display_value(created_by_name)
+            },
+            "estimate": {
+                "text": _display_value(ticket.estimate)
+            },
+            "status": {
+                "text": _display_value(ticket.status)
+            },
+            "auto_start": {
+                "text": "yes" if ticket.auto_start else "no"
+            },
             "source_url": {
                 "text": _format_url(ticket.source_url),
                 "href": ticket.source_url,
                 "external": True,
             },
-            "description": {"text": _truncate_text(ticket.description, 80)},
-            "internal_notes": {"text": _truncate_text(ticket.internal_notes, 80)},
-            "github_comments_json": {"text": _format_github_comments(ticket.github_comments_json)},
-            "github_comments_fetched_at": {"text": _format_timestamp(ticket.github_comments_fetched_at)},
-            "created_at": {"text": _format_timestamp(ticket.created_at)},
-            "updated_at": {"text": _format_timestamp(ticket.updated_at)},
+            "description": {
+                "text": _truncate_text(ticket.description, 80)
+            },
+            "internal_notes": {
+                "text": _truncate_text(ticket.internal_notes, 80)
+            },
+            "github_comments_json": {
+                "text": _format_github_comments(ticket.github_comments_json)
+            },
+            "github_comments_fetched_at": {
+                "text": _format_timestamp(ticket.github_comments_fetched_at)
+            },
+            "created_at": {
+                "text": _format_timestamp(ticket.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(ticket.updated_at)
+            },
         }
         rows.append({"id": ticket.id, "cells": cells})
     return rows
@@ -627,15 +1164,35 @@ def _build_project_rows(projects: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for project in projects:
         cells = {
-            "id": {"text": _display_value(project.id)},
-            "name": {"text": _display_value(project.name), "href": f"/ui/projects/{project.id}/edit"},
-            "slug": {"text": _display_value(project.slug)},
-            "slack_channel_id": {"text": _display_value(project.slack_channel_id)},
-            "max_repo_resources": {"text": _display_value(project.max_repo_resources)},
-            "prompt_template": {"text": _truncate_text(project.prompt_template, 80)},
-            "created_at": {"text": _format_timestamp(project.created_at)},
-            "updated_at": {"text": _format_timestamp(project.updated_at)},
-            "actions": {"text": "Create Ticket", "href": f"/ui/tickets/create?project_id={project.id}"},
+            "id": {
+                "text": _display_value(project.id)
+            },
+            "name": {
+                "text": _display_value(project.name),
+                "href": f"/ui/projects/{project.id}/edit"
+            },
+            "slug": {
+                "text": _display_value(project.slug)
+            },
+            "slack_channel_id": {
+                "text": _display_value(project.slack_channel_id)
+            },
+            "max_repo_resources": {
+                "text": _display_value(project.max_repo_resources)
+            },
+            "prompt_template": {
+                "text": _truncate_text(project.prompt_template, 80)
+            },
+            "created_at": {
+                "text": _format_timestamp(project.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(project.updated_at)
+            },
+            "actions": {
+                "text": "Create Ticket",
+                "href": f"/ui/tickets/create?project_id={project.id}"
+            },
         }
         rows.append({"id": project.id, "cells": cells})
     return rows
@@ -645,13 +1202,28 @@ def _build_vm_rows(vm_targets: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for vm in vm_targets:
         cells = {
-            "id": {"text": _display_value(vm.id)},
-            "name": {"text": _display_value(vm.name), "href": f"/ui/vms/{vm.id}/edit"},
-            "host": {"text": _display_value(vm.host)},
-            "user": {"text": _display_value(vm.user)},
-            "port": {"text": _display_value(vm.port)},
-            "created_at": {"text": _format_timestamp(vm.created_at)},
-            "updated_at": {"text": _format_timestamp(vm.updated_at)},
+            "id": {
+                "text": _display_value(vm.id)
+            },
+            "name": {
+                "text": _display_value(vm.name),
+                "href": f"/ui/vms/{vm.id}/edit"
+            },
+            "host": {
+                "text": _display_value(vm.host)
+            },
+            "user": {
+                "text": _display_value(vm.user)
+            },
+            "port": {
+                "text": _display_value(vm.port)
+            },
+            "created_at": {
+                "text": _format_timestamp(vm.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(vm.updated_at)
+            },
         }
         rows.append({"id": vm.id, "cells": cells})
     return rows
@@ -661,20 +1233,49 @@ def _build_agent_rows(agents: list[Any], vm_lookup: dict[str, str]) -> list[dict
     rows: list[dict[str, Any]] = []
     for agent in agents:
         cells = {
-            "id": {"text": _display_value(agent.id)},
-            "name": {"text": _display_value(agent.name), "href": f"/ui/agents/{agent.id}/edit"},
-            "slug": {"text": _display_value(agent.slug)},
-            "session_mode": {"text": _display_value(agent.session_mode)},
-            "vm_target_id": {"text": vm_lookup.get(agent.vm_target_id, agent.vm_target_id or "—")},
-            "command": {"text": _truncate_text(agent.command, 80)},
-            "required_ssh_options": {"text": _truncate_text(agent.required_ssh_options, 80)},
-            "env_vars": {"text": _truncate_text(agent.env_vars, 80)},
-            "mcp_config": {"text": _truncate_text(agent.mcp_config, 80)},
-            "trust_level": {"text": _display_value(agent.trust_level)},
-            "input_echo_prefix": {"text": _truncate_text(agent.input_echo_prefix, 80)},
-            "response_prefix": {"text": _truncate_text(agent.response_prefix, 80)},
-            "created_at": {"text": _format_timestamp(agent.created_at)},
-            "updated_at": {"text": _format_timestamp(agent.updated_at)},
+            "id": {
+                "text": _display_value(agent.id)
+            },
+            "name": {
+                "text": _display_value(agent.name),
+                "href": f"/ui/agents/{agent.id}/edit"
+            },
+            "slug": {
+                "text": _display_value(agent.slug)
+            },
+            "session_mode": {
+                "text": _display_value(agent.session_mode)
+            },
+            "vm_target_id": {
+                "text": vm_lookup.get(agent.vm_target_id, agent.vm_target_id or "—")
+            },
+            "command": {
+                "text": _truncate_text(agent.command, 80)
+            },
+            "required_ssh_options": {
+                "text": _truncate_text(agent.required_ssh_options, 80)
+            },
+            "env_vars": {
+                "text": _truncate_text(agent.env_vars, 80)
+            },
+            "mcp_config": {
+                "text": _truncate_text(agent.mcp_config, 80)
+            },
+            "trust_level": {
+                "text": _display_value(agent.trust_level)
+            },
+            "input_echo_prefix": {
+                "text": _truncate_text(agent.input_echo_prefix, 80)
+            },
+            "response_prefix": {
+                "text": _truncate_text(agent.response_prefix, 80)
+            },
+            "created_at": {
+                "text": _format_timestamp(agent.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(agent.updated_at)
+            },
         }
         rows.append({"id": agent.id, "cells": cells})
     return rows
@@ -684,12 +1285,25 @@ def _build_api_token_rows(api_tokens: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for token in api_tokens:
         cells = {
-            "id": {"text": _display_value(token.id)},
-            "name": {"text": _display_value(token.name), "href": f"/ui/api-tokens/{token.id}/edit"},
-            "token": {"text": _mask_token(token.token)},
-            "permissions": {"text": _format_permissions(token.permissions)},
-            "created_at": {"text": _format_timestamp(token.created_at)},
-            "updated_at": {"text": _format_timestamp(token.updated_at)},
+            "id": {
+                "text": _display_value(token.id)
+            },
+            "name": {
+                "text": _display_value(token.name),
+                "href": f"/ui/api-tokens/{token.id}/edit"
+            },
+            "token": {
+                "text": _mask_token(token.token)
+            },
+            "permissions": {
+                "text": _format_permissions(token.permissions)
+            },
+            "created_at": {
+                "text": _format_timestamp(token.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(token.updated_at)
+            },
         }
         rows.append({"id": token.id, "cells": cells})
     return rows
@@ -699,42 +1313,88 @@ def _build_sprint_rows(sprints: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for sprint in sprints:
         cells = {
-            "id": {"text": _display_value(sprint.id)},
-            "name": {"text": _display_value(sprint.name), "href": f"/ui/sprints/{sprint.id}/edit"},
-            "start_date": {"text": sprint.start_date[:10] if sprint.start_date else "—"},
-            "end_date": {"text": sprint.end_date[:10] if sprint.end_date else "—"},
-            "enabled": {"text": "Yes" if sprint.enabled else "No"},
-            "status": {"text": _display_value(sprint.status)},
-            "created_at": {"text": _format_timestamp(sprint.created_at)},
-            "updated_at": {"text": _format_timestamp(sprint.updated_at)},
+            "id": {
+                "text": _display_value(sprint.id)
+            },
+            "name": {
+                "text": _display_value(sprint.name),
+                "href": f"/ui/sprints/{sprint.id}/edit"
+            },
+            "start_date": {
+                "text": sprint.start_date[:10] if sprint.start_date else "—"
+            },
+            "end_date": {
+                "text": sprint.end_date[:10] if sprint.end_date else "—"
+            },
+            "enabled": {
+                "text": "Yes" if sprint.enabled else "No"
+            },
+            "status": {
+                "text": _display_value(sprint.status)
+            },
+            "created_at": {
+                "text": _format_timestamp(sprint.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(sprint.updated_at)
+            },
         }
         rows.append({"id": sprint.id, "cells": cells})
     return rows
 
 
-def _build_comment_rows(
-    comments: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]
-) -> list[dict[str, Any]]:
+def _build_comment_rows(comments: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for comment in comments:
         project_name = project_lookup.get(comment.project_id, comment.project_id) if comment.project_id else None
         agent_name = agent_lookup.get(comment.agent_id, comment.agent_id) if comment.agent_id else None
         cells = {
-            "id": {"text": _display_value(comment.id)},
-            "body": {"text": _truncate_text(comment.body, 80), "href": f"/ui/comments/{comment.id}/edit"},
-            "ticket_id": {"text": _display_value(comment.ticket_id)},
-            "session_id": {"text": _display_value(comment.session_id)},
-            "project_id": {"text": _display_value(project_name)},
-            "agent_id": {"text": _display_value(agent_name)},
-            "author": {"text": _display_value(comment.author)},
-            "source_id": {"text": _display_value(comment.source_id)},
-            "issue_number": {"text": _display_value(comment.issue_number)},
-            "public": {"text": "yes" if comment.public else "no"},
-            "approved": {"text": "yes" if comment.approved else "no"},
-            "sent": {"text": "yes" if comment.sent else "no"},
-            "sent_at": {"text": _format_timestamp(comment.sent_at)},
-            "created_at": {"text": _format_timestamp(comment.created_at)},
-            "updated_at": {"text": _format_timestamp(comment.updated_at)},
+            "id": {
+                "text": _display_value(comment.id)
+            },
+            "body": {
+                "text": _truncate_text(comment.body, 80),
+                "href": f"/ui/comments/{comment.id}/edit"
+            },
+            "ticket_id": {
+                "text": _display_value(comment.ticket_id)
+            },
+            "session_id": {
+                "text": _display_value(comment.session_id)
+            },
+            "project_id": {
+                "text": _display_value(project_name)
+            },
+            "agent_id": {
+                "text": _display_value(agent_name)
+            },
+            "author": {
+                "text": _display_value(comment.author)
+            },
+            "source_id": {
+                "text": _display_value(comment.source_id)
+            },
+            "issue_number": {
+                "text": _display_value(comment.issue_number)
+            },
+            "public": {
+                "text": "yes" if comment.public else "no"
+            },
+            "approved": {
+                "text": "yes" if comment.approved else "no"
+            },
+            "sent": {
+                "text": "yes" if comment.sent else "no"
+            },
+            "sent_at": {
+                "text": _format_timestamp(comment.sent_at)
+            },
+            "created_at": {
+                "text": _format_timestamp(comment.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(comment.updated_at)
+            },
         }
         rows.append({"id": comment.id, "cells": cells})
     return rows
@@ -744,14 +1404,31 @@ def _build_remote_token_rows(tokens: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for token in tokens:
         cells = {
-            "id": {"text": _display_value(token.id)},
-            "provider": {"text": _display_value(token.provider)},
-            "note": {"text": _display_value(token.note), "href": f"/ui/remote-tokens/{token.id}/edit"},
-            "token": {"text": _mask_token(token.token)},
-            "user_id": {"text": _display_value(token.user_id)},
-            "user_login": {"text": _display_value(token.user_login)},
-            "created_at": {"text": _format_timestamp(token.created_at)},
-            "updated_at": {"text": _format_timestamp(token.updated_at)},
+            "id": {
+                "text": _display_value(token.id)
+            },
+            "provider": {
+                "text": _display_value(token.provider)
+            },
+            "note": {
+                "text": _display_value(token.note),
+                "href": f"/ui/remote-tokens/{token.id}/edit"
+            },
+            "token": {
+                "text": _mask_token(token.token)
+            },
+            "user_id": {
+                "text": _display_value(token.user_id)
+            },
+            "user_login": {
+                "text": _display_value(token.user_login)
+            },
+            "created_at": {
+                "text": _format_timestamp(token.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(token.updated_at)
+            },
         }
         rows.append({"id": token.id, "cells": cells})
     return rows
@@ -769,59 +1446,116 @@ def _build_issue_source_rows(
         token_name = token_lookup.get(source.token_id, source.token_id) if source.token_id else None
         agent_name = agent_lookup.get(source.agent_id, source.agent_id) if source.agent_id else None
         cells = {
-            "id": {"text": _display_value(source.id)},
-            "provider": {"text": _display_value(source.provider)},
-            "project_id": {"text": _display_value(project_name)},
-            "repo": {"text": _display_value(source.repo), "href": f"/ui/issue-sources/{source.id}/edit"},
-            "token_id": {"text": _display_value(token_name)},
-            "agent_id": {"text": _display_value(agent_name)},
-            "state": {"text": _display_value(source.state)},
-            "labels": {"text": ", ".join(source.labels) if source.labels else "n/a"},
-            "enabled": {"text": "yes" if source.enabled else "no"},
-            "auto_start": {"text": "yes" if source.auto_start else "no"},
-            "poll_interval_seconds": {"text": f"{source.poll_interval_seconds}s"},
-            "created_at": {"text": _format_timestamp(source.created_at)},
-            "updated_at": {"text": _format_timestamp(source.updated_at)},
+            "id": {
+                "text": _display_value(source.id)
+            },
+            "provider": {
+                "text": _display_value(source.provider)
+            },
+            "project_id": {
+                "text": _display_value(project_name)
+            },
+            "repo": {
+                "text": _display_value(source.repo),
+                "href": f"/ui/issue-sources/{source.id}/edit"
+            },
+            "token_id": {
+                "text": _display_value(token_name)
+            },
+            "agent_id": {
+                "text": _display_value(agent_name)
+            },
+            "state": {
+                "text": _display_value(source.state)
+            },
+            "labels": {
+                "text": ", ".join(source.labels) if source.labels else "n/a"
+            },
+            "enabled": {
+                "text": "yes" if source.enabled else "no"
+            },
+            "auto_start": {
+                "text": "yes" if source.auto_start else "no"
+            },
+            "poll_interval_seconds": {
+                "text": f"{source.poll_interval_seconds}s"
+            },
+            "created_at": {
+                "text": _format_timestamp(source.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(source.updated_at)
+            },
         }
         rows.append({"id": source.id, "cells": cells})
     return rows
 
 
-def _build_agent_response_rows(
-    responses: list[Any], agent_lookup: dict[str, str]
-) -> list[dict[str, Any]]:
+def _build_agent_response_rows(responses: list[Any], agent_lookup: dict[str, str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for response in responses:
         agent_name = agent_lookup.get(response.agent_id, response.agent_id) if response.agent_id else None
         cells = {
-            "id": {"text": _display_value(response.id)},
-            "agent_id": {"text": _display_value(agent_name)},
-            "pattern": {"text": _display_value(response.pattern), "href": f"/ui/agent-responses/{response.id}/edit"},
-            "response": {"text": _truncate_text(response.response, 80)},
-            "created_at": {"text": _format_timestamp(response.created_at)},
-            "updated_at": {"text": _format_timestamp(response.updated_at)},
+            "id": {
+                "text": _display_value(response.id)
+            },
+            "agent_id": {
+                "text": _display_value(agent_name)
+            },
+            "pattern": {
+                "text": _display_value(response.pattern),
+                "href": f"/ui/agent-responses/{response.id}/edit"
+            },
+            "response": {
+                "text": _truncate_text(response.response, 80)
+            },
+            "created_at": {
+                "text": _format_timestamp(response.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(response.updated_at)
+            },
         }
         rows.append({"id": response.id, "cells": cells})
     return rows
 
 
-def _build_repo_resource_rows(
-    resources: list[Any], project_lookup: dict[str, str]
-) -> list[dict[str, Any]]:
+def _build_repo_resource_rows(resources: list[Any], project_lookup: dict[str, str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for resource in resources:
         project_name = project_lookup.get(resource.project_id, resource.project_id) if resource.project_id else None
         cells = {
-            "id": {"text": _display_value(resource.id)},
-            "path": {"text": _display_value(resource.path), "href": f"/ui/repo-resources/{resource.id}/edit"},
-            "project_id": {"text": _display_value(project_name)},
-            "repo_mode": {"text": _display_value(resource.repo_mode)},
-            "status": {"text": _display_value(resource.status)},
-            "session_id": {"text": _display_value(resource.session_id)},
-            "agent_id": {"text": _display_value(resource.agent_id)},
-            "last_used_at": {"text": _format_timestamp(resource.last_used_at)},
-            "created_at": {"text": _format_timestamp(resource.created_at)},
-            "updated_at": {"text": _format_timestamp(resource.updated_at)},
+            "id": {
+                "text": _display_value(resource.id)
+            },
+            "path": {
+                "text": _display_value(resource.path),
+                "href": f"/ui/repo-resources/{resource.id}/edit"
+            },
+            "project_id": {
+                "text": _display_value(project_name)
+            },
+            "repo_mode": {
+                "text": _display_value(resource.repo_mode)
+            },
+            "status": {
+                "text": _display_value(resource.status)
+            },
+            "session_id": {
+                "text": _display_value(resource.session_id)
+            },
+            "agent_id": {
+                "text": _display_value(resource.agent_id)
+            },
+            "last_used_at": {
+                "text": _format_timestamp(resource.last_used_at)
+            },
+            "created_at": {
+                "text": _format_timestamp(resource.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(resource.updated_at)
+            },
         }
         rows.append({"id": resource.id, "cells": cells})
     return rows
@@ -831,40 +1565,82 @@ def _build_work_item_rows(work_items: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for item in work_items:
         cells = {
-            "work_id": {"text": _display_value(item.work_id), "href": f"/ui/work-items/{item.work_id}"},
-            "source_id": {"text": _display_value(item.source_id)},
-            "priority": {"text": _display_value(item.priority)},
-            "status": {"text": _display_value(item.status)},
-            "attempts": {"text": _display_value(item.attempts)},
-            "run_after": {"text": _format_timestamp(item.run_after)},
-            "last_error": {"text": _truncate_text(item.last_error, 80)},
-            "created_at": {"text": _format_timestamp(item.created_at)},
-            "updated_at": {"text": _format_timestamp(item.updated_at)},
+            "work_id": {
+                "text": _display_value(item.work_id),
+                "href": f"/ui/work-items/{item.work_id}"
+            },
+            "source_id": {
+                "text": _display_value(item.source_id)
+            },
+            "priority": {
+                "text": _display_value(item.priority)
+            },
+            "status": {
+                "text": _display_value(item.status)
+            },
+            "attempts": {
+                "text": _display_value(item.attempts)
+            },
+            "run_after": {
+                "text": _format_timestamp(item.run_after)
+            },
+            "last_error": {
+                "text": _truncate_text(item.last_error, 80)
+            },
+            "created_at": {
+                "text": _format_timestamp(item.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(item.updated_at)
+            },
         }
         rows.append({"id": item.work_id, "cells": cells})
     return rows
 
 
-def _build_session_rows(
-    sessions: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]
-) -> list[dict[str, Any]]:
+def _build_session_rows(sessions: list[Any], project_lookup: dict[str, str], agent_lookup: dict[str, str]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for session in sessions:
         project_name = project_lookup.get(session.project_id, session.project_id) if session.project_id else None
         agent_name = agent_lookup.get(session.agent_id, session.agent_id) if session.agent_id else None
         cells = {
-            "id": {"text": _display_value(session.id), "href": f"/ui/sessions/{session.id}"},
-            "project_id": {"text": _display_value(project_name)},
-            "agent_id": {"text": _display_value(agent_name)},
-            "ticket_id": {"text": _display_value(session.ticket_id)},
-            "status": {"text": _display_value(session.status)},
-            "repo_path": {"text": _display_value(session.repo_path)},
-            "thread_ts": {"text": _display_value(session.thread_ts)},
-            "mcp_conversation_id": {"text": _display_value(session.mcp_conversation_id)},
-            "claude_session_id": {"text": _display_value(session.claude_session_id)},
-            "last_output_at": {"text": _format_timestamp(session.last_output_at)},
-            "created_at": {"text": _format_timestamp(session.created_at)},
-            "updated_at": {"text": _format_timestamp(session.updated_at)},
+            "id": {
+                "text": _display_value(session.id),
+                "href": f"/ui/sessions/{session.id}"
+            },
+            "project_id": {
+                "text": _display_value(project_name)
+            },
+            "agent_id": {
+                "text": _display_value(agent_name)
+            },
+            "ticket_id": {
+                "text": _display_value(session.ticket_id)
+            },
+            "status": {
+                "text": _display_value(session.status)
+            },
+            "repo_path": {
+                "text": _display_value(session.repo_path)
+            },
+            "thread_ts": {
+                "text": _display_value(session.thread_ts)
+            },
+            "mcp_conversation_id": {
+                "text": _display_value(session.mcp_conversation_id)
+            },
+            "claude_session_id": {
+                "text": _display_value(session.claude_session_id)
+            },
+            "last_output_at": {
+                "text": _format_timestamp(session.last_output_at)
+            },
+            "created_at": {
+                "text": _format_timestamp(session.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(session.updated_at)
+            },
         }
         rows.append({"id": session.id, "cells": cells})
     return rows
@@ -894,8 +1670,10 @@ def _build_table_context(
         "table_title": title,
         "table_description": description,
         "table_columns": columns,
-        "table_columns_meta": {column["key"]: column for column in columns},
-        "table_columns_lookup": {column["key"]: column["label"] for column in columns},
+        "table_columns_meta": {column["key"]: column
+                               for column in columns},
+        "table_columns_lookup": {column["key"]: column["label"]
+                                 for column in columns},
         "table_selected_columns": selected,
         "table_rows": rows,
         "table_create_label": create_label,
@@ -976,16 +1754,14 @@ def _ticket_prompt(
         lines.extend(["", f"Source URL: {source_url}"])
     if internal_notes:
         lines.extend(["", "Internal notes:", internal_notes])
-    lines.extend(
-        [
-            "",
-            f"Repo path: {repo_path}",
-            f"Branch: {branch_name}",
-            "",
-            "Please do the work, commit your changes, and push the branch for review.",
-            "If you need clarification, ask your questions clearly.",
-        ]
-    )
+    lines.extend([
+        "",
+        f"Repo path: {repo_path}",
+        f"Branch: {branch_name}",
+        "",
+        "Please do the work, commit your changes, and push the branch for review.",
+        "If you need clarification, ask your questions clearly.",
+    ])
     default_prompt = "\n".join(lines)
     context = {
         "project_name": project_name,
@@ -1047,6 +1823,58 @@ def _find_channel_id(client: WebClient, channel_name: str) -> Optional[str]:
         if not cursor:
             break
     return None
+
+
+def _create_agent_slack_channel(database: Database, agent: Any, channel_name: str) -> Optional[str]:
+    """Create a Slack channel for an agent and return the channel ID.
+
+    The Slack channel name follows the pattern: {agent_slug}-{vm_name}
+    If the channel already exists, returns the existing channel's ID.
+    """
+    logger = logging.getLogger(__name__)
+    slack_bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+    if not slack_bot:
+        logger.warning("Slack bot token not configured - cannot create channel")
+        return None
+
+    # Build Slack channel name: {agent_slug}-{vm_name}
+    vm = database.get_vm_target(agent.vm_target_id) if agent.vm_target_id else None
+    if vm:
+        slack_channel_name = f"{agent.slug}-{vm.name}".lower().replace(" ", "-")
+    else:
+        slack_channel_name = f"{agent.slug}".lower().replace(" ", "-")
+
+    # Slack channel names must be lowercase, no spaces, max 80 chars
+    slack_channel_name = slack_channel_name[:80]
+
+    client = WebClient(token=slack_bot.reference)
+    channel_id = None
+
+    try:
+        resp = client.conversations_create(name=slack_channel_name, is_private=False)
+        channel_id = resp.get("channel", {}).get("id")
+        logger.info("Created Slack channel %s (ID: %s) for agent %s", slack_channel_name, channel_id, agent.slug)
+    except Exception as exc:
+        error_text = str(exc)
+        if "name_taken" in error_text:
+            channel_id = _find_channel_id(client, slack_channel_name)
+            logger.info("Slack channel %s already exists (ID: %s)", slack_channel_name, channel_id)
+        elif "missing_scope" in error_text:
+            logger.warning("Slack channel create missing scope for agent %s", agent.slug)
+        else:
+            logger.warning("Slack channel create failed for agent %s: %s", agent.slug, exc)
+
+    # Invite admin user to channel if configured
+    if channel_id:
+        admin_user_id = _slack_admin_user_id(database)
+        if admin_user_id:
+            try:
+                client.conversations_invite(channel=channel_id, users=admin_user_id)
+            except Exception as exc:
+                if "already_in_channel" not in str(exc):
+                    logger.warning("Failed to invite admin to channel %s: %s", slack_channel_name, exc)
+
+    return channel_id
 
 
 def _growl_message(saved: Optional[str]) -> Optional[str]:
@@ -1143,21 +1971,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     templates = Jinja2Templates(directory=os.path.join(base_dir, "templates"))
 
     class NoCacheStaticFiles(StaticFiles):
+
         async def get_response(self, path: str, scope: Any) -> Response:
             response = await super().get_response(path, scope)
-            response.headers.update(
-                {
-                    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                    "Pragma": "no-cache",
-                    "Expires": "0",
-                }
-            )
+            response.headers.update({
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            })
             return response
 
     app.mount("/static", NoCacheStaticFiles(directory=os.path.join(base_dir, "static")), name="static")
-    secret_key = (
-        os.environ.get("WINTERMUTE_WEB_SECRET") or secrets.token_urlsafe(32)
-    )
+    secret_key = (os.environ.get("WINTERMUTE_WEB_SECRET") or secrets.token_urlsafe(32))
     app.add_middleware(SessionMiddleware, secret_key=secret_key)
 
     def _render_markdown(text: Optional[str]) -> str:
@@ -1252,15 +2077,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         user = context.get("user") or request.session.get("user")
         response = templates.TemplateResponse(
             template_name,
-            {"request": request, "static_version": static_version, "user": user, **context},
-        )
-        response.headers.update(
             {
-                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                "Pragma": "no-cache",
-                "Expires": "0",
-            }
+                "request": request,
+                "static_version": static_version,
+                "user": user,
+                **context
+            },
         )
+        response.headers.update({
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        })
         return response
 
     def _ensure_agent_response(agent_id: str, pattern: str, response: str) -> None:
@@ -1366,17 +2194,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 if rows:
                     last_seen = rows[-1].created_at
                     for row in rows:
-                        await websocket.send_json(
-                            {"type": "comment", "data": comment_to_dict(row)}
-                        )
+                        await websocket.send_json({"type": "comment", "data": comment_to_dict(row)})
                 session = get_session()
                 if session and session.status == "running":
                     last_activity = session.last_output_at or session.prompt_sent_at
-                    active = (
-                        bool(session.awaiting_response)
-                        and bool(session.last_user_message)
-                        and _recent_activity(last_activity)
-                    )
+                    active = (bool(session.awaiting_response) and bool(session.last_user_message) and _recent_activity(last_activity))
                     await websocket.send_json({"type": "typing", "data": {"active": active}})
                 else:
                     await websocket.send_json({"type": "typing", "data": {"active": False}})
@@ -1501,23 +2323,19 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         rows = database.list_task_sources()
         result = []
         for row in rows:
-            result.append(
-                {
-                    "id": row.id,
-                    "enabled": bool(row.enabled),
-                    "base_priority": row.base_priority,
-                    "poll_interval_seconds": row.poll_interval_seconds,
-                    "config": row.config,
-                    "created_at": row.created_at,
-                    "updated_at": row.updated_at,
-                }
-            )
+            result.append({
+                "id": row.id,
+                "enabled": bool(row.enabled),
+                "base_priority": row.base_priority,
+                "poll_interval_seconds": row.poll_interval_seconds,
+                "config": row.config,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            })
         return result
 
     @app.put("/sources/{source_id}")
-    def update_source(
-        source_id: str, payload: TaskSourceUpdate, user: str = Depends(_require_login)
-    ) -> dict[str, Any]:
+    def update_source(source_id: str, payload: TaskSourceUpdate, user: str = Depends(_require_login)) -> dict[str, Any]:
         rows = {row.id: row for row in database.list_task_sources()}
         row = rows.get(source_id)
         if not row:
@@ -1526,17 +2344,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             source_id,
             payload.enabled if payload.enabled is not None else bool(row.enabled),
             payload.base_priority if payload.base_priority is not None else row.base_priority,
-            payload.poll_interval_seconds
-            if payload.poll_interval_seconds is not None
-            else row.poll_interval_seconds,
+            payload.poll_interval_seconds if payload.poll_interval_seconds is not None else row.poll_interval_seconds,
             payload.config if payload.config is not None else row.config,
         )
         return {"status": "ok"}
 
     @app.post("/sources/{source_id}/ui_update")
-    async def update_source_ui(
-        source_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_source_ui(source_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         row = database.get_task_source(source_id)
         if not row:
@@ -1628,25 +2442,20 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui?saved={saved}", status_code=303)
 
     @app.get("/work-items")
-    def list_work_items(
-        status: Optional[str] = None, user: str = Depends(_require_login)
-    ) -> list[dict[str, Any]]:
+    def list_work_items(status: Optional[str] = None, user: str = Depends(_require_login)) -> list[dict[str, Any]]:
         rows = database.list_work_items(status=status)
-        return [
-            {
-                "work_id": row.work_id,
-                "source_id": row.source_id,
-                "priority": row.priority,
-                "status": row.status,
-                "checkpoint": row.checkpoint,
-                "created_at": row.created_at,
-                "updated_at": row.updated_at,
-                "run_after": row.run_after,
-                "attempts": row.attempts,
-                "last_error": row.last_error,
-            }
-            for row in rows
-        ]
+        return [{
+            "work_id": row.work_id,
+            "source_id": row.source_id,
+            "priority": row.priority,
+            "status": row.status,
+            "checkpoint": row.checkpoint,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "run_after": row.run_after,
+            "attempts": row.attempts,
+            "last_error": row.last_error,
+        } for row in rows]
 
     @app.get("/work-items/{work_id}")
     def get_work_item(work_id: str, user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -1684,22 +2493,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.get("/credentials")
     def list_credentials(user: str = Depends(_require_login)) -> list[dict[str, Any]]:
-        return [
-            {
-                "id": row.id,
-                "name": row.name,
-                "provider": row.provider,
-                "reference": row.reference,
-                "note": row.note,
-                "created_at": row.created_at,
-            }
-            for row in database.list_credentials()
-        ]
+        return [{
+            "id": row.id,
+            "name": row.name,
+            "provider": row.provider,
+            "reference": row.reference,
+            "note": row.note,
+            "created_at": row.created_at,
+        } for row in database.list_credentials()]
 
     @app.post("/credentials")
-    def create_credential(
-        payload: CredentialCreate, user: str = Depends(_require_login)
-    ) -> dict[str, Any]:
+    def create_credential(payload: CredentialCreate, user: str = Depends(_require_login)) -> dict[str, Any]:
         cred_id = str(uuid.uuid4())
         database.insert_credential(
             cred_id,
@@ -1711,9 +2515,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"id": cred_id}
 
     @app.post("/slack/credentials")
-    async def set_slack_credentials(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def set_slack_credentials(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         bot_token = str(form.get("bot_token", "")).strip()
         app_token = str(form.get("app_token", "")).strip()
@@ -1742,9 +2544,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui?saved=slack", status_code=303)
 
     @app.post("/github-tokens")
-    async def create_github_token(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_github_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         token = str(form.get("token", "")).strip()
         note = str(form.get("note", "")).strip() or None
@@ -1764,9 +2564,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}?saved=github_token_created", status_code=303)
 
     @app.post("/github-tokens/{token_id}/edit")
-    async def update_github_token(
-        token_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_github_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         token = str(form.get("token", "")).strip()
         note = str(form.get("note", "")).strip() or None
@@ -1787,16 +2585,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/github-tokens?saved=github_token_updated", status_code=303)
 
     @app.post("/github-tokens/{token_id}/delete")
-    async def delete_github_token(
-        token_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_github_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_github_token(token_id)
         return RedirectResponse("/ui/github-tokens?saved=github_token_deleted", status_code=303)
 
     @app.post("/gitlab-tokens")
-    async def create_gitlab_token(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_gitlab_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         token = str(form.get("token", "")).strip()
         note = str(form.get("note", "")).strip() or None
@@ -1816,9 +2610,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}?saved=gitlab_token_created", status_code=303)
 
     @app.post("/gitlab-tokens/{token_id}/edit")
-    async def update_gitlab_token(
-        token_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_gitlab_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         token = str(form.get("token", "")).strip()
         note = str(form.get("note", "")).strip() or None
@@ -1839,18 +2631,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_updated", status_code=303)
 
     @app.post("/gitlab-tokens/{token_id}/delete")
-    async def delete_gitlab_token(
-        token_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_gitlab_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_gitlab_token(token_id)
         return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_deleted", status_code=303)
 
     # --- Unified Remote Token POST routes ---
 
     @app.post("/remote-tokens")
-    async def create_remote_token(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_remote_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         provider = str(form.get("provider", "github")).strip()
         token = str(form.get("token", "")).strip()
@@ -1879,9 +2667,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}?saved=remote_token_created", status_code=303)
 
     @app.post("/remote-tokens/{token_id}/edit")
-    async def update_remote_token(
-        token_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_remote_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         provider = str(form.get("provider", "")).strip()
         token = str(form.get("token", "")).strip()
@@ -1911,9 +2697,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/remote-tokens?saved=remote_token_updated", status_code=303)
 
     @app.post("/remote-tokens/{token_id}/delete")
-    async def delete_remote_token(
-        token_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_remote_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_remote_token(token_id)
         return RedirectResponse("/ui/remote-tokens?saved=remote_token_deleted", status_code=303)
 
@@ -2014,9 +2798,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}{separator}saved=api_token_created", status_code=303)
 
     @app.post("/api-tokens/{token_id}/edit")
-    async def update_api_token(
-        token_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_api_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         name = str(form.get("name", "")).strip()
         token_value = str(form.get("token", "")).strip()
@@ -2032,9 +2814,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/api-tokens?saved=api_token_updated", status_code=303)
 
     @app.post("/api-tokens/{token_id}/delete")
-    async def delete_api_token(
-        token_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_api_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_api_token(token_id)
         return RedirectResponse("/ui/api-tokens?saved=api_token_deleted", status_code=303)
 
@@ -2054,10 +2834,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def _api_model_handlers() -> dict[str, dict[str, Any]]:
         return {
             "projects": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_projects()],
-                "get": database.get_project,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_projects()],
+                "get":
+                database.get_project,
                 "required": ["name"],
-                "create": lambda payload: database.insert_project(
+                "create":
+                lambda payload: database.insert_project(
                     str(uuid.uuid4()),
                     payload["name"],
                     payload.get("slug") or _slugify(payload["name"]),
@@ -2068,7 +2851,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     repo_path=payload.get("repo_path"),
                     repo_url=payload.get("repo_url"),
                 ),
-                "update": lambda item_id, payload: database.update_project(
+                "update":
+                lambda item_id, payload: database.update_project(
                     item_id,
                     name=payload.get("name"),
                     slug=payload.get("slug"),
@@ -2079,13 +2863,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     repo_path=payload.get("repo_path"),
                     repo_url=payload.get("repo_url"),
                 ),
-                "delete": database.delete_project,
+                "delete":
+                database.delete_project,
             },
             "comments": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_comments()],
-                "get": database.get_comment,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_comments()],
+                "get":
+                database.get_comment,
                 "required": ["ticket_id", "body"],
-                "create": lambda payload: database.insert_comment(
+                "create":
+                lambda payload: database.insert_comment(
                     payload.get("id") or str(uuid.uuid4()),
                     payload["ticket_id"],
                     payload.get("session_id"),
@@ -2098,7 +2886,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     bool(payload.get("public")),
                     bool(payload.get("approved")),
                 ),
-                "update": lambda item_id, payload: database.update_comment(
+                "update":
+                lambda item_id, payload: database.update_comment(
                     item_id,
                     body=payload.get("body"),
                     public=payload.get("public"),
@@ -2106,13 +2895,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     sent=payload.get("sent"),
                     sent_at=payload.get("sent_at"),
                 ),
-                "delete": database.delete_comment,
+                "delete":
+                database.delete_comment,
             },
             "repo_resources": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_repo_resources()],
-                "get": database.get_repo_resource,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_repo_resources()],
+                "get":
+                database.get_repo_resource,
                 "required": ["project_id", "repo_mode", "path", "status"],
-                "create": lambda payload: database.insert_repo_resource(
+                "create":
+                lambda payload: database.insert_repo_resource(
                     payload.get("id") or str(uuid.uuid4()),
                     payload["project_id"],
                     payload["repo_mode"],
@@ -2121,20 +2914,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     session_id=payload.get("session_id"),
                     agent_id=payload.get("agent_id"),
                 ),
-                "update": lambda item_id, payload: database.update_repo_resource(
+                "update":
+                lambda item_id, payload: database.update_repo_resource(
                     item_id,
                     status=payload.get("status"),
                     session_id=payload.get("session_id"),
                     agent_id=payload.get("agent_id"),
                     last_used_at=payload.get("last_used_at"),
                 ),
-                "delete": database.delete_repo_resource,
+                "delete":
+                database.delete_repo_resource,
             },
             "tickets": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_tickets()],
-                "get": database.get_ticket,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_tickets()],
+                "get":
+                database.get_ticket,
                 "required": ["project_id", "title"],
-                "create": lambda payload: database.insert_ticket(
+                "create":
+                lambda payload: database.insert_ticket(
                     payload.get("id") or str(uuid.uuid4()),
                     payload["project_id"],
                     payload["title"],
@@ -2147,11 +2945,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     source_url=payload.get("source_url"),
                     auto_start=bool(payload.get("auto_start", False)),
                 ),
-                "update": lambda item_id, payload: database.update_ticket(
+                "update":
+                lambda item_id, payload: database.update_ticket(
                     item_id,
-                    agent_id=("" if "agent_id" in payload and payload.get("agent_id") is None else payload.get("agent_id"))
-                    if "agent_id" in payload
-                    else None,
+                    agent_id=("" if "agent_id" in payload and payload.get("agent_id") is None else payload.get("agent_id")) if "agent_id" in payload else None,
                     title=payload.get("title"),
                     description=payload.get("description"),
                     internal_notes=payload.get("internal_notes"),
@@ -2161,33 +2958,42 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     source_url=payload.get("source_url"),
                     auto_start=payload.get("auto_start"),
                 ),
-                "delete": database.delete_ticket,
+                "delete":
+                database.delete_ticket,
             },
             "vms": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_vm_targets()],
-                "get": database.get_vm_target,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_vm_targets()],
+                "get":
+                database.get_vm_target,
                 "required": ["name", "host"],
-                "create": lambda payload: database.insert_vm_target(
+                "create":
+                lambda payload: database.insert_vm_target(
                     str(uuid.uuid4()),
                     payload["name"],
                     payload["host"],
                     payload.get("user") or "root",
                     int(payload.get("port") or 22),
                 ),
-                "update": lambda item_id, payload: database.update_vm_target(
+                "update":
+                lambda item_id, payload: database.update_vm_target(
                     item_id,
                     name=payload.get("name"),
                     host=payload.get("host"),
                     user=payload.get("user"),
                     port=int(payload["port"]) if payload.get("port") is not None else None,
                 ),
-                "delete": database.delete_vm_target,
+                "delete":
+                database.delete_vm_target,
             },
             "agents": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_agents()],
-                "get": database.get_agent,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_agents()],
+                "get":
+                database.get_agent,
                 "required": ["name", "command"],
-                "create": lambda payload: database.insert_agent(
+                "create":
+                lambda payload: database.insert_agent(
                     str(uuid.uuid4()),
                     payload["name"],
                     payload.get("slug") or _slugify(payload["name"]),
@@ -2200,7 +3006,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload.get("input_echo_prefix"),
                     payload.get("response_prefix"),
                 ),
-                "update": lambda item_id, payload: database.update_agent(
+                "update":
+                lambda item_id, payload: database.update_agent(
                     item_id,
                     name=payload.get("name"),
                     slug=payload.get("slug"),
@@ -2213,31 +3020,40 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     input_echo_prefix=payload.get("input_echo_prefix"),
                     response_prefix=payload.get("response_prefix"),
                 ),
-                "delete": database.delete_agent,
+                "delete":
+                database.delete_agent,
             },
             "agent_responses": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_agent_responses()],
-                "get": database.get_agent_response,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_agent_responses()],
+                "get":
+                database.get_agent_response,
                 "required": ["agent_id", "pattern", "response"],
-                "create": lambda payload: database.insert_agent_response(
+                "create":
+                lambda payload: database.insert_agent_response(
                     payload.get("id") or str(uuid.uuid4()),
                     payload["agent_id"],
                     payload["pattern"],
                     payload["response"],
                 ),
-                "update": lambda item_id, payload: database.update_agent_response(
+                "update":
+                lambda item_id, payload: database.update_agent_response(
                     item_id,
                     agent_id=payload.get("agent_id"),
                     pattern=payload.get("pattern"),
                     response=payload.get("response"),
                 ),
-                "delete": database.delete_agent_response,
+                "delete":
+                database.delete_agent_response,
             },
             "sessions": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_sessions()],
-                "get": database.get_session,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_sessions()],
+                "get":
+                database.get_session,
                 "required": ["project_id", "agent_id", "repo_path"],
-                "create": lambda payload: database.insert_session(
+                "create":
+                lambda payload: database.insert_session(
                     payload.get("id") or str(uuid.uuid4()),
                     payload["project_id"],
                     payload["agent_id"],
@@ -2247,7 +3063,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     payload.get("thread_ts"),
                     payload.get("mcp_conversation_id"),
                 ),
-                "update": lambda item_id, payload: database.update_session(
+                "update":
+                lambda item_id, payload: database.update_session(
                     item_id,
                     status=payload.get("status"),
                     thread_ts=payload.get("thread_ts"),
@@ -2260,7 +3077,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     prompt_sent_at=payload.get("prompt_sent_at"),
                     last_output_at=payload.get("last_output_at"),
                 ),
-                "delete": database.delete_session,
+                "delete":
+                database.delete_session,
             },
             "supervisor_state": {
                 "list": lambda: [state] if (state := database.get_supervisor_state()) else [],
@@ -2271,30 +3089,38 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "delete": lambda item_id: _unsupported_api_action("supervisor_state"),
             },
             "github_tokens": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_github_tokens()],
-                "get": database.get_github_token,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_github_tokens()],
+                "get":
+                database.get_github_token,
                 "required": ["token"],
-                "create": lambda payload: database.insert_github_token(
+                "create":
+                lambda payload: database.insert_github_token(
                     str(uuid.uuid4()),
                     payload.get("note"),
                     payload["token"],
                     payload.get("user_id"),
                     payload.get("user_login"),
                 ),
-                "update": lambda item_id, payload: database.update_github_token(
+                "update":
+                lambda item_id, payload: database.update_github_token(
                     item_id,
                     token=payload.get("token"),
                     note=payload.get("note"),
                     user_id=payload.get("user_id"),
                     user_login=payload.get("user_login"),
                 ),
-                "delete": database.delete_github_token,
+                "delete":
+                database.delete_github_token,
             },
             "github_sources": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_github_sources()],
-                "get": database.get_github_source,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_github_sources()],
+                "get":
+                database.get_github_source,
                 "required": ["project_id", "owner", "repo"],
-                "create": lambda payload: database.insert_github_source(
+                "create":
+                lambda payload: database.insert_github_source(
                     payload.get("id") or str(uuid.uuid4()),
                     payload.get("token_id"),
                     payload.get("agent_id"),
@@ -2306,7 +3132,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     bool(payload.get("enabled", True)),
                     bool(payload.get("auto_start", False)),
                 ),
-                "update": lambda item_id, payload: database.update_github_source(
+                "update":
+                lambda item_id, payload: database.update_github_source(
                     item_id,
                     token_id=payload.get("token_id"),
                     agent_id=payload.get("agent_id"),
@@ -2318,33 +3145,42 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     enabled=payload.get("enabled"),
                     auto_start=payload.get("auto_start"),
                 ),
-                "delete": database.delete_github_source,
+                "delete":
+                database.delete_github_source,
             },
             "gitlab_tokens": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_gitlab_tokens()],
-                "get": database.get_gitlab_token,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_gitlab_tokens()],
+                "get":
+                database.get_gitlab_token,
                 "required": ["token"],
-                "create": lambda payload: database.insert_gitlab_token(
+                "create":
+                lambda payload: database.insert_gitlab_token(
                     str(uuid.uuid4()),
                     payload.get("note"),
                     payload["token"],
                     payload.get("user_id"),
                     payload.get("user_login"),
                 ),
-                "update": lambda item_id, payload: database.update_gitlab_token(
+                "update":
+                lambda item_id, payload: database.update_gitlab_token(
                     item_id,
                     token=payload.get("token"),
                     note=payload.get("note"),
                     user_id=payload.get("user_id"),
                     user_login=payload.get("user_login"),
                 ),
-                "delete": database.delete_gitlab_token,
+                "delete":
+                database.delete_gitlab_token,
             },
             "gitlab_sources": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_gitlab_sources()],
-                "get": database.get_gitlab_source,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_gitlab_sources()],
+                "get":
+                database.get_gitlab_source,
                 "required": ["project_id", "project_path"],
-                "create": lambda payload: database.insert_gitlab_source(
+                "create":
+                lambda payload: database.insert_gitlab_source(
                     payload.get("id") or str(uuid.uuid4()),
                     payload.get("token_id"),
                     payload.get("agent_id"),
@@ -2355,7 +3191,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     bool(payload.get("enabled", True)),
                     bool(payload.get("auto_start", False)),
                 ),
-                "update": lambda item_id, payload: database.update_gitlab_source(
+                "update":
+                lambda item_id, payload: database.update_gitlab_source(
                     item_id,
                     token_id=payload.get("token_id"),
                     agent_id=payload.get("agent_id"),
@@ -2366,40 +3203,50 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     enabled=payload.get("enabled"),
                     auto_start=payload.get("auto_start"),
                 ),
-                "delete": database.delete_gitlab_source,
+                "delete":
+                database.delete_gitlab_source,
             },
             "task_sources": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_task_sources()],
-                "get": database.get_task_source,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_task_sources()],
+                "get":
+                database.get_task_source,
                 "required": ["id"],
-                "create": lambda payload: database.upsert_task_source(
+                "create":
+                lambda payload: database.upsert_task_source(
                     payload["id"],
                     bool(payload.get("enabled", False)),
                     int(payload.get("base_priority") or 50),
                     int(payload.get("poll_interval_seconds") or 60),
                     payload.get("config") or {},
                 ),
-                "update": lambda item_id, payload: database.upsert_task_source(
+                "update":
+                lambda item_id, payload: database.upsert_task_source(
                     item_id,
                     bool(payload.get("enabled", False)),
                     int(payload.get("base_priority") or 50),
                     int(payload.get("poll_interval_seconds") or 60),
                     payload.get("config") or {},
                 ),
-                "delete": database.delete_task_source,
+                "delete":
+                database.delete_task_source,
             },
             "work_items": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_work_items()],
-                "get": database.get_work_item,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_work_items()],
+                "get":
+                database.get_work_item,
                 "required": ["work_id", "source_id"],
-                "create": lambda payload: database.insert_work_item_if_absent(
+                "create":
+                lambda payload: database.insert_work_item_if_absent(
                     payload["work_id"],
                     payload["source_id"],
                     int(payload.get("priority") or 50),
                     payload.get("checkpoint") or {},
                     payload.get("status") or "queued",
                 ),
-                "update": lambda item_id, payload: database.update_work_item_status(
+                "update":
+                lambda item_id, payload: database.update_work_item_status(
                     item_id,
                     payload.get("status") or "queued",
                     checkpoint=payload["checkpoint"] if "checkpoint" in payload else None,
@@ -2408,32 +3255,36 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     attempts=payload.get("attempts"),
                     last_error=payload.get("last_error"),
                     last_traceback=payload.get("last_traceback"),
-                    clear_errors=(
-                        ("last_error" in payload and payload.get("last_error") is None)
-                        or ("last_traceback" in payload and payload.get("last_traceback") is None)
-                    ),
+                    clear_errors=(("last_error" in payload and payload.get("last_error") is None) or
+                                  ("last_traceback" in payload and payload.get("last_traceback") is None)),
                 ),
-                "delete": database.delete_work_item,
+                "delete":
+                database.delete_work_item,
             },
             "credentials": {
-                "list": lambda: [_record_to_dict(row) for row in database.list_credentials()],
-                "get": database.get_credential,
+                "list":
+                lambda: [_record_to_dict(row) for row in database.list_credentials()],
+                "get":
+                database.get_credential,
                 "required": ["name", "provider", "reference"],
-                "create": lambda payload: database.insert_credential(
+                "create":
+                lambda payload: database.insert_credential(
                     str(uuid.uuid4()),
                     payload["name"],
                     payload["provider"],
                     payload["reference"],
                     payload.get("note"),
                 ),
-                "update": lambda item_id, payload: database.update_credential(
+                "update":
+                lambda item_id, payload: database.update_credential(
                     item_id,
                     name=payload.get("name"),
                     provider=payload.get("provider"),
                     reference=payload.get("reference"),
                     note=payload.get("note"),
                 ),
-                "delete": database.delete_credential,
+                "delete":
+                database.delete_credential,
             },
             "users": {
                 "list": lambda: [_record_to_dict(row) for row in database.list_users()],
@@ -2549,9 +3400,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     @app.post("/api/admin/restart-supervisor")
     async def api_restart_supervisor(request: Request) -> dict[str, Any]:
         _require_api_permission(request, "admin", "update")
-        pid_file = os.environ.get(
-            "WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid")
-        )
+        pid_file = os.environ.get("WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid"))
         return _restart_script("run_supervisor.sh", pid_file, "python -m wintermute.supervisor")
 
     @app.post("/api/admin/backfill-ticket-sources")
@@ -2601,9 +3450,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return payload
 
     @app.post("/api/tickets/{ticket_id}/comments")
-    async def api_ticket_add_comment(
-        ticket_id: str, request: Request
-    ) -> dict[str, Any]:
+    async def api_ticket_add_comment(ticket_id: str, request: Request) -> dict[str, Any]:
         user, token_record = _require_login_or_api(request, "comments", "create")
         payload = await request.json()
         body = str(payload.get("body") or "").strip()
@@ -2634,10 +3481,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             agent = database.get_agent(session.agent_id)
             message = body
             if agent and agent.response_prefix:
-                message = (
-                    f"{body}\n\n"
-                    f"Please reply with lines starting with '{agent.response_prefix}'."
-                )
+                message = (f"{body}\n\n" f"Please reply with lines starting with '{agent.response_prefix}'.")
             raw_queue = session.queued_user_messages or "[]"
             try:
                 queue = json.loads(raw_queue)
@@ -2653,9 +3497,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"ok": True, "comment": _comment_to_dict(database.get_comment(comment_id))}
 
     @app.get("/api/tickets/{ticket_id}/session-status")
-    async def api_ticket_session_status(
-        ticket_id: str, request: Request
-    ) -> dict[str, Any]:
+    async def api_ticket_session_status(ticket_id: str, request: Request) -> dict[str, Any]:
         _require_login_or_api(request, "sessions", "read")
         session = database.get_session_by_ticket(ticket_id)
         if not session:
@@ -2695,9 +3537,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         }
 
     @app.post("/api/tickets/{ticket_id}/start-session")
-    async def api_ticket_start_session(
-        ticket_id: str, request: Request
-    ) -> dict[str, Any]:
+    async def api_ticket_start_session(ticket_id: str, request: Request) -> dict[str, Any]:
         user, _token_record = _require_login_or_api(request, "sessions", "create")
         ticket = database.get_ticket(ticket_id)
         if not ticket:
@@ -2718,20 +3558,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Ticket agent not configured")
         agent = database.get_agent(agent_id)
         if agent:
-            approval_pattern = "\n".join(
-                [
-                    r"^You are running Codex in",
-                    r"^Yes, allow Codex to work in this folder without asking for",
-                ]
-            )
+            approval_pattern = "\n".join([
+                r"^You are running Codex in",
+                r"^Yes, allow Codex to work in this folder without asking for",
+            ])
             _ensure_agent_response(agent_id, approval_pattern, "1")
-            command_pattern = "\n".join(
-                [
-                    r"run this command",
-                    r"yes",
-                    r"forever",
-                ]
-            )
+            command_pattern = "\n".join([
+                r"run this command",
+                r"yes",
+                r"forever",
+            ])
             _ensure_agent_response(agent_id, command_pattern, "1")
         if source and ticket.project_id != source.project_id:
             database.update_ticket(ticket_id, project_id=source.project_id)
@@ -2820,9 +3656,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             token_record = database.get_github_token(source.token_id) if source.token_id else None
             comments: list[dict[str, Any]] = []
             if token_record:
-                comments = await _fetch_issue_comments(
-                    token_record.token, source.owner, source.repo, int(issue_number)
-                )
+                comments = await _fetch_issue_comments(token_record.token, source.owner, source.repo, int(issue_number))
             prompt = _issue_prompt(
                 {
                     "issue_number": issue_number,
@@ -2844,9 +3678,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             token_record = database.get_gitlab_token(source.token_id) if source.token_id else None
             comments = []
             if token_record:
-                comments = await _fetch_gitlab_issue_comments(
-                    token_record.token, source.project_path, int(issue_number)
-                )
+                comments = await _fetch_gitlab_issue_comments(token_record.token, source.project_path, int(issue_number))
             prompt = _gitlab_issue_prompt(
                 {
                     "issue_number": issue_number,
@@ -2899,9 +3731,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         }
 
     @app.post("/api/sessions/{session_id}/stop")
-    async def api_session_stop(
-        session_id: str, request: Request
-    ) -> dict[str, Any]:
+    async def api_session_stop(session_id: str, request: Request) -> dict[str, Any]:
         _require_login_or_api(request, "sessions", "update")
         session = database.get_session(session_id)
         if not session:
@@ -2948,15 +3778,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     async def api_admin_pids(request: Request) -> dict[str, Any]:
         _require_api_permission(request, "admin", "update")
         web_pid_file = os.environ.get("WINTERMUTE_WEB_PID_FILE", os.path.join(repo_root, ".runtime", "web.pid"))
-        web_started_file = os.environ.get(
-            "WINTERMUTE_WEB_STARTED_FILE", os.path.join(repo_root, ".runtime", "web.started")
-        )
-        supervisor_pid_file = os.environ.get(
-            "WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid")
-        )
-        supervisor_started_file = os.environ.get(
-            "WINTERMUTE_SUPERVISOR_STARTED_FILE", os.path.join(repo_root, ".runtime", "supervisor.started")
-        )
+        web_started_file = os.environ.get("WINTERMUTE_WEB_STARTED_FILE", os.path.join(repo_root, ".runtime", "web.started"))
+        supervisor_pid_file = os.environ.get("WINTERMUTE_SUPERVISOR_PID_FILE", os.path.join(repo_root, ".runtime", "supervisor.pid"))
+        supervisor_started_file = os.environ.get("WINTERMUTE_SUPERVISOR_STARTED_FILE", os.path.join(repo_root, ".runtime", "supervisor.started"))
         return {
             "web": _read_pid_info(web_pid_file, web_started_file),
             "supervisor": _read_pid_info(supervisor_pid_file, supervisor_started_file),
@@ -3008,16 +3832,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         end = start + per_page
         tickets = tickets[start:end]
         return {
-            "tickets": [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "status": t.status,
-                    "priority": t.priority,
-                    "story_points": t.story_points,
-                }
-                for t in tickets
-            ],
+            "tickets": [{
+                "id": t.id,
+                "title": t.title,
+                "status": t.status,
+                "priority": t.priority,
+                "story_points": t.story_points,
+            } for t in tickets],
             "total": total,
             "page": page,
             "per_page": per_page,
@@ -3055,9 +3876,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # -------------------------------------------------------------------------
 
     @app.get("/api/agents/{agent_id}/session-status")
-    async def api_agent_session_status(
-        agent_id: str, user: str = Depends(_require_login)
-    ) -> dict:
+    async def api_agent_session_status(agent_id: str, user: str = Depends(_require_login)) -> dict:
         import subprocess
 
         agent = database.get_agent(agent_id)
@@ -3081,8 +3900,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                             f"child=$(pgrep -P $pane_pid 2>/dev/null | head -1); "
                             f"echo \"${{child:-$pane_pid}}\"; fi"
                         )
-                        pid_cmd = ["ssh", "-p", str(spec.port), *spec.options,
-                                   f"{spec.user}@{spec.host}", pid_script]
+                        pid_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", pid_script]
                         try:
                             result = subprocess.run(pid_cmd, capture_output=True, text=True, timeout=10)
                             if result.returncode == 0 and result.stdout.strip():
@@ -3100,9 +3918,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"running": False, "session_id": None, "location": None, "pid": None, "log_path": None}
 
     @app.post("/api/agents/{agent_id}/start-session")
-    async def api_start_agent_session(
-        agent_id: str, user: str = Depends(_require_login)
-    ) -> dict:
+    async def api_start_agent_session(agent_id: str, user: str = Depends(_require_login)) -> dict:
         import subprocess
         import tempfile
         import shlex
@@ -3126,8 +3942,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         spec = build_ssh_spec(vm, agent.required_ssh_options)
 
         # Create temp workspace on VM target
-        mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options,
-                      f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
+        mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
         result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Failed to create workspace: {result.stderr}")
@@ -3166,11 +3981,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     with open(local_path, "w") as f:
                         f.write(file_content)
                 # SCP files to VM
-                scp_cmd = ["scp", "-P", str(spec.port), *spec.options,
-                           "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{workspace}/"]
+                scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{workspace}/"]
                 scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                 if scp_result.returncode != 0:
-                    logger.warning("Failed to copy session files: %s", scp_result.stderr)
+                    logging.getLogger(__name__).warning("Failed to copy session files: %s", scp_result.stderr)
 
         # Start the tmux session
         start_session(spec, session_id, agent, workspace)
@@ -3178,9 +3992,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"session_id": session_id, "location": workspace}
 
     @app.post("/api/agents/{agent_id}/session/stop")
-    async def api_stop_agent_session(
-        agent_id: str, user: str = Depends(_require_login)
-    ) -> dict:
+    async def api_stop_agent_session(agent_id: str, user: str = Depends(_require_login)) -> dict:
         import subprocess
         import tempfile
 
@@ -3206,9 +4018,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 # Create a local temp dir to receive files
                 with tempfile.TemporaryDirectory() as local_tmp:
                     # SCP files from VM
-                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options,
-                               "-r", f"{spec.user}@{spec.host}:{standalone_session.workspace_path}/.",
-                               f"{local_tmp}/"]
+                    scp_cmd = [
+                        "scp", "-P",
+                        str(spec.port), *spec.options, "-r", f"{spec.user}@{spec.host}:{standalone_session.workspace_path}/.", f"{local_tmp}/"
+                    ]
                     scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                     if scp_result.returncode == 0:
                         for defn in definitions:
@@ -3219,16 +4032,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                                         content = f.read()
                                     database.upsert_session_file(agent_id, defn.id, content)
                     else:
-                        logger.warning("Failed to sync session files back: %s", scp_result.stderr)
+                        logging.getLogger(__name__).warning("Failed to sync session files back: %s", scp_result.stderr)
 
         # Mark session as stopped
         database.update_session(standalone_session.id, status="stopped")
         return {"success": True}
 
     @app.post("/api/agents/{agent_id}/comments")
-    async def api_add_agent_comment(
-        agent_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> dict:
+    async def api_add_agent_comment(agent_id: str, request: Request, user: str = Depends(_require_login)) -> dict:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -3253,7 +4064,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             session_id=standalone_session.id,
             project_id=None,
             agent_id=agent_id,
-            author="user",
+            author=user,
             source_id=None,
             issue_number=None,
             body=message,
@@ -3266,10 +4077,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if standalone_session.status == "running":
             queued_message = message
             if agent.response_prefix:
-                queued_message = (
-                    f"{message}\n\n"
-                    f"Please reply with lines starting with '{agent.response_prefix}'."
-                )
+                queued_message = (f"{message}\n\n" f"Please reply with lines starting with '{agent.response_prefix}'.")
             raw_queue = standalone_session.queued_user_messages or "[]"
             try:
                 queue = json.loads(raw_queue)
@@ -3282,10 +4090,19 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 standalone_session.id,
                 queued_user_messages=json.dumps(queue),
             )
+        # Relay to Slack channels
+        try:
+            from wintermute.chat.dispatcher import ChatDispatcher
+            dispatcher = ChatDispatcher(database)
+            import asyncio
+            slack_message = f"[{user}] {message}"
+            asyncio.create_task(dispatcher.broadcast_to_agent_channels(agent_id, slack_message, platform_filter="slack"))
+        except Exception as e:
+            logging.getLogger(__name__).warning("Failed to relay to Slack: %s", e)
         return {
             "comment": {
                 "id": comment_id,
-                "author": "user",
+                "author": user,
                 "body": message,
                 "origin": "web",
                 "created_at": now,
@@ -3315,20 +4132,18 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return {"comments": []}
         comments = database.list_comments_since(agent_session_id=session_id, since=since)
         return {
-            "comments": [
-                {
-                    "id": c.id,
-                    "author": c.author,
-                    "body": c.body,
-                    "origin": c.origin,
-                    "created_at": c.created_at,
-                }
-                for c in comments
-            ]
+            "comments": [{
+                "id": c.id,
+                "author": c.author,
+                "body": c.body,
+                "origin": c.origin,
+                "created_at": c.created_at,
+            } for c in comments]
         }
 
     @app.websocket("/ws/agents/{agent_id}/comments")
     async def ws_agent_comments(websocket: WebSocket, agent_id: str) -> None:
+
         def _find_standalone_session():
             all_sessions = database.list_sessions(agent_id=agent_id)
             for sess in all_sessions:
@@ -3352,9 +4167,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/api/agents/{agent_id}/channels")
-    async def api_create_agent_channel(
-        agent_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> dict:
+    async def api_create_agent_channel(agent_id: str, request: Request, user: str = Depends(_require_login)) -> dict:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -3364,6 +4177,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         external_channel_id = str(data.get("external_channel_id", "")).strip() or None
         if not channel_type or not name:
             raise HTTPException(status_code=400, detail="Missing channel fields")
+        # Auto-create Slack channel if type is slack and no external_channel_id provided
+        if channel_type == "slack" and not external_channel_id:
+            external_channel_id = _create_agent_slack_channel(database, agent, name)
         channel_id = str(uuid.uuid4())
         database.insert_channel(
             channel_id=channel_id,
@@ -3384,9 +4200,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         }
 
     @app.patch("/api/agents/{agent_id}/channels/{channel_id}")
-    async def api_update_agent_channel(
-        agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> dict:
+    async def api_update_agent_channel(agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)) -> dict:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -3418,7 +4232,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"data": _record_to_dict(record)}
 
     @app.put("/api/{model}/{item_id:path}")
-    async def api_update(model: str, item_id: str, request: Request) -> dict[str, Any]:
+    async def api_update_put(model: str, item_id: str, request: Request) -> dict[str, Any]:
         handlers = _api_model_handlers().get(model)
         if not handlers:
             raise HTTPException(status_code=404, detail="Unknown model")
@@ -3477,13 +4291,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 if "name_taken" in error_text:
                     channel_id = _find_channel_id(client, channel_name)
                 elif "missing_scope" in error_text:
-                    logging.getLogger(__name__).warning(
-                        "Slack channel create missing scope; continuing without channel id."
-                    )
+                    logging.getLogger(__name__).warning("Slack channel create missing scope; continuing without channel id.")
                 else:
-                    logging.getLogger(__name__).warning(
-                        "Slack channel create failed; continuing without channel id: %s", exc
-                    )
+                    logging.getLogger(__name__).warning("Slack channel create failed; continuing without channel id: %s", exc)
         if channel_id and slack_bot:
             admin_user_id = _slack_admin_user_id(database)
             client = _slack_client(database)
@@ -3525,11 +4335,23 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         auto_start = form.get("auto_start") == "on"
         project_id = str(uuid.uuid4())
         database.insert_project(
-            project_id, name, slug, channel_id, prompt_template, max_repo_resources,
-            repo_mode=repo_mode, repo_path=repo_path, repo_url=repo_url,
-            provider=provider, source_token_id=source_token_id, source_agent_id=source_agent_id,
-            source_repo=source_repo, issue_state=issue_state, issue_labels=issue_labels,
-            source_enabled=source_enabled, auto_start=auto_start,
+            project_id,
+            name,
+            slug,
+            channel_id,
+            prompt_template,
+            max_repo_resources,
+            repo_mode=repo_mode,
+            repo_path=repo_path,
+            repo_url=repo_url,
+            provider=provider,
+            source_token_id=source_token_id,
+            source_agent_id=source_agent_id,
+            source_repo=source_repo,
+            issue_state=issue_state,
+            issue_labels=issue_labels,
+            source_enabled=source_enabled,
+            auto_start=auto_start,
         )
         _update_slack_channel_filter(database)
         return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
@@ -3575,9 +4397,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/projects/{project_id}/sources")
-    async def create_project_source(
-        project_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_project_source(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         project = database.get_project(project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -3817,13 +4637,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         issue_number,
                     )
         comment_rows = list(reversed(database.list_comments(ticket_id=ticket_id)))
-        comments = [
-            {
-                **_comment_to_dict(row),
-                "created_at": row.created_at,
-            }
-            for row in comment_rows
-        ]
+        comments = [{
+            **_comment_to_dict(row),
+            "created_at": row.created_at,
+        } for row in comment_rows]
         last_comment_ts = comment_rows[-1].created_at if comment_rows else None
         created_by_user = database.get_user_by_id(ticket.created_by_id) if ticket.created_by_id else None
         return _render_template(
@@ -3862,9 +4679,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/tickets/{ticket_id}/edit")
-    async def update_ticket(
-        ticket_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_ticket(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
         agent_id = str(form.get("agent_id", "")).strip()
@@ -3904,9 +4719,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
 
     @app.post("/api/tickets/{ticket_id}/description")
-    async def api_ticket_update_description(
-        ticket_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> dict[str, Any]:
+    async def api_ticket_update_description(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> dict[str, Any]:
         ticket = database.get_ticket(ticket_id)
         if not ticket:
             raise HTTPException(status_code=404, detail="Ticket not found")
@@ -3919,9 +4732,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"ok": True, "html": _render_markdown(description)}
 
     @app.patch("/api/tickets/{ticket_id}")
-    async def api_ticket_patch(
-        ticket_id: str, request: Request
-    ) -> dict[str, Any]:
+    async def api_ticket_patch(ticket_id: str, request: Request) -> dict[str, Any]:
         _require_login_or_api(request, "tickets", "update")
         ticket = database.get_ticket(ticket_id)
         if not ticket:
@@ -4012,17 +4823,15 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": growl_message,
                 "comment": comment,
                 "tickets": database.list_tickets(),
-                "project_lookup": {
-                    project.id: project.name for project in database.list_projects()
-                },
-                "agent_lookup": {agent.id: agent.name for agent in database.list_agents()},
+                "project_lookup": {project.id: project.name
+                                   for project in database.list_projects()},
+                "agent_lookup": {agent.id: agent.name
+                                 for agent in database.list_agents()},
             },
         )
 
     @app.post("/comments/{comment_id}/edit")
-    async def update_comment(
-        comment_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_comment(comment_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         body = str(form.get("body", "")).strip()
         public = form.get("public") == "on"
@@ -4102,9 +4911,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             agent_id=agent_id,
             last_used_at=utc_now(),
         )
-        return RedirectResponse(
-            f"/ui/repo-resources/{resource_id}/edit?saved=repo_resource_updated", status_code=303
-        )
+        return RedirectResponse(f"/ui/repo-resources/{resource_id}/edit?saved=repo_resource_updated", status_code=303)
 
     @app.post("/repo-resources/{resource_id}/delete")
     async def repo_resource_delete(resource_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -4214,15 +5021,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Get file definitions if agent has a config
         session_file_definitions = []
         if agent.session_file_config_id:
-            session_file_definitions = database.list_session_file_definitions(
-                agent.session_file_config_id
-            )
+            session_file_definitions = database.list_session_file_definitions(agent.session_file_config_id)
         # Build map of definition_id -> session file content
         file_contents = {sf.definition_id: sf for sf in session_files}
         # Get standalone sessions (no ticket_id)
         all_sessions = database.list_sessions(agent_id=agent_id)
-        standalone_session = None  # Active (running/blocked) session for controls
-        recent_standalone_session = None  # Most recent session for comments
+        standalone_session = None # Active (running/blocked) session for controls
+        recent_standalone_session = None # Most recent session for comments
         for sess in all_sessions:
             if not sess.ticket_id:
                 if sess.status in ("running", "blocked"):
@@ -4313,15 +5118,19 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # -------------------------------------------------------------------------
 
     @app.post("/agents/{agent_id}/channels")
-    async def create_agent_channel(
-        agent_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_agent_channel(agent_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         channel_type = str(form.get("channel_type", "")).strip()
         name = str(form.get("name", "")).strip()
         external_channel_id = str(form.get("external_channel_id", "")).strip() or None
         if not channel_type or not name:
             raise HTTPException(status_code=400, detail="Missing channel fields")
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        # Auto-create Slack channel if type is slack and no external_channel_id provided
+        if channel_type == "slack" and not external_channel_id:
+            external_channel_id = _create_agent_slack_channel(database, agent, name)
         database.insert_channel(
             channel_id=str(uuid.uuid4()),
             agent_id=agent_id,
@@ -4333,9 +5142,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_created", status_code=303)
 
     @app.post("/agents/{agent_id}/channels/{channel_id}/edit")
-    async def update_agent_channel(
-        agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_agent_channel(agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         name = str(form.get("name", "")).strip() or None
         external_channel_id = str(form.get("external_channel_id", "")).strip() or None
@@ -4350,9 +5157,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_updated", status_code=303)
 
     @app.post("/agents/{agent_id}/channels/{channel_id}/delete")
-    async def delete_agent_channel(
-        agent_id: str, channel_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_agent_channel(agent_id: str, channel_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_channel(channel_id)
         return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_deleted", status_code=303)
 
@@ -4361,9 +5166,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # -------------------------------------------------------------------------
 
     @app.post("/agents/{agent_id}/session-files")
-    async def save_agent_session_files(
-        agent_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def save_agent_session_files(agent_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         agent = database.get_agent(agent_id)
         if not agent or not agent.session_file_config_id:
             raise HTTPException(status_code=400, detail="Agent has no session file config")
@@ -4379,9 +5182,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # -------------------------------------------------------------------------
 
     @app.post("/agents/{agent_id}/session/start")
-    async def start_agent_standalone_session(
-        agent_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def start_agent_standalone_session(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -4426,9 +5227,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_started", status_code=303)
 
     @app.post("/agents/{agent_id}/session/stop")
-    async def stop_agent_standalone_session(
-        agent_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def stop_agent_standalone_session(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -4457,9 +5256,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_stopped", status_code=303)
 
     @app.post("/agents/{agent_id}/session/message")
-    async def send_agent_standalone_message(
-        agent_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def send_agent_standalone_message(agent_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         agent = database.get_agent(agent_id)
         if not agent:
             raise HTTPException(status_code=404, detail="Agent not found")
@@ -4483,7 +5280,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             session_id=standalone_session.id,
             project_id=None,
             agent_id=agent_id,
-            author="user",
+            author=user,
             source_id=None,
             issue_number=None,
             body=message,
@@ -4492,12 +5289,19 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             agent_session_id=standalone_session.id,
             origin="web",
         )
+        # Relay to Slack channels
+        try:
+            from wintermute.chat.dispatcher import ChatDispatcher
+            dispatcher = ChatDispatcher(database)
+            import asyncio
+            slack_message = f"[{user}] {message}"
+            asyncio.create_task(dispatcher.broadcast_to_agent_channels(agent_id, slack_message, platform_filter="slack"))
+        except Exception as e:
+            logging.getLogger(__name__).warning("Failed to relay to Slack: %s", e)
         return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agent-responses")
-    async def create_agent_response(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_agent_response(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         agent_id = str(form.get("agent_id", "")).strip()
         pattern = str(form.get("pattern", "")).strip()
@@ -4511,9 +5315,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}?saved=agent_response_created", status_code=303)
 
     @app.post("/agent-responses/{response_id}/edit")
-    async def update_agent_response(
-        response_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_agent_response(response_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         agent_id = str(form.get("agent_id", "")).strip()
         pattern = str(form.get("pattern", "")).strip()
@@ -4532,17 +5334,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}?saved=agent_response_updated", status_code=303)
 
     @app.post("/agent-responses/{response_id}/delete")
-    async def delete_agent_response(
-        response_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_agent_response(response_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_agent_response(response_id)
         return RedirectResponse("/ui/agent-responses?saved=agent_response_deleted", status_code=303)
 
     # Legacy project_vms POST handlers - no longer functional
     @app.post("/project_vms")
-    async def create_project_vm_legacy(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_project_vm_legacy(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
 
     @app.post("/project_vms/{mapping_id}/delete")
@@ -4604,9 +5402,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/sessions/{session_id}/edit")
-    async def update_session(
-        session_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_session(session_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         status = str(form.get("status", "")).strip()
         if not status:
@@ -4620,9 +5416,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/sessions?saved=session_deleted", status_code=303)
 
     @app.get("/logs/tail")
-    def tail_logs(
-        limit: int = Query(default=100, ge=1, le=1000), user: str = Depends(_require_login)
-    ) -> dict[str, Any]:
+    def tail_logs(limit: int = Query(default=100, ge=1, le=1000), user: str = Depends(_require_login)) -> dict[str, Any]:
         return {"entries": [], "limit": limit}
 
     @app.get("/")
@@ -5031,9 +5825,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.get("/ui/agent-responses/{response_id}/edit")
-    def agent_response_edit_ui(
-        response_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> Response:
+    def agent_response_edit_ui(response_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         response = database.get_agent_response(response_id)
         if not response:
             raise HTTPException(status_code=404, detail="Response rule not found")
@@ -5108,9 +5900,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.get("/ui/sprints/{sprint_id}/edit")
-    def sprint_edit_ui(
-        sprint_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> Response:
+    def sprint_edit_ui(sprint_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         sprint = database.get_sprint(sprint_id)
         if not sprint:
             raise HTTPException(status_code=404, detail="Sprint not found")
@@ -5157,9 +5947,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}?saved=sprint", status_code=303)
 
     @app.post("/sprints/{sprint_id}/edit")
-    async def update_sprint(
-        sprint_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_sprint(sprint_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         name = str(form.get("name", "")).strip()
         start_date = str(form.get("start_date", "")).strip()
@@ -5177,9 +5965,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/sprints/{sprint_id}/edit?saved=sprint", status_code=303)
 
     @app.post("/sprints/{sprint_id}/delete")
-    async def delete_sprint(
-        sprint_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_sprint(sprint_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_sprint(sprint_id)
         return RedirectResponse("/ui/sprints?saved=sprint_deleted", status_code=303)
 
@@ -5309,14 +6095,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def issue_sources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         sources = database.list_issue_sources()
         project_lookup = {project.id: project.name for project in database.list_projects()}
-        github_token_lookup = {
-            token.id: token.note or token.user_login or token.id
-            for token in database.list_github_tokens()
-        }
-        gitlab_token_lookup = {
-            token.id: token.note or token.user_login or token.id
-            for token in database.list_gitlab_tokens()
-        }
+        github_token_lookup = {token.id: token.note or token.user_login or token.id for token in database.list_github_tokens()}
+        gitlab_token_lookup = {token.id: token.note or token.user_login or token.id for token in database.list_gitlab_tokens()}
         token_lookup = {**github_token_lookup, **gitlab_token_lookup}
         agent_lookup = {agent.id: agent.name for agent in database.list_agents()}
         growl_message = _growl_message(request.query_params.get("saved"))
@@ -5446,9 +6226,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"{return_to}?saved=issue_source_created", status_code=303)
 
     @app.post("/issue-sources/{source_id}/edit")
-    async def update_issue_source(
-        source_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_issue_source(source_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         provider = str(form.get("provider", "github")).strip()
         project_id = str(form.get("project_id", "")).strip()
@@ -5487,9 +6265,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/issue-sources?saved=issue_source_updated", status_code=303)
 
     @app.post("/issue-sources/{source_id}/delete")
-    async def delete_issue_source(
-        source_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_issue_source(source_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_issue_source(source_id)
         return RedirectResponse("/ui/issue-sources?saved=issue_source_deleted", status_code=303)
 
@@ -5498,9 +6274,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse("/ui/agents", status_code=302)
 
     @app.post("/project_vms/{mapping_id}/edit")
-    async def project_vms_update_legacy(
-        mapping_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def project_vms_update_legacy(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
 
     @app.get("/ui/tickets")
@@ -5563,9 +6337,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/ui/column-preferences")
-    async def update_column_preferences(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_column_preferences(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         model = str(form.get("model", "")).strip()
         config = LIST_TABLE_CONFIGS.get(model)
@@ -5600,18 +6372,28 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # Session File Configs
     # -------------------------------------------------------------------------
 
-    def _build_session_file_config_rows(
-        configs: list,
-    ) -> list[dict[str, Any]]:
+    def _build_session_file_config_rows(configs: list,) -> list[dict[str, Any]]:
         rows = []
         for config in configs:
             rows.append({
                 "cells": {
-                    "id": {"text": config.id[:8], "href": f"/ui/session-file-configs/{config.id}/edit"},
-                    "name": {"text": config.name, "href": f"/ui/session-file-configs/{config.id}/edit"},
-                    "description": {"text": config.description or "-"},
-                    "created_at": {"text": config.created_at[:16].replace("T", " ") if config.created_at else "-"},
-                    "updated_at": {"text": config.updated_at[:16].replace("T", " ") if config.updated_at else "-"},
+                    "id": {
+                        "text": config.id[:8],
+                        "href": f"/ui/session-file-configs/{config.id}/edit"
+                    },
+                    "name": {
+                        "text": config.name,
+                        "href": f"/ui/session-file-configs/{config.id}/edit"
+                    },
+                    "description": {
+                        "text": config.description or "-"
+                    },
+                    "created_at": {
+                        "text": config.created_at[:16].replace("T", " ") if config.created_at else "-"
+                    },
+                    "updated_at": {
+                        "text": config.updated_at[:16].replace("T", " ") if config.updated_at else "-"
+                    },
                 },
             })
         return rows
@@ -5678,9 +6460,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/session-file-configs")
-    async def create_session_file_config(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_session_file_config(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         name = str(form.get("name", "")).strip()
         description = str(form.get("description", "")).strip() or None
@@ -5694,9 +6474,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_created", status_code=303)
 
     @app.post("/session-file-configs/{config_id}/edit")
-    async def update_session_file_config(
-        config_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_session_file_config(config_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         name = str(form.get("name", "")).strip() or None
         description = str(form.get("description", "")).strip() or None
@@ -5704,9 +6482,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_updated", status_code=303)
 
     @app.post("/session-file-configs/{config_id}/delete")
-    async def delete_session_file_config(
-        config_id: str, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_session_file_config(config_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_session_file_config(config_id)
         return RedirectResponse("/ui/session-file-configs?saved=config_deleted", status_code=303)
 
@@ -5715,9 +6491,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # -------------------------------------------------------------------------
 
     @app.get("/ui/session-file-definitions/{definition_id}/edit")
-    def session_file_definitions_edit_ui(
-        definition_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> Response:
+    def session_file_definitions_edit_ui(definition_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         definition = database.get_session_file_definition(definition_id)
         if not definition:
             raise HTTPException(status_code=404, detail="Definition not found")
@@ -5733,9 +6507,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/session-file-definitions")
-    async def create_session_file_definition(
-        request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def create_session_file_definition(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         config_id = str(form.get("config_id", "")).strip()
         filename = str(form.get("filename", "")).strip()
@@ -5748,15 +6520,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Missing required fields")
         definition_id = str(uuid.uuid4())
         database.insert_session_file_definition(
-            definition_id, config_id, filename, default_content,
-            description=description, required=required, sync_on_exit=sync_on_exit, sort_order=sort_order
+            definition_id, config_id, filename, default_content, description=description, required=required, sync_on_exit=sync_on_exit, sort_order=sort_order
         )
         return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_created", status_code=303)
 
     @app.post("/session-file-definitions/{definition_id}/edit")
-    async def update_session_file_definition(
-        definition_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_session_file_definition(definition_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         config_id = str(form.get("config_id", "")).strip()
         filename = str(form.get("filename", "")).strip() or None
@@ -5777,9 +6546,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_updated", status_code=303)
 
     @app.post("/session-file-definitions/{definition_id}/delete")
-    async def delete_session_file_definition(
-        definition_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_session_file_definition(definition_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         config_id = str(form.get("config_id", "")).strip()
         database.delete_session_file_definition(definition_id)
@@ -5792,9 +6559,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # -------------------------------------------------------------------------
 
     @app.get("/ui/session-files/{file_id}/edit")
-    def edit_session_file_ui(
-        file_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> Response:
+    def edit_session_file_ui(file_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         file = database.get_session_file(file_id)
         if not file:
             raise HTTPException(status_code=404, detail="Session file not found")
@@ -5818,9 +6583,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
 
     @app.post("/session-files/{file_id}/edit")
-    async def update_session_file(
-        file_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def update_session_file(file_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         content = str(form.get("content", ""))
         agent_id = str(form.get("agent_id", "")).strip()
@@ -5833,9 +6596,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return RedirectResponse(f"/ui/session-files/{file_id}/edit?saved=file_updated", status_code=303)
 
     @app.post("/session-files/{file_id}/delete")
-    async def delete_session_file(
-        file_id: str, request: Request, user: str = Depends(_require_login)
-    ) -> RedirectResponse:
+    async def delete_session_file(file_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         form = await request.form()
         agent_id = str(form.get("agent_id", "")).strip()
         database.delete_session_file(file_id)

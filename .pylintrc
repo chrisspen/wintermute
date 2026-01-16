@@ -1,0 +1,53 @@
+[MASTER]
+ignore=CVS,migrations,alembic
+
+[MESSAGES CONTROL]
+# Disable messages that are too noisy or not applicable
+# C0103: Invalid name (allows shorter names)
+# C0111: Missing docstring
+# E1101: No member (too many false positives)
+# R0401: Cyclic import (sometimes unavoidable)
+# R0902: Too many instance attributes
+# R0903: Too few public methods
+# R0904: Too many public methods
+# R0913: Too many arguments
+# W0104: Statement seems to have no effect
+# W0212: Access to protected member
+# W0401: Wildcard import
+# W0511: TODO/FIXME comments
+# W0612: Unused variable
+# W0613: Unused argument
+# W0614: Unused import from wildcard
+disable=C0103,C0111,E1101,R0401,R0902,R0903,R0904,R0913,W0104,W0212,W0401,W0511,W0612,W0613,W0614
+
+[REPORTS]
+output-format=text
+reports=no
+
+[BASIC]
+good-names=i,j,k,ex,_,id,db,vm,fs
+
+[TYPECHECK]
+ignore-mixin-members=yes
+
+[VARIABLES]
+init-import=no
+
+[DESIGN]
+max-args=10
+max-locals=20
+max-returns=8
+max-branches=15
+max-statements=60
+max-parents=10
+max-attributes=15
+max-public-methods=30
+
+[FORMAT]
+max-line-length=120
+max-module-lines=5000
+
+[SIMILARITIES]
+min-similarity-lines=6
+ignore-comments=yes
+ignore-docstrings=yes

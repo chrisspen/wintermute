@@ -151,6 +151,8 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 - `setup.sh`, `run_web.sh`, `run_supervisor.sh`, `_run_web.sh`, `_run_supervisor.sh` — local setup and runners
 
 ## Development norms
+- **CRITICAL: NEVER ACCESS THE DATABASE DIRECTLY.** No Python commands that touch the database AT ALL - no `from wintermute.db import Database`, no sqlite3, no touching wintermute.db in any way. The database is on a network filesystem and ANY direct access CORRUPTS IT. **USE THE API ONLY** - all data access via `curl http://192.168.123.1:8000/api/...`
+- **CRITICAL: NEVER run `./run_supervisor.sh` or `./run_web.sh` locally.** These are blocking relauncher scripts. Killing them mid-execution CORRUPTS THE SQLITE DATABASE. To restart services, use the API endpoint instead.
 - Keep the scheduler deterministic and testable: no hidden global state.
 - Prefer typed, structured outputs from the model; reject non-conforming responses.
 - Every external call (Jira/GitHub/IM) must be mockable and have timeouts + retries.

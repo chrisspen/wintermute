@@ -54,6 +54,7 @@ class ChatDispatcher:
             Adapter instance or None if unavailable.
         """
         if platform_type in self._adapters:
+            self._logger.debug("Using cached adapter for %s", platform_type)
             return self._adapters[platform_type]
 
         adapter_class = self.ADAPTER_CLASSES.get(platform_type)
@@ -64,10 +65,15 @@ class ChatDispatcher:
         # Get platform-specific credentials
         token = self._get_platform_token(platform_type)
         if not token:
-            self._logger.warning("No token found for platform: %s", platform_type)
+            self._logger.warning(
+                "No token found for platform: %s (provider=%s, name=bot_token)",
+                platform_type,
+                platform_type,
+            )
             return None
 
         try:
+            self._logger.info("Creating %s adapter", platform_type)
             adapter = adapter_class(bot_token=token)
             self._adapters[platform_type] = adapter
             return adapter
@@ -149,17 +155,33 @@ class ChatDispatcher:
             List of (channel, result) tuples.
         """
         channels = self._db.list_channels(agent_id=agent_id)
+        self._logger.info("Broadcasting to %d channels for agent %s", len(channels), agent_id)
         results: list[tuple[ChannelRecord, MessageResult]] = []
 
         for channel in channels:
             if not channel.enabled:
+                self._logger.debug("Skipping disabled channel %s", channel.name)
                 continue
             if platform_filter and channel.type != platform_filter:
                 continue
 
+            if not channel.external_channel_id:
+                self._logger.warning(
+                    "Channel %s has no external_channel_id configured - skipping",
+                    channel.name,
+                )
+                continue
+            self._logger.info(
+                "Sending to channel %s (%s: %s)",
+                channel.name,
+                channel.type,
+                channel.external_channel_id,
+            )
             result = await self.send_to_channel(channel, text)
             results.append((channel, result))
-            if not result.success:
+            if result.success:
+                self._logger.info("Successfully sent to channel %s", channel.name)
+            else:
                 self._logger.warning(
                     "Failed to send to channel %s: %s",
                     channel.name,

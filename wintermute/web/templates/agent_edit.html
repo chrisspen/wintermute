@@ -147,7 +147,7 @@
           <tr data-channel-id="{{ channel.id }}">
             <td>{{ channel.type }}</td>
             <td class="editable-cell" data-field="name">{{ channel.name }}</td>
-            <td class="editable-cell" data-field="external_channel_id">{{ channel.external_channel_id or '-' }}</td>
+            <td class="editable-cell" data-field="external_channel_id"{% if not channel.external_channel_id %} style="color: #f97316;" title="Click to set channel ID - messages won't be sent without it"{% endif %}>{{ channel.external_channel_id or '⚠ Not Set' }}</td>
             <td>{% if channel.enabled %}Yes{% else %}No{% endif %}</td>
             <td>
               <form method="post" action="/agents/{{ agent.id }}/channels/{{ channel.id }}/delete" style="display: inline;">
@@ -516,9 +516,11 @@
           if (emptyRow) emptyRow.parentElement.remove();
           var tr = document.createElement("tr");
           tr.dataset.channelId = ch.id;
+          var extIdStyle = ch.external_channel_id ? '' : ' style="color: #f97316;" title="Click to set channel ID - messages won\'t be sent without it"';
+          var extIdDisplay = ch.external_channel_id || '⚠ Not Set';
           tr.innerHTML = '<td>' + ch.type + '</td>' +
             '<td class="editable-cell" data-field="name">' + ch.name + '</td>' +
-            '<td class="editable-cell" data-field="external_channel_id">' + (ch.external_channel_id || '-') + '</td>' +
+            '<td class="editable-cell" data-field="external_channel_id"' + extIdStyle + '>' + extIdDisplay + '</td>' +
             '<td>' + (ch.enabled ? 'Yes' : 'No') + '</td>' +
             '<td><form method="post" action="/agents/{{ agent.id }}/channels/' + ch.id + '/delete" style="display: inline;"><button type="button" class="link danger" style="font-size: 11px;" data-confirm data-confirm-message="Delete this channel?">Delete</button></form></td>';
           channelsTbody.appendChild(tr);

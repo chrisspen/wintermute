@@ -63,6 +63,7 @@ class SupervisorStatus:
 
 
 class Supervisor:
+
     def __init__(
         self,
         db: Database,
@@ -164,7 +165,9 @@ class Supervisor:
         for item in self.db.fetch_ready_work_items(utc_now()):
             if item.work_id == self._current_work_id:
                 continue
-            heapq.heappush(self._queue, (item.priority, item.created_at, item.work_id))
+            # Use run_after as tiebreaker (not created_at) for fair scheduling
+            # This ensures recently-processed items don't monopolize the queue
+            heapq.heappush(self._queue, (item.priority, item.run_after, item.work_id))
 
     async def _run_next(self) -> None:
         if not self._queue:
@@ -226,9 +229,7 @@ class Supervisor:
             self._update_state(f"completed {record.work_id}")
         except WorkItemBlocked as exc:
             logger.info("Work item %s blocked: %s", record.work_id, exc.reason)
-            run_after = (
-                datetime.now(timezone.utc).timestamp() + exc.delay_seconds
-            )
+            run_after = (datetime.now(timezone.utc).timestamp() + exc.delay_seconds)
             run_after_iso = datetime.fromtimestamp(run_after, tz=timezone.utc).isoformat()
             self.db.update_work_item_status(
                 record.work_id,
@@ -238,7 +239,7 @@ class Supervisor:
             )
             self.db.record_run_end(run_id, "blocked", error=exc.reason)
             self._update_state(f"blocked {record.work_id}")
-        except Exception as exc:  # pragma: no cover - safeguard
+        except Exception as exc: # pragma: no cover - safeguard
             tb = traceback.format_exc()
             logger.error("Work item %s failed: %s", record.work_id, exc)
             attempts = record.attempts + 1
@@ -253,10 +254,8 @@ class Supervisor:
                 self.db.record_run_end(run_id, "failed", error=str(exc))
                 self._update_state(f"failed {record.work_id}")
                 return
-            delay_seconds = 2 ** attempts
-            run_after = (
-                datetime.now(timezone.utc).timestamp() + delay_seconds
-            )
+            delay_seconds = 2**attempts
+            run_after = (datetime.now(timezone.utc).timestamp() + delay_seconds)
             run_after_iso = datetime.fromtimestamp(run_after, tz=timezone.utc).isoformat()
             self.db.update_work_item_status(
                 record.work_id,
@@ -354,7 +353,7 @@ class Supervisor:
             match = re.search(r"(\d+)$", sprint.name)
             if match:
                 num = int(match.group(1)) + 1
-                new_name = sprint.name[: match.start()] + str(num)
+                new_name = sprint.name[:match.start()] + str(num)
             else:
                 new_name = sprint.name + " 2"
             new_sprint_id = str(uuid.uuid4())
@@ -425,6 +424,16 @@ async def main() -> None:
     register(TicketAutoStartSource())
     register(StandupSource())
     db = Database()
+
+    # Reset any work items stuck in "running" state from previous crash/kill
+    stuck_items = db.list_work_items(status="running")
+    if stuck_items:
+        logger = logging.getLogger(__name__)
+        logger.info("Resetting %d stuck work items from previous run", len(stuck_items))
+        for item in stuck_items:
+            db.update_work_item_status(item.work_id, "queued")
+            logger.info("Reset stuck work item: %s", item.work_id)
+
     executor = Executor()
     tools = build_default_tools(db)
     supervisor = Supervisor(db=db, sources=all_sources(), executor=executor, tools=tools)

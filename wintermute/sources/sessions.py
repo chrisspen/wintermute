@@ -41,12 +41,14 @@ class SessionWorkItem(WorkItem):
         logger = logging.getLogger(__name__)
         session = ctx.db.get_session(self.session_id)
         if not session:
+            logger.warning("Session %s not found", self.session_id)
             return
         project = ctx.db.get_project(session.project_id) if session.project_id else None
         agent = ctx.db.get_agent(session.agent_id)
         vm = ctx.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
         # Require agent and vm; project is optional for standalone sessions
         if not (agent and vm):
+            logger.warning("Session %s missing agent or vm", self.session_id)
             return
         if agent.session_mode == "mcp":
             await _run_mcp_session(ctx, session, project, agent, vm)
@@ -216,7 +218,7 @@ async def _run_mcp_session(
             return True
         return False
 
-    if session.prompt_pending:
+    if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
         ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
         if prompt:
@@ -270,9 +272,7 @@ async def _run_mcp_session(
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("MCP keepalive for session %s", session.id)
-                keepalive_text = (
-                    "[keepalive] Reply with a single '.' and nothing else."
-                )
+                keepalive_text = ("[keepalive] Reply with a single '.' and nothing else.")
                 keepalive_result = _send_prompt(keepalive_text)
                 if keepalive_result.error or not keepalive_result.response_text:
                     logger.warning("MCP keepalive failed for session %s", session.id)
@@ -324,6 +324,7 @@ async def _run_claude_session(
     keepalive_seconds = int(os.environ.get("WINTERMUTE_CLAUDE_KEEPALIVE_SECONDS", "600"))
 
     if session.status != "running":
+        logger.info("Claude session %s not running (status=%s), closing", session.id, session.status)
         close_claude_process(session.id)
         ctx.db.release_repo_resource_for_session(session.id)
         return
@@ -358,7 +359,7 @@ async def _run_claude_session(
         return False
 
     # Handle pending prompt
-    if session.prompt_pending:
+    if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
         ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
         if prompt:
@@ -432,7 +433,7 @@ async def _run_claude_session(
     if not message.strip():
         return
 
-    logger.info("Claude reply queued for session %s", session.id)
+    logger.info("Claude processing queued message for session %s", session.id)
     result = _send_prompt(message)
     if _handle_claude_error(result.error):
         return
@@ -505,7 +506,7 @@ async def _run_gemini_session(
         return False
 
     # Handle pending prompt
-    if session.prompt_pending:
+    if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
         ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
         if prompt:
@@ -601,9 +602,7 @@ async def _run_gemini_session(
         ctx.db.update_session(session.id, awaiting_response=1)
 
 
-async def _handle_session_markers(
-    ctx: WorkItemContext, session: AgentSessionRecord, output: str
-) -> None:
+async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRecord, output: str) -> None:
     logger = logging.getLogger(__name__)
     public_lines, note_lines, blocker_lines, standup_lines, wm_lines = _extract_marked_lines(output)
     if not (public_lines or note_lines or blocker_lines or standup_lines or wm_lines):
@@ -813,9 +812,7 @@ def _extract_marked_lines(output: str) -> tuple[list[str], list[str], list[str],
     return public_lines, note_lines, blocker_lines, standup_lines, wm_lines
 
 
-def _store_output_comments(
-    ctx: WorkItemContext, session: AgentSessionRecord, agent: Any, chunks: list[str]
-) -> None:
+def _store_output_comments(ctx: WorkItemContext, session: AgentSessionRecord, agent: Any, chunks: list[str]) -> None:
     ticket_id = session.ticket_id
     # For ticket-based sessions, parse ticket info
     source_id = None
@@ -881,15 +878,13 @@ async def _apply_agent_responses(
                 sender(text)
 
 
-
-
 def _chunk_text(text: str, size: int) -> list[str]:
     if len(text) <= size:
         return [text]
     chunks = []
     start = 0
     while start < len(text):
-        chunks.append(text[start : start + size])
+        chunks.append(text[start:start + size])
         start += size
     return chunks
 
@@ -1005,12 +1000,19 @@ async def _emit_output(
             )
     # For standalone sessions, dispatch to agent's configured channels
     if not project and session.agent_id:
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "Dispatching to agent channels for session %s (agent=%s)",
+            session.id,
+            session.agent_id,
+        )
         dispatcher = ChatDispatcher(ctx.db)
         for chunk in _chunk_text(cleaned, 3000):
-            await dispatcher.broadcast_to_agent_channels(
+            results = await dispatcher.broadcast_to_agent_channels(
                 session.agent_id,
                 prefix + chunk,
             )
+            logger.info("Broadcast results: %d channels", len(results))
     _store_output_comments(ctx, session, agent, comment_chunks)
     return bool(comment_chunks)
 
@@ -1048,7 +1050,7 @@ async def _maybe_send_queued_input(
 ) -> None:
     if session.awaiting_response:
         return
-    if session.prompt_pending:
+    if session.prompt_pending and session.prompt_pending not in ("", "None"):
         return
     raw_queue = session.queued_user_messages or "[]"
     try:

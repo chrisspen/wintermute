@@ -130,11 +130,11 @@ class ProjectRecord:
     repo_path: Optional[str]
     repo_url: Optional[str]
     # Issue source fields (merged from IssueSource)
-    provider: Optional[str]  # github, gitlab, or None
+    provider: Optional[str] # github, gitlab, or None
     source_token_id: Optional[str]
     source_agent_id: Optional[str]
-    source_repo: Optional[str]  # owner/repo format
-    issue_state: Optional[str]  # open, closed, all
+    source_repo: Optional[str] # owner/repo format
+    issue_state: Optional[str] # open, closed, all
     issue_labels: list[str]
     source_enabled: bool
     auto_start: bool
@@ -268,11 +268,11 @@ class TicketRecord:
 @dataclass(frozen=True)
 class CommentRecord:
     id: str
-    ticket_id: Optional[str]  # nullable for standalone agent session comments
+    ticket_id: Optional[str] # nullable for standalone agent session comments
     session_id: Optional[str]
     project_id: Optional[str]
     agent_id: Optional[str]
-    agent_session_id: Optional[str]  # for standalone agent sessions
+    agent_session_id: Optional[str] # for standalone agent sessions
     author: Optional[str]
     source_id: Optional[str]
     issue_number: Optional[int]
@@ -281,7 +281,7 @@ class CommentRecord:
     approved: bool
     sent: bool
     sent_at: Optional[str]
-    origin: Optional[str]  # web, slack, telegram, discord, etc.
+    origin: Optional[str] # web, slack, telegram, discord, etc.
     created_at: str
     updated_at: str
 
@@ -336,7 +336,7 @@ class AgentRecord:
 @dataclass(frozen=True)
 class AgentSessionRecord:
     id: str
-    project_id: Optional[str]  # nullable for standalone sessions
+    project_id: Optional[str] # nullable for standalone sessions
     agent_id: str
     ticket_id: Optional[str]
     status: str
@@ -408,8 +408,8 @@ class SessionFileRecord:
 class ChannelRecord:
     id: str
     agent_id: str
-    type: str  # slack, telegram, discord, etc.
-    name: str  # e.g. claude/boreas
+    type: str # slack, telegram, discord, etc.
+    name: str # e.g. claude/boreas
     external_channel_id: Optional[str]
     enabled: bool
     created_at: str
@@ -590,7 +590,7 @@ class CommentModel(Base):
     __tablename__ = "comments"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    ticket_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # nullable for standalone sessions
+    ticket_id: Mapped[Optional[str]] = mapped_column(String, nullable=True) # nullable for standalone sessions
     session_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     project_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -603,7 +603,7 @@ class CommentModel(Base):
     approved: Mapped[int] = mapped_column(Integer, nullable=False)
     sent: Mapped[int] = mapped_column(Integer, nullable=False)
     sent_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    origin: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # web, slack, telegram, etc.
+    origin: Mapped[Optional[str]] = mapped_column(String, nullable=True) # web, slack, telegram, etc.
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -718,7 +718,7 @@ class AgentSessionModel(Base):
     __tablename__ = "agent_sessions"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    project_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # nullable for standalone sessions
+    project_id: Mapped[Optional[str]] = mapped_column(String, nullable=True) # nullable for standalone sessions
     agent_id: Mapped[str] = mapped_column(String, nullable=False)
     ticket_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
@@ -795,8 +795,8 @@ class ChannelModel(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     agent_id: Mapped[str] = mapped_column(String, nullable=False)
-    type: Mapped[str] = mapped_column(String, nullable=False)  # slack, telegram, discord
-    name: Mapped[str] = mapped_column(String, nullable=False)  # e.g. claude/boreas
+    type: Mapped[str] = mapped_column(String, nullable=False) # slack, telegram, discord
+    name: Mapped[str] = mapped_column(String, nullable=False) # e.g. claude/boreas
     external_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -804,8 +804,10 @@ class ChannelModel(Base):
 
 
 class Database:
+
     def __init__(self, path: Optional[str] = None) -> None:
-        self.path = path or os.environ.get(DEFAULT_DB_PATH_ENV, "./wintermute.db")
+        raw_path = path or os.environ.get(DEFAULT_DB_PATH_ENV, "./wintermute.db")
+        self.path = os.path.expanduser(raw_path)
         self.engine: Engine = create_engine(f"sqlite:///{self.path}", future=True)
         self._session_factory = sessionmaker(bind=self.engine, future=True, expire_on_commit=False)
 
@@ -867,8 +869,7 @@ class Database:
                 config=json_loads(row.config_json),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_task_source(self, source_id: str) -> Optional[TaskSourceRecord]:
@@ -923,12 +924,9 @@ class Database:
         with self.session() as session:
             rows = (
                 session.execute(
-                    select(WorkItemModel)
-                    .where(WorkItemModel.status == "queued", WorkItemModel.run_after <= now)
-                    .order_by(WorkItemModel.priority.asc(), WorkItemModel.created_at.asc())
-                )
-                .scalars()
-                .all()
+                    select(WorkItemModel).where(WorkItemModel.status == "queued",
+                                                WorkItemModel.run_after <= now).order_by(WorkItemModel.priority.asc(), WorkItemModel.created_at.asc())
+                ).scalars().all()
             )
         return [self._model_to_work_item(row) for row in rows]
 
@@ -937,11 +935,7 @@ class Database:
             stmt = select(WorkItemModel)
             if status:
                 stmt = stmt.where(WorkItemModel.status == status)
-            rows = (
-                session.execute(stmt.order_by(WorkItemModel.priority.asc(), WorkItemModel.created_at.asc()))
-                .scalars()
-                .all()
-            )
+            rows = (session.execute(stmt.order_by(WorkItemModel.priority.asc(), WorkItemModel.created_at.asc())).scalars().all())
         return [self._model_to_work_item(row) for row in rows]
 
     def get_work_item(self, work_id: str) -> Optional[WorkItemRecord]:
@@ -1067,8 +1061,7 @@ class Database:
                 reference=row.reference,
                 note=row.note,
                 created_at=row.created_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_latest_credential_update(self) -> str:
@@ -1094,16 +1087,14 @@ class Database:
         note: Optional[str] = None,
     ) -> None:
         with self.session() as session:
-            session.add(
-                CredentialModel(
-                    id=cred_id,
-                    name=name,
-                    provider=provider,
-                    reference=reference,
-                    note=note,
-                    created_at=utc_now(),
-                )
-            )
+            session.add(CredentialModel(
+                id=cred_id,
+                name=name,
+                provider=provider,
+                reference=reference,
+                note=note,
+                created_at=utc_now(),
+            ))
 
     def upsert_credential(
         self,
@@ -1116,16 +1107,14 @@ class Database:
         with self.session() as session:
             existing = session.get(CredentialModel, cred_id)
             if existing is None:
-                session.add(
-                    CredentialModel(
-                        id=cred_id,
-                        name=name,
-                        provider=provider,
-                        reference=reference,
-                        note=note,
-                        created_at=utc_now(),
-                    )
-                )
+                session.add(CredentialModel(
+                    id=cred_id,
+                    name=name,
+                    provider=provider,
+                    reference=reference,
+                    note=note,
+                    created_at=utc_now(),
+                ))
                 return
             existing.name = name
             existing.provider = provider
@@ -1175,13 +1164,7 @@ class Database:
 
     def get_credential_by_name(self, provider: str, name: str) -> Optional[CredentialRecord]:
         with self.session() as session:
-            row = (
-                session.execute(
-                    select(CredentialModel)
-                    .where(CredentialModel.provider == provider, CredentialModel.name == name)
-                )
-                .scalar_one_or_none()
-            )
+            row = (session.execute(select(CredentialModel).where(CredentialModel.provider == provider, CredentialModel.name == name)).scalar_one_or_none())
         if not row:
             return None
         return CredentialRecord(
@@ -1196,16 +1179,13 @@ class Database:
     def list_users(self) -> list[UserRecord]:
         with self.session() as session:
             rows = session.execute(select(UserModel).order_by(UserModel.username)).scalars().all()
-        return [
-            UserRecord(
-                id=row.id,
-                username=row.username,
-                password_hash=row.password_hash,
-                salt=row.salt,
-                created_at=row.created_at,
-            )
-            for row in rows
-        ]
+        return [UserRecord(
+            id=row.id,
+            username=row.username,
+            password_hash=row.password_hash,
+            salt=row.salt,
+            created_at=row.created_at,
+        ) for row in rows]
 
     def get_user(self, username: str) -> Optional[UserRecord]:
         with self.session() as session:
@@ -1235,15 +1215,13 @@ class Database:
 
     def insert_user(self, user_id: str, username: str, password_hash: str, salt: str) -> None:
         with self.session() as session:
-            session.add(
-                UserModel(
-                    id=user_id,
-                    username=username,
-                    password_hash=password_hash,
-                    salt=salt,
-                    created_at=utc_now(),
-                )
-            )
+            session.add(UserModel(
+                id=user_id,
+                username=username,
+                password_hash=password_hash,
+                salt=salt,
+                created_at=utc_now(),
+            ))
 
     def update_user(
         self,
@@ -1270,12 +1248,10 @@ class Database:
 
     def get_column_preferences(self, user_id: str, model: str) -> Optional[ColumnPreferenceRecord]:
         with self.session() as session:
-            row = session.execute(
-                select(ColumnPreferenceModel).where(
-                    ColumnPreferenceModel.user_id == user_id,
-                    ColumnPreferenceModel.model == model,
-                )
-            ).scalar_one_or_none()
+            row = session.execute(select(ColumnPreferenceModel).where(
+                ColumnPreferenceModel.user_id == user_id,
+                ColumnPreferenceModel.model == model,
+            )).scalar_one_or_none()
         if not row:
             return None
         columns = json_loads(row.columns_json)
@@ -1294,26 +1270,22 @@ class Database:
         now = utc_now()
         payload = json_dumps(columns)
         with self.session() as session:
-            row = session.execute(
-                select(ColumnPreferenceModel).where(
-                    ColumnPreferenceModel.user_id == user_id,
-                    ColumnPreferenceModel.model == model,
-                )
-            ).scalar_one_or_none()
+            row = session.execute(select(ColumnPreferenceModel).where(
+                ColumnPreferenceModel.user_id == user_id,
+                ColumnPreferenceModel.model == model,
+            )).scalar_one_or_none()
             if row:
                 row.columns_json = payload
                 row.updated_at = now
             else:
-                session.add(
-                    ColumnPreferenceModel(
-                        id=str(uuid.uuid4()),
-                        user_id=user_id,
-                        model=model,
-                        columns_json=payload,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                )
+                session.add(ColumnPreferenceModel(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    model=model,
+                    columns_json=payload,
+                    created_at=now,
+                    updated_at=now,
+                ))
 
     def list_api_tokens(self) -> list[ApiTokenRecord]:
         with self.session() as session:
@@ -1326,8 +1298,7 @@ class Database:
                 permissions=json_loads(row.permissions_json) or {},
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_api_token(self, token_id: str) -> Optional[ApiTokenRecord]:
@@ -1346,9 +1317,7 @@ class Database:
 
     def get_api_token_by_value(self, token_value: str) -> Optional[ApiTokenRecord]:
         with self.session() as session:
-            row = session.execute(
-                select(ApiTokenModel).where(ApiTokenModel.token == token_value)
-            ).scalar_one_or_none()
+            row = session.execute(select(ApiTokenModel).where(ApiTokenModel.token == token_value)).scalar_one_or_none()
         if not row:
             return None
         return ApiTokenRecord(
@@ -1369,16 +1338,14 @@ class Database:
     ) -> None:
         now = utc_now()
         with self.session() as session:
-            session.add(
-                ApiTokenModel(
-                    id=token_id,
-                    name=name,
-                    token=token,
-                    permissions_json=json_dumps(permissions),
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+            session.add(ApiTokenModel(
+                id=token_id,
+                name=name,
+                token=token,
+                permissions_json=json_dumps(permissions),
+                created_at=now,
+                updated_at=now,
+            ))
 
     def update_api_token(
         self,
@@ -1560,15 +1527,9 @@ class Database:
 
     def delete_project(self, project_id: str) -> None:
         with self.session() as session:
-            session.query(AgentSessionModel).filter(
-                AgentSessionModel.project_id == project_id
-            ).delete()
-            session.query(RepoResourceModel).filter(
-                RepoResourceModel.project_id == project_id
-            ).delete()
-            session.query(IssueSourceModel).filter(
-                IssueSourceModel.project_id == project_id
-            ).delete()
+            session.query(AgentSessionModel).filter(AgentSessionModel.project_id == project_id).delete()
+            session.query(RepoResourceModel).filter(RepoResourceModel.project_id == project_id).delete()
+            session.query(IssueSourceModel).filter(IssueSourceModel.project_id == project_id).delete()
             session.query(TicketModel).filter(TicketModel.project_id == project_id).delete()
             session.query(ProjectModel).filter(ProjectModel.id == project_id).delete()
 
@@ -1584,8 +1545,7 @@ class Database:
                 user_login=t.user_login,
                 created_at=t.created_at,
                 updated_at=t.updated_at,
-            )
-            for t in tokens
+            ) for t in tokens
         ]
 
     def list_gitlab_tokens(self) -> list[GitLabTokenRecord]:
@@ -1601,15 +1561,12 @@ class Database:
                 user_login=t.user_login,
                 created_at=t.created_at,
                 updated_at=t.updated_at,
-            )
-            for t in tokens
+            ) for t in tokens
         ]
 
     def list_repo_resources(self) -> list[RepoResourceRecord]:
         with self.session() as session:
-            rows = session.execute(
-                select(RepoResourceModel).order_by(RepoResourceModel.updated_at.desc())
-            ).scalars().all()
+            rows = session.execute(select(RepoResourceModel).order_by(RepoResourceModel.updated_at.desc())).scalars().all()
         return [
             RepoResourceRecord(
                 id=row.id,
@@ -1622,8 +1579,7 @@ class Database:
                 last_used_at=row.last_used_at,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_repo_resource(self, resource_id: str) -> Optional[RepoResourceRecord]:
@@ -1672,9 +1628,8 @@ class Database:
 
         with self.session() as session:
             rows = session.execute(
-                select(RepoResourceModel)
-                .where(RepoResourceModel.project_id == project.id)
-                .order_by(RepoResourceModel.last_used_at.asc().nullsfirst(), RepoResourceModel.created_at.asc())
+                select(RepoResourceModel).where(RepoResourceModel.project_id == project.id
+                                                ).order_by(RepoResourceModel.last_used_at.asc().nullsfirst(), RepoResourceModel.created_at.asc())
             ).scalars().all()
             for row in rows:
                 if row.status != "in_use" or not row.session_id:
@@ -1784,9 +1739,7 @@ class Database:
     def release_repo_resource_for_session(self, session_id: str) -> None:
         now = utc_now()
         with self.session() as session:
-            row = session.execute(
-                select(RepoResourceModel).where(RepoResourceModel.session_id == session_id)
-            ).scalar_one_or_none()
+            row = session.execute(select(RepoResourceModel).where(RepoResourceModel.session_id == session_id)).scalar_one_or_none()
             if not row:
                 return
             row.status = "available"
@@ -1798,15 +1751,12 @@ class Database:
     def list_repo_resources_for_cleanup(self, cutoff: str) -> list[RepoResourceRecord]:
         with self.session() as session:
             rows = session.execute(
-                select(RepoResourceModel)
-                .where(RepoResourceModel.status == "available")
-                .where(RepoResourceModel.repo_mode == "clone")
-                .where(
-                    or_(
-                        RepoResourceModel.last_used_at.is_(None),
-                        RepoResourceModel.last_used_at <= cutoff,
-                    )
-                )
+                select(RepoResourceModel).where(RepoResourceModel.status == "available"
+                                                ).where(RepoResourceModel.repo_mode == "clone"
+                                                        ).where(or_(
+                                                            RepoResourceModel.last_used_at.is_(None),
+                                                            RepoResourceModel.last_used_at <= cutoff,
+                                                        ))
             ).scalars().all()
         return [
             RepoResourceRecord(
@@ -1820,8 +1770,7 @@ class Database:
                 last_used_at=row.last_used_at,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def delete_repo_resource(self, resource_id: str) -> None:
@@ -1882,17 +1831,13 @@ class Database:
     def get_latest_github_token_update(self) -> str:
         """Legacy wrapper - uses unified remote_tokens table."""
         with self.session() as session:
-            value = session.execute(
-                select(func.max(RemoteTokenModel.updated_at)).where(RemoteTokenModel.provider == "github")
-            ).scalar_one_or_none()
+            value = session.execute(select(func.max(RemoteTokenModel.updated_at)).where(RemoteTokenModel.provider == "github")).scalar_one_or_none()
         return value or ""
 
     def get_latest_gitlab_token_update(self) -> str:
         """Legacy wrapper - uses unified remote_tokens table."""
         with self.session() as session:
-            value = session.execute(
-                select(func.max(RemoteTokenModel.updated_at)).where(RemoteTokenModel.provider == "gitlab")
-            ).scalar_one_or_none()
+            value = session.execute(select(func.max(RemoteTokenModel.updated_at)).where(RemoteTokenModel.provider == "gitlab")).scalar_one_or_none()
         return value or ""
 
     def get_github_token(self, token_id: str) -> Optional[GitHubTokenRecord]:
@@ -2028,8 +1973,7 @@ class Database:
                 user_login=row.user_login,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_remote_token(self, token_id: str) -> Optional[RemoteTokenRecord]:
@@ -2142,8 +2086,7 @@ class Database:
                 poll_interval_seconds=row.poll_interval_seconds,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_issue_source(self, source_id: str) -> Optional[IssueSourceRecord]:
@@ -2260,7 +2203,7 @@ class Database:
             owner, repo = _split_repo(project.source_repo)
             results.append(
                 GitHubSourceRecord(
-                    id=project.id,  # Project ID is now the source ID
+                    id=project.id, # Project ID is now the source ID
                     token_id=project.source_token_id,
                     agent_id=project.source_agent_id,
                     project_id=project.id,
@@ -2384,10 +2327,7 @@ class Database:
     def list_auto_start_tickets(self) -> list[TicketRecord]:
         with self.session() as session:
             rows = session.execute(
-                select(TicketModel)
-                .where(TicketModel.auto_start == 1)
-                .where(TicketModel.status == "open")
-                .order_by(TicketModel.updated_at.desc())
+                select(TicketModel).where(TicketModel.auto_start == 1).where(TicketModel.status == "open").order_by(TicketModel.updated_at.desc())
             ).scalars().all()
         return [
             TicketRecord(
@@ -2411,8 +2351,7 @@ class Database:
                 created_by_id=row.created_by_id,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def list_gitlab_sources(self, project_id: Optional[str] = None) -> list[GitLabSourceRecord]:
@@ -2428,7 +2367,7 @@ class Database:
                 continue
             results.append(
                 GitLabSourceRecord(
-                    id=project.id,  # Project ID is now the source ID
+                    id=project.id, # Project ID is now the source ID
                     token_id=project.source_token_id,
                     agent_id=project.source_agent_id,
                     project_id=project.id,
@@ -2566,8 +2505,7 @@ class Database:
                     created_by_id=row.created_by_id,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
-                )
-                for row in rows
+                ) for row in rows
             ]
 
     def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:
@@ -2722,15 +2660,7 @@ class Database:
         if not gitlab_web_base:
             gitlab_web_base = api_base[:-7] if api_base.endswith("/api/v4") else api_base
         with self.session() as session:
-            rows = (
-                session.execute(
-                    select(TicketModel).where(
-                        TicketModel.source_url.is_(None)
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            rows = (session.execute(select(TicketModel).where(TicketModel.source_url.is_(None))).scalars().all())
             for row in rows:
                 if row.id.startswith("github:"):
                     parts = row.id.split(":")
@@ -2783,8 +2713,7 @@ class Database:
                     status=row.status,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
-                )
-                for row in rows
+                ) for row in rows
             ]
 
     def get_sprint(self, sprint_id: str) -> Optional[SprintRecord]:
@@ -2806,11 +2735,7 @@ class Database:
     def get_active_sprint(self) -> Optional[SprintRecord]:
         """Get the current active sprint."""
         with self.session() as session:
-            row = session.execute(
-                select(SprintModel)
-                .where(SprintModel.status == "active")
-                .order_by(SprintModel.start_date.desc())
-            ).scalars().first()
+            row = session.execute(select(SprintModel).where(SprintModel.status == "active").order_by(SprintModel.start_date.desc())).scalars().first()
             if not row:
                 return None
             return SprintRecord(
@@ -2882,26 +2807,16 @@ class Database:
         """Move all open tickets from one sprint to another. Returns count moved."""
         with self.session() as session:
             # Get open tickets in the source sprint via junction table
-            ticket_ids = session.execute(
-                select(TicketSprintModel.ticket_id)
-                .where(TicketSprintModel.sprint_id == from_sprint_id)
-            ).scalars().all()
+            ticket_ids = session.execute(select(TicketSprintModel.ticket_id).where(TicketSprintModel.sprint_id == from_sprint_id)).scalars().all()
             if not ticket_ids:
                 return 0
-            open_tickets = session.execute(
-                select(TicketModel)
-                .where(TicketModel.id.in_(ticket_ids))
-                .where(TicketModel.status.in_(["open", "in-progress"]))
-            ).scalars().all()
+            open_tickets = session.execute(select(TicketModel).where(TicketModel.id.in_(ticket_ids)).where(TicketModel.status.in_(["open", "in-progress"]))
+                                           ).scalars().all()
             count = 0
             now = utc_now()
             for ticket in open_tickets:
                 # Remove from old sprint
-                session.execute(
-                    select(TicketSprintModel)
-                    .where(TicketSprintModel.ticket_id == ticket.id)
-                    .where(TicketSprintModel.sprint_id == from_sprint_id)
-                )
+                session.execute(select(TicketSprintModel).where(TicketSprintModel.ticket_id == ticket.id).where(TicketSprintModel.sprint_id == from_sprint_id))
                 session.query(TicketSprintModel).filter(
                     TicketSprintModel.ticket_id == ticket.id,
                     TicketSprintModel.sprint_id == from_sprint_id,
@@ -2919,9 +2834,7 @@ class Database:
         """Add a ticket to a sprint. Returns True if added, False if already exists."""
         with self.session() as session:
             existing = session.execute(
-                select(TicketSprintModel)
-                .where(TicketSprintModel.ticket_id == ticket_id)
-                .where(TicketSprintModel.sprint_id == sprint_id)
+                select(TicketSprintModel).where(TicketSprintModel.ticket_id == ticket_id).where(TicketSprintModel.sprint_id == sprint_id)
             ).scalars().first()
             if existing:
                 return False
@@ -2944,17 +2857,10 @@ class Database:
     def list_tickets_in_sprint(self, sprint_id: str) -> list[TicketRecord]:
         """List all tickets in a sprint via the junction table."""
         with self.session() as session:
-            ticket_ids = session.execute(
-                select(TicketSprintModel.ticket_id)
-                .where(TicketSprintModel.sprint_id == sprint_id)
-            ).scalars().all()
+            ticket_ids = session.execute(select(TicketSprintModel.ticket_id).where(TicketSprintModel.sprint_id == sprint_id)).scalars().all()
             if not ticket_ids:
                 return []
-            rows = session.execute(
-                select(TicketModel)
-                .where(TicketModel.id.in_(ticket_ids))
-                .order_by(TicketModel.created_at.desc())
-            ).scalars().all()
+            rows = session.execute(select(TicketModel).where(TicketModel.id.in_(ticket_ids)).order_by(TicketModel.created_at.desc())).scalars().all()
             return [
                 TicketRecord(
                     id=row.id,
@@ -2977,26 +2883,20 @@ class Database:
                     created_by_id=row.created_by_id,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
-                )
-                for row in rows
+                ) for row in rows
             ]
 
     def list_tickets_not_in_sprint(self, sprint_id: str, status_filter: Optional[list[str]] = None) -> list[TicketRecord]:
         """List all tickets not in the given sprint, optionally filtered by status."""
         with self.session() as session:
             # Get ticket IDs already in this sprint
-            in_sprint_ids = session.execute(
-                select(TicketSprintModel.ticket_id)
-                .where(TicketSprintModel.sprint_id == sprint_id)
-            ).scalars().all()
+            in_sprint_ids = session.execute(select(TicketSprintModel.ticket_id).where(TicketSprintModel.sprint_id == sprint_id)).scalars().all()
             stmt = select(TicketModel)
             if in_sprint_ids:
                 stmt = stmt.where(TicketModel.id.notin_(in_sprint_ids))
             if status_filter:
                 stmt = stmt.where(TicketModel.status.in_(status_filter))
-            rows = session.execute(
-                stmt.order_by(TicketModel.created_at.desc())
-            ).scalars().all()
+            rows = session.execute(stmt.order_by(TicketModel.created_at.desc())).scalars().all()
             return [
                 TicketRecord(
                     id=row.id,
@@ -3019,13 +2919,10 @@ class Database:
                     created_by_id=row.created_by_id,
                     created_at=row.created_at,
                     updated_at=row.updated_at,
-                )
-                for row in rows
+                ) for row in rows
             ]
 
-    def list_comments(
-        self, ticket_id: Optional[str] = None, agent_session_id: Optional[str] = None
-    ) -> list[CommentRecord]:
+    def list_comments(self, ticket_id: Optional[str] = None, agent_session_id: Optional[str] = None) -> list[CommentRecord]:
         with self.session() as session:
             stmt = select(CommentModel)
             if ticket_id:
@@ -3052,8 +2949,7 @@ class Database:
                 origin=getattr(row, "origin", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def list_comments_since(
@@ -3090,8 +2986,7 @@ class Database:
                 origin=getattr(row, "origin", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_comment(self, comment_id: str) -> Optional[CommentRecord]:
@@ -3193,14 +3088,9 @@ class Database:
         with self.session() as session:
             rows = (
                 session.execute(
-                    select(CommentModel)
-                    .where(CommentModel.public == 1)
-                    .where(CommentModel.approved == 1)
-                    .where(CommentModel.sent == 0)
-                    .order_by(CommentModel.created_at.asc())
-                )
-                .scalars()
-                .all()
+                    select(CommentModel).where(CommentModel.public == 1).where(CommentModel.approved == 1).where(CommentModel.sent == 0
+                                                                                                                 ).order_by(CommentModel.created_at.asc())
+                ).scalars().all()
             )
         return [
             CommentRecord(
@@ -3221,8 +3111,7 @@ class Database:
                 updated_at=row.updated_at,
                 agent_session_id=getattr(row, "agent_session_id", None),
                 origin=getattr(row, "origin", None),
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def mark_comment_sent(self, comment_id: str, sent_at: Optional[str] = None) -> None:
@@ -3246,24 +3135,21 @@ class Database:
                 port=row.port,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def insert_vm_target(self, vm_id: str, name: str, host: str, user: str, port: int) -> None:
         now = utc_now()
         with self.session() as session:
-            session.add(
-                VMTargetModel(
-                    id=vm_id,
-                    name=name,
-                    host=host,
-                    user=user,
-                    port=port,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+            session.add(VMTargetModel(
+                id=vm_id,
+                name=name,
+                host=host,
+                user=user,
+                port=port,
+                created_at=now,
+                updated_at=now,
+            ))
 
     def update_vm_target(
         self,
@@ -3330,8 +3216,7 @@ class Database:
                 session_file_config_id=row.session_file_config_id,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def list_agent_responses(self, agent_id: Optional[str] = None) -> list[AgentResponseRecord]:
@@ -3348,8 +3233,7 @@ class Database:
                 response=row.response,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_agent_response(self, response_id: str) -> Optional[AgentResponseRecord]:
@@ -3375,16 +3259,14 @@ class Database:
     ) -> None:
         now = utc_now()
         with self.session() as session:
-            session.add(
-                AgentResponseModel(
-                    id=response_id,
-                    agent_id=agent_id,
-                    pattern=pattern,
-                    response=response,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+            session.add(AgentResponseModel(
+                id=response_id,
+                agent_id=agent_id,
+                pattern=pattern,
+                response=response,
+                created_at=now,
+                updated_at=now,
+            ))
 
     def update_agent_response(
         self,
@@ -3605,20 +3487,14 @@ class Database:
                 workspace_path=getattr(row, "workspace_path", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_session_by_ticket(self, ticket_id: str) -> Optional[AgentSessionRecord]:
         with self.session() as session:
             row = (
-                session.execute(
-                    select(AgentSessionModel)
-                    .where(AgentSessionModel.ticket_id == ticket_id)
-                    .order_by(AgentSessionModel.created_at.desc())
-                )
-                .scalars()
-                .first()
+                session.execute(select(AgentSessionModel).where(AgentSessionModel.ticket_id == ticket_id).order_by(AgentSessionModel.created_at.desc())
+                                ).scalars().first()
             )
         if not row:
             return None
@@ -3754,12 +3630,7 @@ class Database:
 
     def get_session_by_thread(self, thread_ts: str) -> Optional[AgentSessionRecord]:
         with self.session() as session:
-            row = (
-                session.execute(
-                    select(AgentSessionModel).where(AgentSessionModel.thread_ts == thread_ts)
-                )
-                .scalar_one_or_none()
-            )
+            row = (session.execute(select(AgentSessionModel).where(AgentSessionModel.thread_ts == thread_ts)).scalar_one_or_none())
         if not row:
             return None
         return AgentSessionRecord(
@@ -3857,8 +3728,7 @@ class Database:
                 enabled=bool(row.enabled),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_channel(self, channel_id: str) -> Optional[ChannelRecord]:
@@ -3877,17 +3747,11 @@ class Database:
             updated_at=row.updated_at,
         )
 
-    def get_channel_by_external_id(
-        self, channel_type: str, external_channel_id: str
-    ) -> Optional[ChannelRecord]:
+    def get_channel_by_external_id(self, channel_type: str, external_channel_id: str) -> Optional[ChannelRecord]:
         with self.session() as session:
             row = (
-                session.execute(
-                    select(ChannelModel)
-                    .where(ChannelModel.type == channel_type)
-                    .where(ChannelModel.external_channel_id == external_channel_id)
-                )
-                .scalar_one_or_none()
+                session.execute(select(ChannelModel).where(ChannelModel.type == channel_type).where(ChannelModel.external_channel_id == external_channel_id)
+                                ).scalar_one_or_none()
             )
         if not row:
             return None
@@ -3956,15 +3820,7 @@ class Database:
 
     def list_session_file_configs(self) -> list[SessionFileConfigRecord]:
         with self.session() as session:
-            rows = (
-                session.execute(
-                    select(SessionFileConfigModel).order_by(
-                        SessionFileConfigModel.name.asc()
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            rows = (session.execute(select(SessionFileConfigModel).order_by(SessionFileConfigModel.name.asc())).scalars().all())
         return [
             SessionFileConfigRecord(
                 id=row.id,
@@ -3972,13 +3828,10 @@ class Database:
                 description=row.description,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
-    def get_session_file_config(
-        self, config_id: str
-    ) -> Optional[SessionFileConfigRecord]:
+    def get_session_file_config(self, config_id: str) -> Optional[SessionFileConfigRecord]:
         with self.session() as session:
             row = session.get(SessionFileConfigModel, config_id)
         if not row:
@@ -3999,15 +3852,13 @@ class Database:
     ) -> None:
         now = utc_now()
         with self.session() as session:
-            session.add(
-                SessionFileConfigModel(
-                    id=config_id,
-                    name=name,
-                    description=description,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+            session.add(SessionFileConfigModel(
+                id=config_id,
+                name=name,
+                description=description,
+                created_at=now,
+                updated_at=now,
+            ))
 
     def update_session_file_config(
         self,
@@ -4030,35 +3881,22 @@ class Database:
         with self.session() as session:
             # Also delete definitions and files
             session.query(SessionFileModel).filter(
-                SessionFileModel.definition_id.in_(
-                    select(SessionFileDefinitionModel.id).where(
-                        SessionFileDefinitionModel.config_id == config_id
-                    )
-                )
+                SessionFileModel.definition_id.in_(select(SessionFileDefinitionModel.id).where(SessionFileDefinitionModel.config_id == config_id))
             ).delete(synchronize_session=False)
-            session.query(SessionFileDefinitionModel).filter(
-                SessionFileDefinitionModel.config_id == config_id
-            ).delete()
-            session.query(SessionFileConfigModel).filter(
-                SessionFileConfigModel.id == config_id
-            ).delete()
+            session.query(SessionFileDefinitionModel).filter(SessionFileDefinitionModel.config_id == config_id).delete()
+            session.query(SessionFileConfigModel).filter(SessionFileConfigModel.id == config_id).delete()
 
     # -------------------------------------------------------------------------
     # SessionFileDefinition CRUD
     # -------------------------------------------------------------------------
 
-    def list_session_file_definitions(
-        self, config_id: str
-    ) -> list[SessionFileDefinitionRecord]:
+    def list_session_file_definitions(self, config_id: str) -> list[SessionFileDefinitionRecord]:
         with self.session() as session:
             rows = (
                 session.execute(
-                    select(SessionFileDefinitionModel)
-                    .where(SessionFileDefinitionModel.config_id == config_id)
-                    .order_by(SessionFileDefinitionModel.sort_order.asc())
-                )
-                .scalars()
-                .all()
+                    select(SessionFileDefinitionModel).where(SessionFileDefinitionModel.config_id == config_id
+                                                             ).order_by(SessionFileDefinitionModel.sort_order.asc())
+                ).scalars().all()
             )
         return [
             SessionFileDefinitionRecord(
@@ -4072,13 +3910,10 @@ class Database:
                 sort_order=row.sort_order,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
-    def get_session_file_definition(
-        self, definition_id: str
-    ) -> Optional[SessionFileDefinitionRecord]:
+    def get_session_file_definition(self, definition_id: str) -> Optional[SessionFileDefinitionRecord]:
         with self.session() as session:
             row = session.get(SessionFileDefinitionModel, definition_id)
         if not row:
@@ -4156,12 +3991,8 @@ class Database:
     def delete_session_file_definition(self, definition_id: str) -> None:
         with self.session() as session:
             # Also delete associated session files
-            session.query(SessionFileModel).filter(
-                SessionFileModel.definition_id == definition_id
-            ).delete()
-            session.query(SessionFileDefinitionModel).filter(
-                SessionFileDefinitionModel.id == definition_id
-            ).delete()
+            session.query(SessionFileModel).filter(SessionFileModel.definition_id == definition_id).delete()
+            session.query(SessionFileDefinitionModel).filter(SessionFileDefinitionModel.id == definition_id).delete()
 
     # -------------------------------------------------------------------------
     # SessionFile CRUD
@@ -4170,13 +4001,8 @@ class Database:
     def list_session_files(self, agent_id: str) -> list[SessionFileRecord]:
         with self.session() as session:
             rows = (
-                session.execute(
-                    select(SessionFileModel)
-                    .where(SessionFileModel.agent_id == agent_id)
-                    .order_by(SessionFileModel.created_at.asc())
-                )
-                .scalars()
-                .all()
+                session.execute(select(SessionFileModel).where(SessionFileModel.agent_id == agent_id).order_by(SessionFileModel.created_at.asc())
+                                ).scalars().all()
             )
         return [
             SessionFileRecord(
@@ -4186,8 +4012,7 @@ class Database:
                 content=row.content,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
-            )
-            for row in rows
+            ) for row in rows
         ]
 
     def get_session_file(self, file_id: str) -> Optional[SessionFileRecord]:
@@ -4204,17 +4029,11 @@ class Database:
             updated_at=row.updated_at,
         )
 
-    def get_session_file_by_definition(
-        self, agent_id: str, definition_id: str
-    ) -> Optional[SessionFileRecord]:
+    def get_session_file_by_definition(self, agent_id: str, definition_id: str) -> Optional[SessionFileRecord]:
         with self.session() as session:
             row = (
-                session.execute(
-                    select(SessionFileModel)
-                    .where(SessionFileModel.agent_id == agent_id)
-                    .where(SessionFileModel.definition_id == definition_id)
-                )
-                .scalar_one_or_none()
+                session.execute(select(SessionFileModel).where(SessionFileModel.agent_id == agent_id).where(SessionFileModel.definition_id == definition_id)
+                                ).scalar_one_or_none()
             )
         if not row:
             return None
@@ -4236,16 +4055,14 @@ class Database:
     ) -> None:
         now = utc_now()
         with self.session() as session:
-            session.add(
-                SessionFileModel(
-                    id=file_id,
-                    agent_id=agent_id,
-                    definition_id=definition_id,
-                    content=content,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+            session.add(SessionFileModel(
+                id=file_id,
+                agent_id=agent_id,
+                definition_id=definition_id,
+                content=content,
+                created_at=now,
+                updated_at=now,
+            ))
 
     def update_session_file(
         self,
@@ -4281,12 +4098,8 @@ class Database:
 
     def delete_session_file(self, file_id: str) -> None:
         with self.session() as session:
-            session.query(SessionFileModel).filter(
-                SessionFileModel.id == file_id
-            ).delete()
+            session.query(SessionFileModel).filter(SessionFileModel.id == file_id).delete()
 
     def delete_session_files_for_agent(self, agent_id: str) -> None:
         with self.session() as session:
-            session.query(SessionFileModel).filter(
-                SessionFileModel.agent_id == agent_id
-            ).delete()
+            session.query(SessionFileModel).filter(SessionFileModel.agent_id == agent_id).delete()
