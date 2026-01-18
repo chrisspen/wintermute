@@ -150,6 +150,9 @@
             <td class="editable-cell" data-field="external_channel_id"{% if not channel.external_channel_id %} style="color: #f97316;" title="Click to set channel ID - messages won't be sent without it"{% endif %}>{{ channel.external_channel_id or '⚠ Not Set' }}</td>
             <td>{% if channel.enabled %}Yes{% else %}No{% endif %}</td>
             <td>
+              {% if channel.type == 'slack' and not channel.external_channel_id %}
+              <button type="button" class="link fix-channel-btn" data-channel-id="{{ channel.id }}" style="font-size: 11px; margin-right: 8px;">Fix</button>
+              {% endif %}
               <form method="post" action="/agents/{{ agent.id }}/channels/{{ channel.id }}/delete" style="display: inline;">
                 <button type="button" class="link danger" style="font-size: 11px;" data-confirm data-confirm-message="Delete this channel?">Delete</button>
               </form>
@@ -589,6 +592,47 @@
   if (channelsTbody) {
     bindEditableCells(channelsTbody);
   }
+
+  // Handle Fix channel buttons
+  document.querySelectorAll(".fix-channel-btn").forEach(function(btn) {
+    btn.addEventListener("click", async function() {
+      var channelId = btn.dataset.channelId;
+      btn.disabled = true;
+      btn.textContent = "Fixing...";
+      try {
+        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/channels/" + encodeURIComponent(channelId) + "/fix", {
+          method: "POST"
+        });
+        var payload = await response.json();
+        if (!response.ok) {
+          alert(payload.detail || "Failed to fix channel");
+          btn.disabled = false;
+          btn.textContent = "Fix";
+          return;
+        }
+        if (payload.external_channel_id) {
+          // Update the cell with the new external_channel_id
+          var row = btn.closest("tr");
+          var extIdCell = row.querySelector("[data-field='external_channel_id']");
+          if (extIdCell) {
+            extIdCell.textContent = payload.external_channel_id;
+            extIdCell.style.color = "";
+            extIdCell.title = "";
+          }
+          // Remove the Fix button
+          btn.remove();
+        } else {
+          alert("Could not create Slack channel");
+          btn.disabled = false;
+          btn.textContent = "Fix";
+        }
+      } catch (err) {
+        alert("Failed to fix channel: " + err);
+        btn.disabled = false;
+        btn.textContent = "Fix";
+      }
+    });
+  });
 
   // Scroll conversation to bottom on load
   if (listEl) {

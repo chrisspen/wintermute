@@ -129,6 +129,8 @@ class ProjectRecord:
     repo_mode: Optional[str]
     repo_path: Optional[str]
     repo_url: Optional[str]
+    master_branch_name: str # Default branch name for git operations
+    build_status_image_url: Optional[str] # Custom build badge URL (auto-filled if blank)
     # Issue source fields (merged from IssueSource)
     provider: Optional[str] # github, gitlab, or None
     source_token_id: Optional[str]
@@ -526,6 +528,8 @@ class ProjectModel(Base):
     repo_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     repo_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     repo_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    master_branch_name: Mapped[str] = mapped_column(String, nullable=False, default="master")
+    build_status_image_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     # Issue source fields (merged from IssueSource)
     provider: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     source_token_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -924,8 +928,8 @@ class Database:
         with self.session() as session:
             rows = (
                 session.execute(
-                    select(WorkItemModel).where(WorkItemModel.status == "queued",
-                                                WorkItemModel.run_after <= now).order_by(WorkItemModel.priority.asc(), WorkItemModel.created_at.asc())
+                    select(WorkItemModel).where(WorkItemModel.status == "queued", WorkItemModel.run_after
+                                                <= now).order_by(WorkItemModel.priority.asc(), WorkItemModel.created_at.asc())
                 ).scalars().all()
             )
         return [self._model_to_work_item(row) for row in rows]
@@ -1383,6 +1387,8 @@ class Database:
             repo_mode=row.repo_mode,
             repo_path=row.repo_path,
             repo_url=row.repo_url,
+            master_branch_name=row.master_branch_name or "master",
+            build_status_image_url=row.build_status_image_url,
             provider=row.provider,
             source_token_id=row.source_token_id,
             source_agent_id=row.source_agent_id,
@@ -1426,6 +1432,8 @@ class Database:
         repo_mode: Optional[str] = None,
         repo_path: Optional[str] = None,
         repo_url: Optional[str] = None,
+        master_branch_name: str = "master",
+        build_status_image_url: Optional[str] = None,
         provider: Optional[str] = None,
         source_token_id: Optional[str] = None,
         source_agent_id: Optional[str] = None,
@@ -1449,6 +1457,8 @@ class Database:
                     repo_mode=repo_mode,
                     repo_path=repo_path,
                     repo_url=repo_url,
+                    master_branch_name=master_branch_name,
+                    build_status_image_url=build_status_image_url,
                     provider=provider,
                     source_token_id=source_token_id,
                     source_agent_id=source_agent_id,
@@ -1475,6 +1485,8 @@ class Database:
         repo_mode: Optional[str] = None,
         repo_path: Optional[str] = None,
         repo_url: Optional[str] = None,
+        master_branch_name: Optional[str] = None,
+        build_status_image_url: Optional[str] = None,
         provider: Optional[str] = None,
         source_token_id: Optional[str] = None,
         source_agent_id: Optional[str] = None,
@@ -1505,6 +1517,10 @@ class Database:
                 row.repo_path = repo_path
             if repo_url is not None:
                 row.repo_url = repo_url
+            if master_branch_name is not None:
+                row.master_branch_name = master_branch_name
+            if build_status_image_url is not None:
+                row.build_status_image_url = build_status_image_url or None # Empty string -> None
             if provider is not None:
                 row.provider = provider
             if source_token_id is not None:

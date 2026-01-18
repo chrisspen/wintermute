@@ -59,17 +59,26 @@
             {% set column_meta = table_columns_meta.get(column_key) %}
             {% set cell = row.cells.get(column_key) if row.cells else None %}
             <td class="px-4 py-3 align-top {{ column_meta.cell_class if column_meta and column_meta.cell_class else '' }}">
+              {% set has_inline = (cell.html or cell.html_suffix or cell.provider) if cell else False %}
               {% if cell and cell.href %}
-              <a
-                href="{{ cell.href }}"
-                class="block max-w-[280px] truncate text-slate-900 hover:text-emerald-700 dark:text-slate-100 dark:hover:text-emerald-400"
-                {% if cell.external %}target="_blank" rel="noreferrer"{% endif %}
-              >
-                {{ cell.text if cell.text else "n/a" }}
-              </a>
+              <span{% if has_inline %} style="display: inline-flex; align-items: center; gap: 6px;"{% endif %}>
+                {% if cell.provider and cell.repo_url %}
+                <a href="{{ cell.repo_url }}" target="_blank" rel="noopener" title="{{ cell.provider | capitalize }} repo" onclick="event.stopPropagation();">
+                  <img src="/static/icons/{{ cell.provider }}.svg" alt="{{ cell.provider | capitalize }}" width="14" height="14" style="vertical-align: middle;" />
+                </a>
+                {% endif %}
+                {% if cell.html %}{{ cell.html | safe }}{% endif %}<a
+                  href="{{ cell.href }}"
+                  class="{% if not has_inline %}block max-w-[280px] truncate {% endif %}text-slate-900 hover:text-emerald-700 dark:text-slate-100 dark:hover:text-emerald-400"
+                  {% if cell.external %}target="_blank" rel="noreferrer"{% endif %}
+                >{{ cell.text if cell.text else "n/a" }}</a>{% if cell.html_suffix %}{{ cell.html_suffix | safe }}{% endif %}
+                {% if cell.badge_url and cell.badge_link %}
+                <a href="{{ cell.badge_link }}" target="_blank" rel="noopener" title="Build status" onclick="event.stopPropagation();"><img src="{{ cell.badge_url }}" alt="Build" style="height: 16px;"/></a>
+                {% endif %}
+              </span>
               {% else %}
-              <span class="block max-w-[280px] truncate text-slate-700 dark:text-slate-200">
-                {{ cell.text if cell and cell.text else "n/a" }}
+              <span class="{% if not has_inline %}block max-w-[280px] truncate {% endif %}text-slate-700 dark:text-slate-200"{% if has_inline %} style="display: inline-flex; align-items: center; gap: 6px;"{% endif %}>
+                {% if cell.html %}{{ cell.html | safe }}{% endif %}{{ cell.text if cell and cell.text else "n/a" }}{% if cell and cell.html_suffix %}{{ cell.html_suffix | safe }}{% endif %}
               </span>
               {% endif %}
             </td>

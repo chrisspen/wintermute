@@ -220,7 +220,7 @@ async def _run_mcp_session(
 
     if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
-        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
+        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
         if prompt:
             logger.info("MCP prompt queued for session %s", session.id)
             result = _send_prompt(prompt)
@@ -238,10 +238,10 @@ async def _run_mcp_session(
                     result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+                ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
             else:
                 logger.info("MCP prompt returned no response for session %s", session.id)
-                ctx.db.update_session(session.id, awaiting_response=1)
+                # awaiting_response already set above
 
     raw_queue = session.queued_user_messages or "[]"
     try:
@@ -287,6 +287,8 @@ async def _run_mcp_session(
     if not message.strip():
         return
     logger.info("MCP reply queued for session %s", session.id)
+    # Set last_user_message before sending so typing indicator shows immediately
+    ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
     result = _send_prompt(message)
     if _handle_mcp_error(result.error):
         return
@@ -302,10 +304,10 @@ async def _run_mcp_session(
             result.response_text,
             sender=lambda text: _send_prompt(text),
         )
-        ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+        ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
     else:
         logger.info("MCP reply returned no response for session %s", session.id)
-        ctx.db.update_session(session.id, awaiting_response=1)
+        # awaiting_response already set above
 
 
 async def _run_claude_session(
@@ -361,7 +363,7 @@ async def _run_claude_session(
     # Handle pending prompt
     if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
-        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
+        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
         if prompt:
             logger.info("Claude prompt queued for session %s", session.id)
             result = _send_prompt(prompt)
@@ -379,10 +381,10 @@ async def _run_claude_session(
                     result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+                ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
             else:
                 logger.info("Claude prompt returned no response for session %s", session.id)
-                ctx.db.update_session(session.id, awaiting_response=1)
+                # awaiting_response already set above
 
     # Handle queued user messages
     raw_queue = session.queued_user_messages or "[]"
@@ -434,6 +436,8 @@ async def _run_claude_session(
         return
 
     logger.info("Claude processing queued message for session %s", session.id)
+    # Set last_user_message before sending so typing indicator shows immediately
+    ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
     result = _send_prompt(message)
     if _handle_claude_error(result.error):
         return
@@ -449,10 +453,10 @@ async def _run_claude_session(
             result.response_text,
             sender=lambda text: _send_prompt(text),
         )
-        ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+        ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
     else:
         logger.info("Claude reply returned no response for session %s", session.id)
-        ctx.db.update_session(session.id, awaiting_response=1)
+        # awaiting_response already set above
 
 
 async def _run_gemini_session(
@@ -508,7 +512,7 @@ async def _run_gemini_session(
     # Handle pending prompt
     if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
-        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now())
+        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
         if prompt:
             logger.info("Gemini prompt queued for session %s", session.id)
             result = _send_prompt(prompt)
@@ -526,10 +530,10 @@ async def _run_gemini_session(
                     result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+                ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
             else:
                 logger.info("Gemini prompt returned no response for session %s", session.id)
-                ctx.db.update_session(session.id, awaiting_response=1)
+                # awaiting_response already set above
 
     # Handle queued user messages
     raw_queue = session.queued_user_messages or "[]"
@@ -581,6 +585,8 @@ async def _run_gemini_session(
         return
 
     logger.info("Gemini reply queued for session %s", session.id)
+    # Set last_user_message before sending so typing indicator shows immediately
+    ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
     result = _send_prompt(message)
     if _handle_gemini_error(result.error):
         return
@@ -596,10 +602,10 @@ async def _run_gemini_session(
             result.response_text,
             sender=lambda text: _send_prompt(text),
         )
-        ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+        ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
     else:
         logger.info("Gemini reply returned no response for session %s", session.id)
-        ctx.db.update_session(session.id, awaiting_response=1)
+        # awaiting_response already set above
 
 
 async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRecord, output: str) -> None:

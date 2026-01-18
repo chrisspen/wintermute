@@ -70,6 +70,10 @@ from wintermute.sources.standup import StandupSource
 from wintermute.tickets import parse_issue_ticket
 from wintermute.tools.github import GITHUB_PROVIDER, GITHUB_TOKEN_NAME
 
+# Badge cache: {project_id: (status, timestamp)}
+_badge_cache: dict[str, tuple[str, float]] = {}
+BADGE_CACHE_TTL = 300 # 5 minutes
+
 
 class TaskSourceUpdate(BaseModel):
     enabled: Optional[bool] = None
@@ -1160,16 +1164,44 @@ def _build_ticket_rows(
     return rows
 
 
-def _build_project_rows(projects: list[Any]) -> list[dict[str, Any]]:
+def _build_project_rows(projects: list[Any], database: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for project in projects:
+        # Build URLs for template to render
+        repo_url = None
+        badge_url = None
+        badge_link = None
+        provider = project.provider
+        if provider and project.source_repo:
+            branch = project.master_branch_name or "master"
+            if provider == "github":
+                repo_url = f"https://github.com/{project.source_repo}"
+                badge_url = f"https://github.com/{project.source_repo}/actions/workflows/ci.yml/badge.svg?branch={branch}"
+                badge_link = f"https://github.com/{project.source_repo}/actions"
+            elif provider == "gitlab":
+                gitlab_base = "https://gitlab.com"
+                if project.source_token_id:
+                    token = database.get_remote_token(project.source_token_id)
+                    if token and token.base_url:
+                        gitlab_base = token.base_url.rstrip("/")
+                repo_url = f"{gitlab_base}/{project.source_repo}"
+                # Use proxy endpoint for GitLab badges (avoids referrer blocking)
+                badge_url = f"/badges/projects/{project.id}"
+                badge_link = f"{gitlab_base}/{project.source_repo}/-/pipelines"
+            # Use custom badge URL if set (direct URL)
+            if project.build_status_image_url:
+                badge_url = project.build_status_image_url
         cells = {
             "id": {
                 "text": _display_value(project.id)
             },
             "name": {
                 "text": _display_value(project.name),
-                "href": f"/ui/projects/{project.id}/edit"
+                "href": f"/ui/projects/{project.id}/edit",
+                "provider": provider,
+                "repo_url": repo_url,
+                "badge_url": badge_url,
+                "badge_link": badge_link,
             },
             "slug": {
                 "text": _display_value(project.slug)
@@ -1670,10 +1702,14 @@ def _build_table_context(
         "table_title": title,
         "table_description": description,
         "table_columns": columns,
-        "table_columns_meta": {column["key"]: column
-                               for column in columns},
-        "table_columns_lookup": {column["key"]: column["label"]
-                                 for column in columns},
+        "table_columns_meta": {
+            column["key"]: column
+            for column in columns
+        },
+        "table_columns_lookup": {
+            column["key"]: column["label"]
+            for column in columns
+        },
         "table_selected_columns": selected,
         "table_rows": rows,
         "table_create_label": create_label,
@@ -1825,17 +1861,19 @@ def _find_channel_id(client: WebClient, channel_name: str) -> Optional[str]:
     return None
 
 
-def _create_agent_slack_channel(database: Database, agent: Any, channel_name: str) -> Optional[str]:
-    """Create a Slack channel for an agent and return the channel ID.
+def _create_agent_slack_channel(database: Database, agent: Any, channel_name: str) -> tuple[Optional[str], Optional[str]]:
+    """Create a Slack channel for an agent and return (channel_id, error_message).
 
     The Slack channel name follows the pattern: {agent_slug}-{vm_name}
     If the channel already exists, returns the existing channel's ID.
+    Returns (channel_id, None) on success, (None, error_message) on failure.
     """
     logger = logging.getLogger(__name__)
     slack_bot = database.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
     if not slack_bot:
+        error = "Slack bot token not configured. Add it in Credentials → Slack."
         logger.warning("Slack bot token not configured - cannot create channel")
-        return None
+        return None, error
 
     # Build Slack channel name: {agent_slug}-{vm_name}
     vm = database.get_vm_target(agent.vm_target_id) if agent.vm_target_id else None
@@ -1844,11 +1882,13 @@ def _create_agent_slack_channel(database: Database, agent: Any, channel_name: st
     else:
         slack_channel_name = f"{agent.slug}".lower().replace(" ", "-")
 
-    # Slack channel names must be lowercase, no spaces, max 80 chars
-    slack_channel_name = slack_channel_name[:80]
+    # Slack channel names must be lowercase, no spaces, max 80 chars, alphanumeric + hyphens only
+    slack_channel_name = re.sub(r"[^a-z0-9-]", "-", slack_channel_name)
+    slack_channel_name = re.sub(r"-+", "-", slack_channel_name).strip("-")[:80]
 
     client = WebClient(token=slack_bot.reference)
     channel_id = None
+    error_msg = None
 
     try:
         resp = client.conversations_create(name=slack_channel_name, is_private=False)
@@ -1858,10 +1898,19 @@ def _create_agent_slack_channel(database: Database, agent: Any, channel_name: st
         error_text = str(exc)
         if "name_taken" in error_text:
             channel_id = _find_channel_id(client, slack_channel_name)
-            logger.info("Slack channel %s already exists (ID: %s)", slack_channel_name, channel_id)
+            if channel_id:
+                logger.info("Slack channel %s already exists (ID: %s)", slack_channel_name, channel_id)
+            else:
+                error_msg = f"Channel '{slack_channel_name}' exists but bot can't access it. Invite the bot to the channel."
+                logger.warning(error_msg)
         elif "missing_scope" in error_text:
+            error_msg = "Slack bot missing 'channels:write' scope. Update bot permissions in Slack."
             logger.warning("Slack channel create missing scope for agent %s", agent.slug)
+        elif "invalid_name" in error_text:
+            error_msg = f"Invalid Slack channel name: {slack_channel_name}"
+            logger.warning(error_msg)
         else:
+            error_msg = f"Slack API error: {exc}"
             logger.warning("Slack channel create failed for agent %s: %s", agent.slug, exc)
 
     # Invite admin user to channel if configured
@@ -1870,11 +1919,12 @@ def _create_agent_slack_channel(database: Database, agent: Any, channel_name: st
         if admin_user_id:
             try:
                 client.conversations_invite(channel=channel_id, users=admin_user_id)
+                logger.info("Invited admin user %s to channel %s", admin_user_id, slack_channel_name)
             except Exception as exc:
                 if "already_in_channel" not in str(exc):
                     logger.warning("Failed to invite admin to channel %s: %s", slack_channel_name, exc)
 
-    return channel_id
+    return channel_id, error_msg
 
 
 def _growl_message(saved: Optional[str]) -> Optional[str]:
@@ -3481,7 +3531,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             agent = database.get_agent(session.agent_id)
             message = body
             if agent and agent.response_prefix:
-                message = (f"{body}\n\n" f"Please reply with lines starting with '{agent.response_prefix}'.")
+                message = (f"{body}\n\n"
+                           f"Please reply with lines starting with '{agent.response_prefix}'.")
             raw_queue = session.queued_user_messages or "[]"
             try:
                 queue = json.loads(raw_queue)
@@ -4077,7 +4128,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if standalone_session.status == "running":
             queued_message = message
             if agent.response_prefix:
-                queued_message = (f"{message}\n\n" f"Please reply with lines starting with '{agent.response_prefix}'.")
+                queued_message = (f"{message}\n\n"
+                                  f"Please reply with lines starting with '{agent.response_prefix}'.")
             raw_queue = standalone_session.queued_user_messages or "[]"
             try:
                 queue = json.loads(raw_queue)
@@ -4178,8 +4230,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not channel_type or not name:
             raise HTTPException(status_code=400, detail="Missing channel fields")
         # Auto-create Slack channel if type is slack and no external_channel_id provided
+        slack_error = None
         if channel_type == "slack" and not external_channel_id:
-            external_channel_id = _create_agent_slack_channel(database, agent, name)
+            external_channel_id, slack_error = _create_agent_slack_channel(database, agent, name)
+            if slack_error and not external_channel_id:
+                raise HTTPException(status_code=400, detail=slack_error)
         channel_id = str(uuid.uuid4())
         database.insert_channel(
             channel_id=channel_id,
@@ -4214,6 +4269,26 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if updates:
             database.update_channel(channel_id, **updates)
         return {"success": True}
+
+    @app.post("/api/agents/{agent_id}/channels/{channel_id}/fix")
+    async def api_fix_agent_channel(agent_id: str, channel_id: str, user: str = Depends(_require_login)) -> dict:
+        """Try to create the Slack channel if external_channel_id is missing."""
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        channel = database.get_channel(channel_id)
+        if not channel:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if channel.type != "slack":
+            raise HTTPException(status_code=400, detail="Can only fix Slack channels")
+        if channel.external_channel_id:
+            return {"success": True, "external_channel_id": channel.external_channel_id, "message": "Channel already has external ID"}
+        external_channel_id, slack_error = _create_agent_slack_channel(database, agent, channel.name)
+        if slack_error and not external_channel_id:
+            raise HTTPException(status_code=400, detail=slack_error)
+        if external_channel_id:
+            database.update_channel(channel_id, external_channel_id=external_channel_id)
+        return {"success": True, "external_channel_id": external_channel_id}
 
     # Generic model API routes (catch-all, must be after specific routes)
     @app.get("/api/{model}/{item_id:path}")
@@ -4334,6 +4409,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         source_enabled = form.get("source_enabled") == "on"
         auto_start = form.get("auto_start") == "on"
         project_id = str(uuid.uuid4())
+        master_branch_name = str(form.get("master_branch_name", "")).strip() or "master"
+        build_status_image_url = str(form.get("build_status_image_url", "")).strip() or None
         database.insert_project(
             project_id,
             name,
@@ -4344,6 +4421,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             repo_mode=repo_mode,
             repo_path=repo_path,
             repo_url=repo_url,
+            master_branch_name=master_branch_name,
+            build_status_image_url=build_status_image_url,
             provider=provider,
             source_token_id=source_token_id,
             source_agent_id=source_agent_id,
@@ -4364,13 +4443,20 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         remote_tokens = database.list_remote_tokens()
         agents = database.list_agents()
         mirror_repo_path_base = os.environ.get("WINTERMUTE_MIRROR_REPO_PATH_BASE", "/home/user/git")
-        # Compute external repo URL from project's source settings
+        # Compute external repo URL and build badge from project's source settings
         external_repo_url = None
         external_repo_provider = None
+        default_build_badge_url = None
+        build_badge_url = None
+        build_badge_link = None
         if project.provider and project.source_repo:
+            branch = project.master_branch_name or "master"
             if project.provider == "github":
                 external_repo_url = f"https://github.com/{project.source_repo}"
                 external_repo_provider = "github"
+                # GitHub Actions badge (default)
+                default_build_badge_url = f"https://github.com/{project.source_repo}/actions/workflows/ci.yml/badge.svg?branch={branch}"
+                build_badge_link = f"https://github.com/{project.source_repo}/actions"
             elif project.provider == "gitlab":
                 gitlab_base = "https://gitlab.com"
                 if project.source_token_id:
@@ -4379,6 +4465,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         gitlab_base = token.base_url.rstrip("/")
                 external_repo_url = f"{gitlab_base}/{project.source_repo}"
                 external_repo_provider = "gitlab"
+                # GitLab CI badge - use proxy to avoid referrer blocking
+                default_build_badge_url = f"{gitlab_base}/{project.source_repo}/badges/{branch}/pipeline.svg"
+                build_badge_link = f"{gitlab_base}/{project.source_repo}/-/pipelines"
+            # Use custom badge URL if set, otherwise use proxy for GitLab or direct for GitHub
+            if project.build_status_image_url:
+                build_badge_url = project.build_status_image_url
+            elif project.provider == "gitlab":
+                build_badge_url = f"/badges/projects/{project.id}"
+            else:
+                build_badge_url = default_build_badge_url
         return _render_template(
             request,
             "project_edit.html",
@@ -4392,6 +4488,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "agents": agents,
                 "external_repo_url": external_repo_url,
                 "external_repo_provider": external_repo_provider,
+                "build_badge_url": build_badge_url,
+                "build_badge_link": build_badge_link,
+                "default_build_badge_url": default_build_badge_url,
                 "mirror_repo_path_base": mirror_repo_path_base,
             },
         )
@@ -4467,6 +4566,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         auto_start = form.get("auto_start") == "on"
         if not name or not slug:
             raise HTTPException(status_code=400, detail="Missing name or slug")
+        master_branch_name = str(form.get("master_branch_name", "")).strip() or "master"
+        build_status_image_url = str(form.get("build_status_image_url", "")).strip() # Empty clears the field
         database.update_project(
             project_id,
             name=name,
@@ -4477,6 +4578,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             repo_mode=repo_mode,
             repo_path=repo_path,
             repo_url=repo_url,
+            master_branch_name=master_branch_name,
+            build_status_image_url=build_status_image_url,
             provider=provider,
             source_token_id=source_token_id,
             source_agent_id=source_agent_id,
@@ -4510,6 +4613,83 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.delete_project(project_id)
         _update_slack_channel_filter(database)
         return RedirectResponse("/ui/projects?saved=project_deleted", status_code=303)
+
+    @app.get("/badges/projects/{project_id}")
+    async def get_project_badge(project_id: str) -> Response:
+        """Return CI badge image for project. Caches GitLab status for 5 minutes."""
+        project = database.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if not project.provider or not project.source_repo:
+            raise HTTPException(status_code=404, detail="Project has no source configured")
+
+        branch = project.master_branch_name or "master"
+
+        # GitHub: redirect directly (no referrer issues)
+        if project.provider == "github":
+            if project.build_status_image_url:
+                badge_url = project.build_status_image_url
+            else:
+                badge_url = f"https://github.com/{project.source_repo}/actions/workflows/ci.yml/badge.svg?branch={branch}"
+            return RedirectResponse(badge_url, status_code=302)
+
+        # GitLab: fetch status via API, return shields.io badge
+        if project.provider == "gitlab":
+            cache_key = f"{project_id}:{branch}"
+            now = time.time()
+
+            # Check cache
+            if cache_key in _badge_cache:
+                cached_status, cached_time = _badge_cache[cache_key]
+                if now - cached_time < BADGE_CACHE_TTL:
+                    color = {"success": "brightgreen", "failed": "red", "running": "yellow", "pending": "yellow"}.get(cached_status, "lightgrey")
+                    shields_url = f"https://img.shields.io/badge/pipeline-{cached_status}-{color}"
+                    return RedirectResponse(shields_url, status_code=302)
+
+            # Fetch from GitLab API
+            token_record = database.get_remote_token(project.source_token_id) if project.source_token_id else None
+            if not token_record:
+                raise HTTPException(status_code=400, detail="GitLab token not configured for project")
+
+            gitlab_base = token_record.base_url.rstrip("/") if token_record.base_url else "https://gitlab.com"
+            api_base = f"{gitlab_base}/api/v4"
+            encoded_repo = urllib.parse.quote(project.source_repo, safe="")
+            url = f"{api_base}/projects/{encoded_repo}/pipelines?ref={branch}&per_page=1"
+
+            headers = {
+                "Accept": "application/json",
+                "PRIVATE-TOKEN": token_record.token,
+                "User-Agent": "wintermute",
+            }
+
+            status = "unknown"
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            pipelines = await response.json()
+                            if pipelines and len(pipelines) > 0:
+                                status = pipelines[0].get("status", "unknown")
+            except Exception as exc:
+                logging.getLogger(__name__).warning("Failed to fetch GitLab pipeline status: %s", exc)
+                status = "error"
+
+            # Cache the status
+            _badge_cache[cache_key] = (status, now)
+
+            color = {
+                "success": "brightgreen",
+                "failed": "red",
+                "running": "yellow",
+                "pending": "yellow",
+                "canceled": "lightgrey",
+                "skipped": "lightgrey"
+            }.get(status, "lightgrey")
+            shields_url = f"https://img.shields.io/badge/pipeline-{status}-{color}"
+            return RedirectResponse(shields_url, status_code=302)
+
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {project.provider}")
 
     @app.post("/tickets")
     async def create_ticket(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -4823,10 +5003,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": growl_message,
                 "comment": comment,
                 "tickets": database.list_tickets(),
-                "project_lookup": {project.id: project.name
-                                   for project in database.list_projects()},
-                "agent_lookup": {agent.id: agent.name
-                                 for agent in database.list_agents()},
+                "project_lookup": {
+                    project.id: project.name
+                    for project in database.list_projects()
+                },
+                "agent_lookup": {
+                    agent.id: agent.name
+                    for agent in database.list_agents()
+                },
             },
         )
 
@@ -5130,7 +5314,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Agent not found")
         # Auto-create Slack channel if type is slack and no external_channel_id provided
         if channel_type == "slack" and not external_channel_id:
-            external_channel_id = _create_agent_slack_channel(database, agent, name)
+            external_channel_id, slack_error = _create_agent_slack_channel(database, agent, name)
+            if slack_error and not external_channel_id:
+                raise HTTPException(status_code=400, detail=slack_error)
         database.insert_channel(
             channel_id=str(uuid.uuid4()),
             agent_id=agent_id,
@@ -5648,7 +5834,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             description="All configured projects and defaults.",
             create_label="Create Project",
             create_url="/ui/projects/create?return_to=/ui/projects",
-            rows=_build_project_rows(projects),
+            rows=_build_project_rows(projects, database),
             empty_message="No projects yet.",
         )
         return _render_template(

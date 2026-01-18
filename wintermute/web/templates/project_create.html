@@ -112,6 +112,20 @@
           <textarea name="prompt_template" rows="10">{{ default_prompt_template }}</textarea>
           <p class="muted">Use placeholders like {project_name}, {repo_path}, {branch_name}, {issue_number}, {title}, {description}, {comments}, {internal_notes}.</p>
         </div>
+
+        <div class="divider"></div>
+        <h4>Branch Settings</h4>
+
+        <div class="field-group">
+          <label>Master Branch Name</label>
+          <input type="text" name="master_branch_name" value="master" placeholder="e.g. master, main" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Default branch name used for git operations and build badges.</p>
+        </div>
+        <div class="field-group">
+          <label>Build Status Image URL (optional)</label>
+          <input type="text" name="build_status_image_url" placeholder="e.g. https://github.com/owner/repo/actions/workflows/tests.yml/badge.svg" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Custom CI badge URL. Leave blank to auto-generate from provider/branch settings.</p>
+        </div>
         <button type="submit">Create Project</button>
       </form>
     </div>
