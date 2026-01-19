@@ -14,8 +14,8 @@ from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
-from wintermute.db import Database
-from wintermute.runner import build_ssh_spec, ensure_repo, is_codex_command, send_input, set_codex_trust, start_session
+from wintermute.db import Database, utc_now
+from wintermute.runner import build_ssh_spec, check_vm_memory_available, ensure_repo, is_codex_command, send_input, set_codex_trust, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 SLACK_PROVIDER = "slack"
@@ -150,6 +150,21 @@ class SlackCommandWorkItem(WorkItem):
             return
 
         spec = build_ssh_spec(vm, agent.required_ssh_options)
+        # Memory check before starting agent
+        ctx.db.refresh_agent_average_memory_usage(agent.id)
+        agent = ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
+        if agent and vm.required_reserve_memory_gb > 0:
+            mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
+            if not mem_ok:
+                await ctx.tools.call(
+                    "slack_post_message",
+                    {
+                        "channel": self.message.channel,
+                        "thread_ts": self.message.ts,
+                        "text": mem_error,
+                    },
+                )
+                return
         session_id = f"{project_slug}-{agent_slug}-{self.message.ts.replace('.', '')}"
         repo_resource, resource_error = ctx.db.acquire_repo_resource(
             project=project,
@@ -289,7 +304,8 @@ class SlackCommandWorkItem(WorkItem):
         # Queue the message for the agent (same as web UI does)
         queued_message = message_text
         if agent.response_prefix:
-            queued_message = (f"{message_text}\n\n" f"Please reply with lines starting with '{agent.response_prefix}'.")
+            queued_message = (f"{message_text}\n\n"
+                              f"Please reply with lines starting with '{agent.response_prefix}'.")
 
         raw_queue = standalone_session.queued_user_messages or "[]"
         try:
@@ -303,6 +319,9 @@ class SlackCommandWorkItem(WorkItem):
         ctx.db.update_session(
             standalone_session.id,
             queued_user_messages=json.dumps(queue),
+            awaiting_response=1,
+            last_user_message=message_text,
+            prompt_sent_at=utc_now(),
         )
 
         logger.info("Queued Slack message for agent %s", agent.slug)

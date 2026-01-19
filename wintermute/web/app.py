@@ -38,6 +38,7 @@ from wintermute.mcp_client import close_mcp_process
 from wintermute.runner import (
     build_ssh_spec,
     build_ssh_spec_with_options,
+    check_vm_memory_available,
     configure_git_push_auth,
     ensure_repo,
     is_codex_command,
@@ -384,6 +385,12 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
                 "key": "updated_at",
                 "label": "Updated",
                 "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+        ],
+        "bulk_actions": [
+            {
+                "key": "clone",
+                "label": "Clone"
             },
         ],
     },
@@ -835,6 +842,70 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {
                 "key": "updated_at",
                 "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+        ],
+    },
+    "metric_definitions": {
+        "default": ["metric_type", "recording_frequency_minutes", "enabled"],
+        "columns": [
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "metric_type",
+                "label": "Metric Type"
+            },
+            {
+                "key": "recording_frequency_minutes",
+                "label": "Frequency (min)"
+            },
+            {
+                "key": "enabled",
+                "label": "Enabled"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+        ],
+    },
+    "agent_metrics_logs": {
+        "default": ["agent_id", "metric_type", "value", "recorded_at"],
+        "columns": [
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "agent_id",
+                "label": "Agent"
+            },
+            {
+                "key": "metric_type",
+                "label": "Metric Type"
+            },
+            {
+                "key": "value",
+                "label": "Value"
+            },
+            {
+                "key": "recorded_at",
+                "label": "Recorded At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
                 "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
             },
         ],
@@ -1678,6 +1749,64 @@ def _build_session_rows(sessions: list[Any], project_lookup: dict[str, str], age
     return rows
 
 
+def _build_metric_definition_rows(definitions: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for defn in definitions:
+        cells = {
+            "id": {
+                "text": _display_value(defn.id),
+                "href": f"/ui/metric-definitions/{defn.id}/edit"
+            },
+            "metric_type": {
+                "text": _display_value(defn.metric_type),
+                "href": f"/ui/metric-definitions/{defn.id}/edit"
+            },
+            "recording_frequency_minutes": {
+                "text": _display_value(defn.recording_frequency_minutes)
+            },
+            "enabled": {
+                "text": "Yes" if defn.enabled else "No"
+            },
+            "created_at": {
+                "text": _format_timestamp(defn.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(defn.updated_at)
+            },
+        }
+        rows.append({"id": defn.id, "cells": cells})
+    return rows
+
+
+def _build_agent_metrics_log_rows(logs: list[Any], agent_lookup: dict[str, str], definition_lookup: dict[str, str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for log in logs:
+        agent_name = agent_lookup.get(log.agent_id, log.agent_id) if log.agent_id else None
+        metric_type = definition_lookup.get(log.metric_definition_id, log.metric_definition_id)
+        cells = {
+            "id": {
+                "text": _display_value(log.id)
+            },
+            "agent_id": {
+                "text": _display_value(agent_name)
+            },
+            "metric_type": {
+                "text": _display_value(metric_type)
+            },
+            "value": {
+                "text": _display_value(log.value)
+            },
+            "recorded_at": {
+                "text": _format_timestamp(log.recorded_at)
+            },
+            "created_at": {
+                "text": _format_timestamp(log.created_at)
+            },
+        }
+        rows.append({"id": log.id, "cells": cells})
+    return rows
+
+
 def _build_table_context(
     *,
     database: Database,
@@ -1697,6 +1826,7 @@ def _build_table_context(
     columns = config["columns"]
     available_keys = [column["key"] for column in columns]
     selected = _resolve_table_columns(database, user, model, available_keys, config["default"])
+    bulk_actions = config.get("bulk_actions", [])
     return {
         "table_model": model,
         "table_title": title,
@@ -1719,6 +1849,7 @@ def _build_table_context(
         "table_search_action": request.url.path,
         "table_search_query": request.query_params.get("q", "").strip(),
         "table_search_placeholder": "Search",
+        "table_bulk_actions": bulk_actions,
     }
 
 
@@ -1765,6 +1896,32 @@ async def _fetch_gitlab_user(token: str, base_url: Optional[str] = None) -> tupl
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
     return slug or "project"
+
+
+def _generate_unique_string(base: str, existing: set[str]) -> str:
+    """Generate a unique string by appending a number suffix if needed.
+
+    If base is 'bob' and 'bob' exists, returns 'bob2'.
+    If 'bob2' also exists, returns 'bob3', etc.
+    """
+    if base not in existing:
+        return base
+
+    # Strip any existing numeric suffix to get the base
+    match = re.match(r"^(.+?)(\d+)$", base)
+    if match:
+        stem = match.group(1)
+        start = int(match.group(2)) + 1
+    else:
+        stem = base
+        start = 2
+
+    counter = start
+    while True:
+        candidate = f"{stem}{counter}"
+        if candidate not in existing:
+            return candidate
+        counter += 1
 
 
 def _ticket_prompt(
@@ -1875,12 +2032,12 @@ def _create_agent_slack_channel(database: Database, agent: Any, channel_name: st
         logger.warning("Slack bot token not configured - cannot create channel")
         return None, error
 
-    # Build Slack channel name: {agent_slug}-{vm_name}
+    # Build Slack channel name: {agent_name}-{vm_name}
     vm = database.get_vm_target(agent.vm_target_id) if agent.vm_target_id else None
     if vm:
-        slack_channel_name = f"{agent.slug}-{vm.name}".lower().replace(" ", "-")
+        slack_channel_name = f"{agent.name}-{vm.name}".lower().replace(" ", "-")
     else:
-        slack_channel_name = f"{agent.slug}".lower().replace(" ", "-")
+        slack_channel_name = f"{agent.name}".lower().replace(" ", "-")
 
     # Slack channel names must be lowercase, no spaces, max 80 chars, alphanumeric + hyphens only
     slack_channel_name = re.sub(r"[^a-z0-9-]", "-", slack_channel_name)
@@ -1913,8 +2070,17 @@ def _create_agent_slack_channel(database: Database, agent: Any, channel_name: st
             error_msg = f"Slack API error: {exc}"
             logger.warning("Slack channel create failed for agent %s: %s", agent.slug, exc)
 
-    # Invite admin user to channel if configured
+    # Bot joins channel and invites admin user
     if channel_id:
+        # Ensure bot is in the channel
+        try:
+            client.conversations_join(channel=channel_id)
+            logger.info("Bot joined channel %s", slack_channel_name)
+        except Exception as exc:
+            if "already_in_channel" not in str(exc):
+                logger.warning("Failed to join channel %s: %s", slack_channel_name, exc)
+
+        # Invite admin user if configured
         admin_user_id = _slack_admin_user_id(database)
         if admin_user_id:
             try:
@@ -1978,6 +2144,13 @@ def _growl_message(saved: Optional[str]) -> Optional[str]:
     }
     if not saved:
         return None
+    # Handle dynamic clone messages like "cloned_3"
+    if saved.startswith("cloned_"):
+        try:
+            count = int(saved.split("_")[1])
+            return f"Cloned {count} item{'s' if count != 1 else ''}"
+        except (IndexError, ValueError):
+            return "Items cloned"
     return messages.get(saved)
 
 
@@ -2247,7 +2420,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         await websocket.send_json({"type": "comment", "data": comment_to_dict(row)})
                 session = get_session()
                 if session and session.status == "running":
-                    last_activity = session.last_output_at or session.prompt_sent_at
+                    # Use most recent timestamp - prompt_sent_at for awaiting, last_output_at for active
+                    last_activity = max(session.prompt_sent_at or "", session.last_output_at or "") or None
                     active = (bool(session.awaiting_response) and bool(session.last_user_message) and _recent_activity(last_activity))
                     await websocket.send_json({"type": "typing", "data": {"active": active}})
                 else:
@@ -3544,6 +3718,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             database.update_session(
                 session.id,
                 queued_user_messages=json.dumps(queue),
+                awaiting_response=1,
+                last_user_message=body,
+                prompt_sent_at=utc_now(),
             )
         return {"ok": True, "comment": _comment_to_dict(database.get_comment(comment_id))}
 
@@ -3640,6 +3817,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             session_id = f"{project.slug}-{agent.slug}-ticket-{short_id}-{int(time.time())}"
         base_spec = build_ssh_spec_with_options(vm, base_options)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
+        # Memory check before starting agent
+        database.refresh_agent_average_memory_usage(agent.id)
+        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
+        if agent and vm.required_reserve_memory_gb > 0:
+            mem_ok, mem_error = check_vm_memory_available(session_spec, vm, agent)
+            if not mem_ok:
+                raise HTTPException(status_code=503, detail=mem_error)
         repo_resource, resource_error = database.acquire_repo_resource(
             project=project,
             session_id=session_id,
@@ -3992,6 +4176,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Build SSH spec
         spec = build_ssh_spec(vm, agent.required_ssh_options)
 
+        # Memory check before starting agent
+        database.refresh_agent_average_memory_usage(agent.id)
+        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
+        if agent and vm.required_reserve_memory_gb > 0:
+            mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
+            if not mem_ok:
+                raise HTTPException(status_code=503, detail=mem_error)
+
         # Create temp workspace on VM target
         mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
         result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
@@ -4141,6 +4333,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             database.update_session(
                 standalone_session.id,
                 queued_user_messages=json.dumps(queue),
+                awaiting_response=1,
+                last_user_message=message,
+                prompt_sent_at=utc_now(),
             )
         # Relay to Slack channels
         try:
@@ -4197,6 +4392,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     async def ws_agent_comments(websocket: WebSocket, agent_id: str) -> None:
 
         def _find_standalone_session():
+            """Return the active (running/blocked) standalone session, or most recent."""
             all_sessions = database.list_sessions(agent_id=agent_id)
             for sess in all_sessions:
                 if not sess.ticket_id and sess.status in ("running", "blocked"):
@@ -4206,11 +4402,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     return sess
             return None
 
+        def _get_standalone_session_ids():
+            """Return all standalone session IDs for this agent."""
+            all_sessions = database.list_sessions(agent_id=agent_id)
+            return [sess.id for sess in all_sessions if not sess.ticket_id]
+
         def _get_comments(since):
-            session = _find_standalone_session()
-            if not session:
+            session_ids = _get_standalone_session_ids()
+            if not session_ids:
                 return []
-            return database.list_comments_since(agent_session_id=session.id, since=since)
+            return database.list_comments_since(agent_session_ids=session_ids, since=since)
 
         await _run_comment_websocket(
             websocket,
@@ -4226,15 +4427,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         data = await request.json()
         channel_type = str(data.get("type", "")).strip()
         name = str(data.get("name", "")).strip()
-        external_channel_id = str(data.get("external_channel_id", "")).strip() or None
+        # Handle null from JSON - data.get returns None, not empty string
+        raw_ext_id = data.get("external_channel_id")
+        external_channel_id = str(raw_ext_id).strip() if raw_ext_id else None
         if not channel_type or not name:
             raise HTTPException(status_code=400, detail="Missing channel fields")
         # Auto-create Slack channel if type is slack and no external_channel_id provided
         slack_error = None
         if channel_type == "slack" and not external_channel_id:
             external_channel_id, slack_error = _create_agent_slack_channel(database, agent, name)
-            if slack_error and not external_channel_id:
-                raise HTTPException(status_code=400, detail=slack_error)
+            if not external_channel_id:
+                raise HTTPException(status_code=400, detail=slack_error or "Failed to create Slack channel")
         channel_id = str(uuid.uuid4())
         database.insert_channel(
             channel_id=channel_id,
@@ -5140,9 +5343,21 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         host = str(form.get("host", "")).strip()
         user_name = str(form.get("user", "")).strip()
         port = int(form.get("port", 22))
+        required_reserve_memory_gb_str = str(form.get("required_reserve_memory_gb", "0")).strip()
+        try:
+            required_reserve_memory_gb = float(required_reserve_memory_gb_str) if required_reserve_memory_gb_str else 0.0
+        except ValueError:
+            required_reserve_memory_gb = 0.0
         if not name or not host or not user_name:
             raise HTTPException(status_code=400, detail="Missing VM fields")
-        database.update_vm_target(vm_id, name=name, host=host, user=user_name, port=port)
+        database.update_vm_target(
+            vm_id,
+            name=name,
+            host=host,
+            user=user_name,
+            port=port,
+            required_reserve_memory_gb=required_reserve_memory_gb,
+        )
         return RedirectResponse("/ui/vms?saved=vm_updated", status_code=303)
 
     @app.post("/vms/{vm_id}/delete")
@@ -5191,6 +5406,60 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         )
         return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
 
+    @app.post("/ui/agents/bulk-action")
+    async def agents_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        """Handle bulk actions on agents (e.g., clone)."""
+        form = await request.form()
+        action = str(form.get("action", "")).strip()
+        ids = form.getlist("ids")
+        if not action or not ids:
+            raise HTTPException(status_code=400, detail="Missing action or ids")
+
+        cloned_count = 0
+        if action == "clone":
+            # Get all existing agents to check for unique name/slug conflicts
+            existing_agents = database.list_agents()
+            existing_names = {a.name for a in existing_agents}
+            existing_slugs = {a.slug for a in existing_agents}
+
+            for agent_id in ids:
+                agent = database.get_agent(agent_id)
+                if not agent:
+                    continue
+
+                # Generate unique name
+                new_name = _generate_unique_string(agent.name, existing_names)
+                existing_names.add(new_name)
+
+                # Generate unique slug
+                new_slug = _generate_unique_string(agent.slug, existing_slugs)
+                existing_slugs.add(new_slug)
+
+                # Create the clone with new UUID
+                database.insert_agent(
+                    agent_id=str(uuid.uuid4()),
+                    name=new_name,
+                    slug=new_slug,
+                    command=agent.command,
+                    session_mode=agent.session_mode,
+                    vm_target_id=agent.vm_target_id,
+                    required_ssh_options=agent.required_ssh_options,
+                    env_vars=agent.env_vars,
+                    mcp_config=agent.mcp_config,
+                    trust_level=agent.trust_level,
+                    input_echo_prefix=agent.input_echo_prefix,
+                    response_prefix=agent.response_prefix,
+                    llm_base_url=agent.llm_base_url,
+                    llm_api_key=agent.llm_api_key,
+                    llm_model=agent.llm_model,
+                    average_memory_usage_mb=agent.average_memory_usage_mb,
+                )
+                cloned_count += 1
+
+            return RedirectResponse(f"/ui/agents?saved=cloned_{cloned_count}", status_code=303)
+
+        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+
     @app.get("/ui/agents/{agent_id}/edit")
     def edit_agent_ui(agent_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
         agent = database.get_agent(agent_id)
@@ -5211,20 +5480,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Get standalone sessions (no ticket_id)
         all_sessions = database.list_sessions(agent_id=agent_id)
         standalone_session = None # Active (running/blocked) session for controls
-        recent_standalone_session = None # Most recent session for comments
+        standalone_session_ids: list[str] = [] # All standalone session IDs for comments
         for sess in all_sessions:
             if not sess.ticket_id:
-                if sess.status in ("running", "blocked"):
+                standalone_session_ids.append(sess.id)
+                if sess.status in ("running", "blocked") and standalone_session is None:
                     standalone_session = sess
-                    recent_standalone_session = sess
-                    break
-                elif recent_standalone_session is None:
-                    # Keep track of most recent stopped session
-                    recent_standalone_session = sess
-        # Get comments for the session (active or most recent stopped)
+        # Get comments from all standalone sessions (persists across start/stop)
         standalone_comments: list = []
-        if recent_standalone_session:
-            standalone_comments = database.list_comments(agent_session_id=recent_standalone_session.id)
+        if standalone_session_ids:
+            standalone_comments = database.list_comments(agent_session_ids=standalone_session_ids)
         return _render_template(
             request,
             "agent_edit.html",
@@ -5315,8 +5580,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Auto-create Slack channel if type is slack and no external_channel_id provided
         if channel_type == "slack" and not external_channel_id:
             external_channel_id, slack_error = _create_agent_slack_channel(database, agent, name)
-            if slack_error and not external_channel_id:
-                raise HTTPException(status_code=400, detail=slack_error)
+            if not external_channel_id:
+                raise HTTPException(status_code=400, detail=slack_error or "Failed to create Slack channel")
         database.insert_channel(
             channel_id=str(uuid.uuid4()),
             agent_id=agent_id,
@@ -6789,5 +7054,143 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if agent_id:
             return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=file_deleted", status_code=303)
         return RedirectResponse("/ui/agents?saved=file_deleted", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Metric Definitions UI
+    # -------------------------------------------------------------------------
+
+    @app.get("/ui/metric-definitions")
+    def metric_definitions_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        definitions = database.list_metric_definitions()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="metric_definitions",
+            title="Metric Definitions",
+            description="Configure what metrics to collect for agents",
+            create_label="Create Metric Definition",
+            create_url="/ui/metric-definitions/create",
+            rows=_build_metric_definition_rows(definitions),
+            empty_message="No metric definitions yet.",
+        )
+        return _render_template(
+            request,
+            "metric_definitions.html",
+            {
+                "title": "Metric Definitions",
+                "active_nav": "metric_definitions",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/metric-definitions/create")
+    def metric_definition_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        return _render_template(
+            request,
+            "metric_definition_edit.html",
+            {
+                "title": "Create Metric Definition",
+                "active_nav": "metric_definitions",
+                "growl_message": None,
+                "definition": None,
+            },
+        )
+
+    @app.post("/metric-definitions")
+    async def create_metric_definition(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        metric_type = str(form.get("metric_type", "")).strip().upper()
+        frequency_str = str(form.get("recording_frequency_minutes", "5")).strip()
+        enabled = form.get("enabled") == "on"
+        try:
+            frequency = int(frequency_str) if frequency_str else 5
+        except ValueError:
+            frequency = 5
+        definition_id = str(uuid.uuid4())
+        database.insert_metric_definition(
+            definition_id=definition_id,
+            metric_type=metric_type,
+            recording_frequency_minutes=frequency,
+            enabled=enabled,
+        )
+        return RedirectResponse("/ui/metric-definitions?saved=definition_created", status_code=303)
+
+    @app.get("/ui/metric-definitions/{definition_id}/edit")
+    def metric_definition_edit_ui(definition_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        definition = database.get_metric_definition(definition_id)
+        if not definition:
+            raise HTTPException(status_code=404, detail="Metric definition not found")
+        growl_message = _growl_message(request.query_params.get("saved"))
+        return _render_template(
+            request,
+            "metric_definition_edit.html",
+            {
+                "title": "Edit Metric Definition",
+                "active_nav": "metric_definitions",
+                "growl_message": growl_message,
+                "definition": definition,
+            },
+        )
+
+    @app.post("/metric-definitions/{definition_id}/edit")
+    async def update_metric_definition(definition_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        form = await request.form()
+        metric_type = str(form.get("metric_type", "")).strip().upper()
+        frequency_str = str(form.get("recording_frequency_minutes", "5")).strip()
+        enabled = form.get("enabled") == "on"
+        try:
+            frequency = int(frequency_str) if frequency_str else 5
+        except ValueError:
+            frequency = 5
+        database.update_metric_definition(
+            definition_id,
+            metric_type=metric_type,
+            recording_frequency_minutes=frequency,
+            enabled=enabled,
+        )
+        return RedirectResponse(f"/ui/metric-definitions/{definition_id}/edit?saved=definition_updated", status_code=303)
+
+    @app.post("/metric-definitions/{definition_id}/delete")
+    def delete_metric_definition(definition_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.delete_metric_definition(definition_id)
+        return RedirectResponse("/ui/metric-definitions?saved=definition_deleted", status_code=303)
+
+    # -------------------------------------------------------------------------
+    # Agent Metrics Logs UI
+    # -------------------------------------------------------------------------
+
+    @app.get("/ui/agent-metrics-logs")
+    def agent_metrics_logs_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        logs = database.list_agent_metrics_logs(limit=500)
+        agents = database.list_agents()
+        definitions = database.list_metric_definitions()
+        agent_lookup = {agent.id: agent.name for agent in agents}
+        definition_lookup = {defn.id: defn.metric_type for defn in definitions}
+        growl_message = _growl_message(request.query_params.get("saved"))
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="agent_metrics_logs",
+            title="Agent Metrics Logs",
+            description="Historical metrics collected from agents",
+            create_label=None,
+            create_url=None,
+            rows=_build_agent_metrics_log_rows(logs, agent_lookup, definition_lookup),
+            empty_message="No metrics logs yet.",
+        )
+        return _render_template(
+            request,
+            "agent_metrics_logs.html",
+            {
+                "title": "Agent Metrics Logs",
+                "active_nav": "agent_metrics_logs",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
 
     return app

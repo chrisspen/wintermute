@@ -141,6 +141,18 @@
             >
               Slack
             </a>
+            <a
+              href="/ui/metric-definitions"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'metric_definitions' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Metric Definitions
+            </a>
+            <a
+              href="/ui/agent-metrics-logs"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'agent_metrics_logs' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Agent Metrics
+            </a>
           </nav>
           {% if user %}
           <div class="mt-6 border-t border-slate-200 pt-4 text-sm relative dark:border-slate-800">

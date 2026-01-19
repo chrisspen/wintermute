@@ -13,6 +13,7 @@ from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,
     build_ssh_spec_with_options,
+    check_vm_memory_available,
     ensure_repo,
     is_codex_command,
     parse_ssh_options,
@@ -85,6 +86,13 @@ class TicketAutoStartWorkItem(WorkItem):
                 logger.info("Project session already running for %s", project.id)
                 raise WorkItemBlocked("Project session already running", delay_seconds=60)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
+        # Memory check before starting agent
+        ctx.db.refresh_agent_average_memory_usage(agent.id)
+        agent = ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
+        if agent and vm.required_reserve_memory_gb > 0:
+            mem_ok, mem_error = check_vm_memory_available(session_spec, vm, agent)
+            if not mem_ok:
+                raise WorkItemBlocked(mem_error, delay_seconds=300)
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         base_spec = build_ssh_spec_with_options(vm, base_options)
         title_line = f"Ticket: {ticket.title}".strip()
@@ -175,9 +183,7 @@ class TicketAutoStartWorkItem(WorkItem):
                 thread_ts=thread_ts,
             )
 
-    async def _notify(
-        self, ctx: WorkItemContext, channel: Optional[str], text: str, thread_ts: Optional[str] = None
-    ) -> Optional[str]:
+    async def _notify(self, ctx: WorkItemContext, channel: Optional[str], text: str, thread_ts: Optional[str] = None) -> Optional[str]:
         if not channel:
             return None
         if not ctx.tools.get("slack_post_message"):
@@ -216,18 +222,16 @@ def _ticket_prompt(
         lines.extend(["", f"Source URL: {source_url}"])
     if internal_notes:
         lines.extend(["", "Internal notes:", internal_notes])
-    lines.extend(
-        [
-            "",
-            f"Repo path: {repo_path}",
-            f"Branch: {branch_name}",
-            "",
-            "Please do the work, commit your changes, and push the branch for review.",
-            "Work autonomously until you hit a blocker.",
-            "If you need help or clarification, ask your questions clearly and include a line starting with 'BLOCKER:' summarizing what you need.",
-            "Then stop this session so the supervisor can move you to other work while you wait.",
-        ]
-    )
+    lines.extend([
+        "",
+        f"Repo path: {repo_path}",
+        f"Branch: {branch_name}",
+        "",
+        "Please do the work, commit your changes, and push the branch for review.",
+        "Work autonomously until you hit a blocker.",
+        "If you need help or clarification, ask your questions clearly and include a line starting with 'BLOCKER:' summarizing what you need.",
+        "Then stop this session so the supervisor can move you to other work while you wait.",
+    ])
     default_prompt = "\n".join(lines)
     context = {
         "project_name": project_name,
@@ -263,14 +267,12 @@ class TicketAutoStartSource(TaskSource):
             if provider:
                 continue
             work_id = f"ticket:{ticket.id}:{ticket.updated_at}"
-            drafts.append(
-                WorkItemDraft(
-                    work_id=work_id,
-                    priority=source.base_priority,
-                    source_id=self.id,
-                    checkpoint={"ticket_id": ticket.id},
-                )
-            )
+            drafts.append(WorkItemDraft(
+                work_id=work_id,
+                priority=source.base_priority,
+                source_id=self.id,
+                checkpoint={"ticket_id": ticket.id},
+            ))
         return drafts
 
     async def build_work_item(self, ctx: dict[str, Any], record: Any) -> WorkItem:

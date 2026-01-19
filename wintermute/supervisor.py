@@ -32,7 +32,7 @@ from wintermute.sources.tickets import TicketAutoStartSource
 from wintermute.sources.standup import StandupSource
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
-from wintermute.runner import build_ssh_spec, delete_repo_path
+from wintermute.runner import build_ssh_spec, delete_repo_path, get_session_memory_usage_mb
 from wintermute.tools.fs import ReadFileTool
 from wintermute.tools.github import (
     GitHubCommentIssueTool,
@@ -86,6 +86,7 @@ class Supervisor:
         self._tools_version: tuple[str, str] = ("", "")
         self._slack_signature: tuple[Optional[str], Optional[str]] = (None, None)
         self._last_repo_cleanup: float = 0.0
+        self._last_metrics_collection: dict[str, float] = {} # agent_id -> timestamp
 
     def status(self) -> SupervisorStatus:
         return SupervisorStatus(
@@ -108,6 +109,7 @@ class Supervisor:
                 self._update_state("refreshed queue")
                 await self._cleanup_repo_resources()
                 await self._cycle_sprints()
+                await self._collect_agent_metrics()
                 if not self._current_work_id:
                     await self._run_next()
                 self._update_state("idle")
@@ -375,6 +377,51 @@ class Supervisor:
                 new_name,
                 moved,
             )
+
+    async def _collect_agent_metrics(self) -> None:
+        """Collect memory usage metrics for running agent sessions."""
+        # Get enabled metric definitions
+        definitions = self.db.list_metric_definitions()
+        memory_def = None
+        for defn in definitions:
+            if defn.metric_type == "MEMORY_USAGE" and defn.enabled:
+                memory_def = defn
+                break
+        if not memory_def:
+            return # No MEMORY_USAGE metric defined or enabled
+
+        now = datetime.now(timezone.utc).timestamp()
+        freq_seconds = memory_def.recording_frequency_minutes * 60
+
+        # Get all running sessions
+        running_sessions = self.db.list_sessions(status="running")
+        for sess in running_sessions:
+            agent = self.db.get_agent(sess.agent_id)
+            if not agent or not agent.vm_target_id:
+                continue
+            # Check if enough time has passed since last collection for this agent
+            last_collection = self._last_metrics_collection.get(agent.id, 0.0)
+            if now - last_collection < freq_seconds:
+                continue
+            vm = self.db.get_vm_target(agent.vm_target_id)
+            if not vm:
+                continue
+            spec = build_ssh_spec(vm, agent.required_ssh_options)
+            memory_mb = get_session_memory_usage_mb(spec, sess.id)
+            if memory_mb is not None and memory_mb > 0:
+                log_id = str(uuid.uuid4())
+                self.db.insert_agent_metrics_log(
+                    log_id=log_id,
+                    agent_id=agent.id,
+                    metric_definition_id=memory_def.id,
+                    value=float(memory_mb),
+                )
+                self._last_metrics_collection[agent.id] = now
+                logger.debug(
+                    "Collected memory metric for agent %s: %dMB",
+                    agent.name,
+                    memory_mb,
+                )
 
     def _get_slack_source(self) -> Optional[SlackSource]:
         for source in self.sources:

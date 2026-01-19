@@ -20,15 +20,13 @@ def _create_test_user(db: Database, username: str = "testuser", password: str = 
     """Create a test user with proper password hash."""
     salt = os.urandom(16)
     salt_b64 = base64.b64encode(salt).decode("ascii")
-    password_hash = base64.b64encode(
-        hashlib.scrypt(
-            password.encode("utf-8"),
-            salt=salt,
-            n=2**14,
-            r=8,
-            p=1,
-        )
-    ).decode("ascii")
+    password_hash = base64.b64encode(hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=2**14,
+        r=8,
+        p=1,
+    )).decode("ascii")
     user_id = str(uuid.uuid4())
     db.insert_user(
         user_id=user_id,
@@ -54,7 +52,10 @@ class TicketWebSocketTests(unittest.TestCase):
         _create_test_user(self.db)
         self.client.post(
             "/login",
-            data={"username": "testuser", "password": "testpass"},
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
             follow_redirects=False,
         )
 
@@ -158,9 +159,7 @@ class TicketWebSocketTests(unittest.TestCase):
         )
 
         # Connect with 'since' filter (URL-encode the timestamp)
-        with self.client.websocket_connect(
-            f"/ws/tickets/{self.ticket_id}?since={quote(old_ts, safe='')}"
-        ) as ws:
+        with self.client.websocket_connect(f"/ws/tickets/{self.ticket_id}?since={quote(old_ts, safe='')}") as ws:
             # Should only receive the new comment
             data = ws.receive_json()
             self.assertEqual(data["type"], "comment")
@@ -190,7 +189,10 @@ class AgentWebSocketTests(unittest.TestCase):
         _create_test_user(self.db)
         self.client.post(
             "/login",
-            data={"username": "testuser", "password": "testpass"},
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
             follow_redirects=False,
         )
 
@@ -217,9 +219,7 @@ class AgentWebSocketTests(unittest.TestCase):
 
     def test_websocket_connect(self) -> None:
         """Test that WebSocket connection is accepted."""
-        with self.client.websocket_connect(
-            f"/ws/agents/{self.agent_id}/comments"
-        ) as ws:
+        with self.client.websocket_connect(f"/ws/agents/{self.agent_id}/comments") as ws:
             # Should not raise an exception
             pass
 
@@ -255,17 +255,15 @@ class AgentWebSocketTests(unittest.TestCase):
             origin="session",
         )
 
-        with self.client.websocket_connect(
-            f"/ws/agents/{self.agent_id}/comments"
-        ) as ws:
+        with self.client.websocket_connect(f"/ws/agents/{self.agent_id}/comments") as ws:
             # Should receive the existing comment
             data = ws.receive_json()
             self.assertEqual(data["type"], "comment")
             self.assertEqual(data["data"]["id"], comment_id)
             self.assertEqual(data["data"]["body"], "Agent response")
 
-    def test_websocket_multiple_sessions_gets_latest(self) -> None:
-        """Test WebSocket gets comments from most recent session."""
+    def test_websocket_multiple_sessions_persists_comments(self) -> None:
+        """Test WebSocket gets comments from ALL standalone sessions (persists across start/stop)."""
         # Create an old session (first)
         old_session_id = str(uuid.uuid4())
         self.db.insert_session(
@@ -294,7 +292,7 @@ class AgentWebSocketTests(unittest.TestCase):
             origin="session",
         )
 
-        # Small delay to ensure session order
+        # Small delay to ensure comment order
         time.sleep(0.1)
 
         # Create a newer session (second, created after old)
@@ -325,10 +323,13 @@ class AgentWebSocketTests(unittest.TestCase):
             origin="session",
         )
 
-        with self.client.websocket_connect(
-            f"/ws/agents/{self.agent_id}/comments"
-        ) as ws:
-            # Should receive comment from newer session
+        with self.client.websocket_connect(f"/ws/agents/{self.agent_id}/comments") as ws:
+            # Should receive comment from OLD session first (ordered by created_at)
+            data = ws.receive_json()
+            self.assertEqual(data["type"], "comment")
+            self.assertEqual(data["data"]["id"], old_comment_id)
+            self.assertEqual(data["data"]["body"], "Old session response")
+            # Should also receive comment from NEW session
             data = ws.receive_json()
             self.assertEqual(data["type"], "comment")
             self.assertEqual(data["data"]["id"], new_comment_id)
@@ -389,9 +390,7 @@ class AgentWebSocketTests(unittest.TestCase):
             origin="session",
         )
 
-        with self.client.websocket_connect(
-            f"/ws/agents/{self.agent_id}/comments?since={quote(old_ts, safe='')}"
-        ) as ws:
+        with self.client.websocket_connect(f"/ws/agents/{self.agent_id}/comments?since={quote(old_ts, safe='')}") as ws:
             # Should only receive the new comment
             data = ws.receive_json()
             self.assertEqual(data["type"], "comment")
@@ -413,7 +412,10 @@ class CommentStreamAPITests(unittest.TestCase):
         _create_test_user(self.db)
         self.client.post(
             "/login",
-            data={"username": "testuser", "password": "testpass"},
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
             follow_redirects=False,
         )
 
@@ -463,13 +465,16 @@ class CommentStreamAPITests(unittest.TestCase):
         """Test adding a comment to a ticket via API."""
         response = self.client.post(
             f"/api/tickets/{self.ticket_id}/comments",
-            json={"body": "Test comment", "public": False},
+            json={
+                "body": "Test comment",
+                "public": False
+            },
         )
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn("comment", data)
         self.assertEqual(data["comment"]["body"], "Test comment")
-        self.assertEqual(data["comment"]["author"], "testuser")  # Uses logged-in username
+        self.assertEqual(data["comment"]["author"], "testuser") # Uses logged-in username
 
     def test_add_agent_comment(self) -> None:
         """Test adding a comment to an agent via API."""
@@ -494,7 +499,7 @@ class CommentStreamAPITests(unittest.TestCase):
         data = response.json()
         self.assertIn("comment", data)
         self.assertEqual(data["comment"]["body"], "User message to agent")
-        self.assertEqual(data["comment"]["author"], "testuser")  # Uses logged-in username
+        self.assertEqual(data["comment"]["author"], "testuser") # Uses logged-in username
         # Verify the comment was stored in the database with the session association
         comment_id = data["comment"]["id"]
         stored_comment = self.db.get_comment(comment_id)

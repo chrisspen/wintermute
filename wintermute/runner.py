@@ -86,9 +86,7 @@ def _run_local(
         return subprocess.CompletedProcess(exc.cmd, 124, stdout=b"", stderr=b"Command timed out")
 
 
-def _run_ssh(
-    spec: SSHSpec, remote_args: list[str], timeout: Optional[int] = None
-) -> subprocess.CompletedProcess:
+def _run_ssh(spec: SSHSpec, remote_args: list[str], timeout: Optional[int] = None) -> subprocess.CompletedProcess:
     logger = logging.getLogger(__name__)
     if _is_local_host(spec) and spec.user == getpass.getuser():
         return _run_local(remote_args, timeout)
@@ -109,9 +107,7 @@ def _run_ssh(
         return subprocess.CompletedProcess(exc.cmd, 124, stdout=b"", stderr=b"Command timed out")
 
 
-def _run_ssh_script(
-    spec: SSHSpec, script: str, timeout: Optional[int] = None
-) -> subprocess.CompletedProcess:
+def _run_ssh_script(spec: SSHSpec, script: str, timeout: Optional[int] = None) -> subprocess.CompletedProcess:
     if _is_local_host(spec) and spec.user == getpass.getuser():
         return _run_local(["bash", "-s"], timeout, input_data=script)
     cmd = [
@@ -285,9 +281,7 @@ def ensure_repo(
             detail = stderr or "Repo mkdir failed"
             if stdout:
                 detail = f"{detail} stdout={stdout}"
-            raise RuntimeError(
-                f"{detail} (code={result.returncode} repo_path={repo_path} parent={parent_dir} cmd={mkdir_cmd})"
-            )
+            raise RuntimeError(f"{detail} (code={result.returncode} repo_path={repo_path} parent={parent_dir} cmd={mkdir_cmd})")
         clone_cmd = (
             "if [ -d {path}/.git ]; then "
             "  cd {path}; git fetch origin --prune; "
@@ -309,9 +303,7 @@ def ensure_repo(
             detail = stderr or "Repo clone failed"
             if stdout:
                 detail = f"{detail} stdout={stdout}"
-            raise RuntimeError(
-                f"{detail} (code={result.returncode} repo_path={repo_path} parent={parent_dir} cmd={clone_cmd})"
-            )
+            raise RuntimeError(f"{detail} (code={result.returncode} repo_path={repo_path} parent={parent_dir} cmd={clone_cmd})")
         return repo_path
     return None
 
@@ -333,11 +325,9 @@ def configure_git_push_auth(
     safe_user = username.replace("'", "'\"'\"'")
     push_netloc = f"{safe_user}:{safe_token}@{parsed.netloc}"
     push_url = urllib.parse.urlunparse(parsed._replace(netloc=push_netloc))
-    script = (
-        "set -e; "
-        f"cd {shlex.quote(repo_path)}; "
-        f"git remote set-url --push origin {shlex.quote(push_url)};"
-    )
+    script = ("set -e; "
+              f"cd {shlex.quote(repo_path)}; "
+              f"git remote set-url --push origin {shlex.quote(push_url)};")
     _run_ssh_script(spec, f"{script}\n", timeout=20)
 
 
@@ -453,6 +443,94 @@ def prepare_local_ticket_branch(spec: SSHSpec, repo_path: str, ticket_id: str) -
     return branch
 
 
+def get_vm_available_memory_mb(spec: SSHSpec) -> int:
+    """Get available memory in MB on the VM via SSH."""
+    logger = logging.getLogger(__name__)
+    # Use 'free -m' and parse the 'available' column from the Mem row
+    cmd = "free -m | awk '/^Mem:/ {print $7}'"
+    result = _run_ssh_script(spec, f"{cmd}\n", timeout=15)
+    if result.returncode != 0:
+        stderr = _stderr_text(result.stderr).strip()
+        logger.error("Failed to get VM memory: %s", stderr or "unknown error")
+        return -1
+    try:
+        stdout = _stdout_text(result.stdout).strip()
+        return int(stdout)
+    except ValueError:
+        logger.error("Failed to parse VM memory output: %s", result.stdout)
+        return -1
+
+
+def check_vm_memory_available(
+    spec: SSHSpec,
+    vm: VMTargetRecord,
+    agent: AgentRecord,
+) -> tuple[bool, str]:
+    """Check if VM has enough memory to start the agent.
+
+    Returns (ok, message) tuple. If ok is False, message contains the error.
+    """
+    logger = logging.getLogger(__name__)
+    # Skip check if no reserve is configured
+    if vm.required_reserve_memory_gb <= 0:
+        return True, ""
+    available_mb = get_vm_available_memory_mb(spec)
+    if available_mb < 0:
+        # Could not determine memory - allow start but log warning
+        logger.warning("Could not determine VM memory for %s, allowing start", vm.name)
+        return True, ""
+
+    required_reserve_mb = int(vm.required_reserve_memory_gb * 1024)
+    agent_expected_mb = agent.average_memory_usage_mb
+
+    # Calculate if we have enough memory after starting this agent
+    remaining_after_start = available_mb - agent_expected_mb
+
+    if remaining_after_start < required_reserve_mb:
+        msg = (
+            f"Insufficient memory on {vm.name} to start agent. "
+            f"Available: {available_mb}MB, "
+            f"Agent needs: {agent_expected_mb}MB, "
+            f"Required reserve: {required_reserve_mb}MB"
+        )
+        logger.warning(msg)
+        return False, msg
+
+    logger.info(
+        "Memory check passed for %s on %s: %dMB available, %dMB needed, %dMB reserve", agent.name, vm.name, available_mb, agent_expected_mb, required_reserve_mb
+    )
+    return True, ""
+
+
+def get_session_memory_usage_mb(spec: SSHSpec, session_id: str) -> Optional[int]:
+    """Get the memory usage in MB of the running session process.
+
+    Returns None if memory could not be determined.
+    """
+    logger = logging.getLogger(__name__)
+    session_name = _session_name(session_id)
+    # Get the child process PID and its RSS memory in KB, convert to MB
+    cmd = (
+        f"pane_pid=$(tmux list-panes -t {shlex.quote(session_name)} -F '#{{pane_pid}}' 2>/dev/null | head -1); "
+        f"if [ -n \"$pane_pid\" ]; then "
+        f"child=$(pgrep -P $pane_pid 2>/dev/null | head -1); "
+        f"pid=${{child:-$pane_pid}}; "
+        f"rss=$(ps -o rss= -p $pid 2>/dev/null | head -1 | tr -d ' '); "
+        f"if [ -n \"$rss\" ]; then echo $((rss / 1024)); fi; fi"
+    )
+    result = _run_ssh_script(spec, f"{cmd}\n", timeout=15)
+    if result.returncode != 0:
+        logger.debug("Failed to get session memory for %s", session_id)
+        return None
+    try:
+        stdout = _stdout_text(result.stdout).strip()
+        if stdout:
+            return int(stdout)
+    except ValueError:
+        logger.debug("Failed to parse session memory output for %s: %s", session_id, result.stdout)
+    return None
+
+
 def start_session(
     spec: SSHSpec,
     session_id: str,
@@ -467,16 +545,14 @@ def start_session(
         env_vars = agent.env_vars.strip()
         if env_vars:
             agent_cmd = f"env {env_vars} {agent.command}"
-    cmd = "\n".join(
-        [
-            f"tmux new-session -d -s {shlex.quote(name)} -c {shlex.quote(repo_path)}",
-            f"tmux set-option -t {shlex.quote(name)} prefix C-a",
-            f"tmux unbind-key -t {shlex.quote(name)} C-b",
-            f"tmux bind-key -t {shlex.quote(name)} C-a send-prefix",
-            f"tmux send-keys -t {shlex.quote(name)} \"bash -lc {shlex.quote(agent_cmd)}\" Enter",
-            f"tmux pipe-pane -o -t {shlex.quote(name)} \"cat >> {shlex.quote(logfile)}\"",
-        ]
-    )
+    cmd = "\n".join([
+        f"tmux new-session -d -s {shlex.quote(name)} -c {shlex.quote(repo_path)}",
+        f"tmux set-option -t {shlex.quote(name)} prefix C-a",
+        f"tmux unbind-key -t {shlex.quote(name)} C-b",
+        f"tmux bind-key -t {shlex.quote(name)} C-a send-prefix",
+        f"tmux send-keys -t {shlex.quote(name)} \"bash -lc {shlex.quote(agent_cmd)}\" Enter",
+        f"tmux pipe-pane -o -t {shlex.quote(name)} \"cat >> {shlex.quote(logfile)}\"",
+    ])
     logger.info("Starting session %s in %s", session_id, repo_path)
     _run_ssh_script(spec, f"{cmd}\n", timeout=30)
 
@@ -485,13 +561,11 @@ def send_input(spec: SSHSpec, session: AgentSessionRecord, text: str) -> None:
     logger = logging.getLogger(__name__)
     name = _session_name(session.id)
     trimmed = text.rstrip("\r\n")
-    cmd = "\n".join(
-        [
-            f"tmux send-keys -t {shlex.quote(name)} -l {shlex.quote(trimmed)}",
-            f"tmux send-keys -t {shlex.quote(name)} C-m",
-            f"tmux send-keys -t {shlex.quote(name)} C-j",
-        ]
-    )
+    cmd = "\n".join([
+        f"tmux send-keys -t {shlex.quote(name)} -l {shlex.quote(trimmed)}",
+        f"tmux send-keys -t {shlex.quote(name)} C-m",
+        f"tmux send-keys -t {shlex.quote(name)} C-j",
+    ])
     logger.info("Sending input to session %s (%d chars)", session.id, len(text))
     result = _run_ssh_script(spec, f"{cmd}\n", timeout=30)
     if result.returncode != 0:
@@ -509,9 +583,7 @@ def send_interrupt(spec: SSHSpec, session_id: str, count: int = 2) -> None:
     logger = logging.getLogger(__name__)
     name = _session_name(session_id)
     count = max(count, 1)
-    cmd = " ".join(
-        [f"tmux send-keys -t {shlex.quote(name)} C-c" for _ in range(count)]
-    )
+    cmd = " ".join([f"tmux send-keys -t {shlex.quote(name)} C-c" for _ in range(count)])
     logger.info("Sending interrupt to session %s (x%d)", session_id, count)
     _run_ssh_script(spec, f"{cmd}\n", timeout=10)
 
@@ -538,15 +610,11 @@ def command_exists(spec: SSHSpec, command: str) -> bool:
     return result.returncode == 0
 
 
-def read_output(
-    spec: SSHSpec, session: AgentSessionRecord, max_bytes: int = 32768
-) -> tuple[str, int]:
+def read_output(spec: SSHSpec, session: AgentSessionRecord, max_bytes: int = 32768) -> tuple[str, int]:
     logger = logging.getLogger(__name__)
     logfile = _log_path(session.id)
     offset = session.last_output_offset
-    cmd = (
-        "if [ -f {log} ]; then tail -c +{start} {log} | head -c {limit}; fi"
-    ).format(
+    cmd = ("if [ -f {log} ]; then tail -c +{start} {log} | head -c {limit}; fi").format(
         log=shlex.quote(logfile),
         start=offset + 1,
         limit=max_bytes,

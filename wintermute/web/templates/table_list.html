@@ -42,11 +42,45 @@
     </div>
   </div>
 
+  {% if table_bulk_actions %}
+  <div style="display: flex; align-items: center; gap: 12px;">
+    <select
+      data-bulk-action-select
+      style="height: 36px; width: auto; min-width: 180px; padding: 0 12px;"
+      class="rounded-lg border border-slate-200 bg-white text-sm text-slate-700 shadow-sm outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-emerald-500 dark:focus:ring-emerald-500/30"
+    >
+      <option value="">--- select action ---</option>
+      {% for action in table_bulk_actions %}
+      <option value="{{ action.key }}">{{ action.label }}</option>
+      {% endfor %}
+    </select>
+    <button
+      type="button"
+      data-bulk-action-go
+      disabled
+      style="width: auto; padding: 6px 16px;"
+      class="rounded-lg border border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+    >
+      Go
+    </button>
+    <span data-bulk-selected-count class="text-sm text-slate-400 dark:text-slate-500">0 of {{ table_rows|length }} selected</span>
+  </div>
+  {% endif %}
+
   <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
     <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
+      <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800"{% if table_bulk_actions %} data-bulk-actions data-bulk-model="{{ table_model }}"{% endif %}>
         <thead class="bg-slate-50 text-xs uppercase tracking-wider text-slate-500 dark:bg-slate-950 dark:text-slate-400">
           <tr>
+            {% if table_bulk_actions %}
+            <th class="w-10 px-4 py-3 text-center">
+              <input
+                type="checkbox"
+                data-select-all
+                class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-800"
+              />
+            </th>
+            {% endif %}
             {% for column_key in table_selected_columns %}
             <th class="px-4 py-3 text-left font-semibold">{{ table_columns_lookup[column_key] }}</th>
             {% endfor %}
@@ -55,6 +89,15 @@
         <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
           {% for row in table_rows %}
           <tr class="transition hover:bg-slate-50 dark:hover:bg-slate-900/60">
+            {% if table_bulk_actions %}
+            <td class="w-10 px-4 py-3 text-center">
+              <input
+                type="checkbox"
+                data-row-id="{{ row.id }}"
+                class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 dark:border-slate-600 dark:bg-slate-800"
+              />
+            </td>
+            {% endif %}
             {% for column_key in table_selected_columns %}
             {% set column_meta = table_columns_meta.get(column_key) %}
             {% set cell = row.cells.get(column_key) if row.cells else None %}
@@ -86,7 +129,7 @@
           </tr>
           {% else %}
           <tr>
-            <td class="px-4 py-6 text-center text-slate-500 dark:text-slate-400" colspan="{{ table_selected_columns|length }}">
+            <td class="px-4 py-6 text-center text-slate-500 dark:text-slate-400" colspan="{{ (table_selected_columns|length) + (1 if table_bulk_actions else 0) }}">
               {{ table_empty_message }}
             </td>
           </tr>
@@ -96,6 +139,10 @@
     </div>
   </div>
 </div>
+
+{% if table_bulk_actions %}
+<script src="/static/bulk-actions.js"></script>
+{% endif %}
 
 {% if table_columns %}
 <div class="modal" id="column-picker-modal" data-column-picker>

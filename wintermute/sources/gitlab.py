@@ -16,6 +16,7 @@ from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,
     build_ssh_spec_with_options,
+    check_vm_memory_available,
     configure_git_push_auth,
     ensure_repo,
     is_codex_command,
@@ -26,7 +27,6 @@ from wintermute.runner import (
     strip_port_forwards,
 )
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft, WorkItemBlocked
-
 
 GITLAB_API_BASE = os.environ.get("WINTERMUTE_GITLAB_API_BASE", "https://gitlab.com/api/v4").rstrip("/")
 
@@ -58,9 +58,7 @@ async def _fetch_issue_comments(
     page = 1
     async with aiohttp.ClientSession() as session:
         while True:
-            async with session.get(
-                url, headers=headers, params={"per_page": 100, "page": page}
-            ) as response:
+            async with session.get(url, headers=headers, params={"per_page": 100, "page": page}) as response:
                 payload = await response.json()
                 if response.status >= 400:
                     return []
@@ -117,13 +115,11 @@ class GitLabIssueWorkItem(WorkItem):
         )
         if decision.type == "tool":
             result = await ctx.tools.call(decision.payload["name"], decision.payload["args"])
-            await ctx.checkpoint(
-                {
-                    "last_tool": decision.payload["name"],
-                    "last_tool_args": decision.payload["args"],
-                    "last_tool_result": result,
-                }
-            )
+            await ctx.checkpoint({
+                "last_tool": decision.payload["name"],
+                "last_tool_args": decision.payload["args"],
+                "last_tool_result": result,
+            })
             return
         if decision.type == "update":
             await ctx.checkpoint(decision.payload["patch"])
@@ -132,14 +128,10 @@ class GitLabIssueWorkItem(WorkItem):
             await ctx.checkpoint({"summary": decision.payload["summary"]})
             return
         if decision.type == "escalate":
-            await ctx.checkpoint(
-                {
-                    "escalate": {
-                        "priority": decision.payload["priority"],
-                        "reason": decision.payload["reason"],
-                    }
-                }
-            )
+            await ctx.checkpoint({"escalate": {
+                "priority": decision.payload["priority"],
+                "reason": decision.payload["reason"],
+            }})
             return
         if decision.type == "yield":
             await ctx.checkpoint({"yield_reason": decision.payload["reason"]})
@@ -240,6 +232,13 @@ class GitLabIssueWorkItem(WorkItem):
                 logger.info("Project session already running for %s", project.id)
                 raise WorkItemBlocked("Project session already running", delay_seconds=60)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
+        # Memory check before starting agent
+        ctx.db.refresh_agent_average_memory_usage(agent.id)
+        agent = ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
+        if agent and vm.required_reserve_memory_gb > 0:
+            mem_ok, mem_error = check_vm_memory_available(session_spec, vm, agent)
+            if not mem_ok:
+                raise WorkItemBlocked(mem_error, delay_seconds=300)
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         base_spec = build_ssh_spec_with_options(vm, base_options)
         token_record = ctx.db.get_gitlab_token(source.token_id) if source.token_id else None
@@ -336,9 +335,7 @@ class GitLabIssueWorkItem(WorkItem):
                 thread_ts=thread_ts,
             )
 
-    async def _notify(
-        self, ctx: WorkItemContext, channel: Optional[str], text: str, thread_ts: Optional[str] = None
-    ) -> Optional[str]:
+    async def _notify(self, ctx: WorkItemContext, channel: Optional[str], text: str, thread_ts: Optional[str] = None) -> Optional[str]:
         if not channel:
             return None
         if not ctx.tools.get("slack_post_message"):
@@ -424,7 +421,7 @@ class GitLabIssuesSource(TaskSource):
     id = "gitlab_issues"
     enabled = True
     base_priority = 60
-    poll_interval_seconds = 10  # Check frequently; per-source intervals control actual polling
+    poll_interval_seconds = 10 # Check frequently; per-source intervals control actual polling
 
     def __init__(self) -> None:
         self._last_poll: dict[str, float] = {}
@@ -457,9 +454,7 @@ class GitLabIssuesSource(TaskSource):
                     base_url=token_record.base_url,
                 )
             except Exception as exc:
-                logger.warning(
-                    "Failed to fetch issues for %s: %s", repo_source.project_path, exc
-                )
+                logger.warning("Failed to fetch issues for %s: %s", repo_source.project_path, exc)
                 continue
             logger.info("Fetched %d issues for %s", len(issues), repo_source.project_path)
             for issue in issues:
@@ -467,10 +462,8 @@ class GitLabIssuesSource(TaskSource):
                 issue_number = issue.get("iid")
                 if issue_number is None:
                     continue
-                work_id = (
-                    f"gitlab:{repo_source.id}:{repo_source.project_path}"
-                    f"#{issue_number}:{updated_at}"
-                )
+                work_id = (f"gitlab:{repo_source.id}:{repo_source.project_path}"
+                           f"#{issue_number}:{updated_at}")
                 drafts.append(
                     WorkItemDraft(
                         work_id=work_id,
@@ -541,16 +534,12 @@ class GitLabIssuesSource(TaskSource):
             async with session.get(url, headers=headers, params=params) as response:
                 # Check status before parsing JSON to avoid crashes on HTML error pages
                 if response.status >= 400:
-                    logging.getLogger(__name__).warning(
-                        "GitLab API returned %d for %s", response.status, project_id
-                    )
+                    logging.getLogger(__name__).warning("GitLab API returned %d for %s", response.status, project_id)
                     return []
                 try:
                     payload = await response.json()
                 except aiohttp.ContentTypeError as exc:
-                    logging.getLogger(__name__).warning(
-                        "GitLab API returned non-JSON response for %s: %s", project_id, exc
-                    )
+                    logging.getLogger(__name__).warning("GitLab API returned non-JSON response for %s: %s", project_id, exc)
                     return []
                 if isinstance(payload, list):
                     return payload

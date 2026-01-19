@@ -60,13 +60,36 @@
         </div>
         <div class="field-group">
           <label>VM Target</label>
-          <select name="vm_target_id">
-            <option value="" {% if not agent.vm_target_id %}selected{% endif %}>(none)</option>
-            {% for vm in vm_targets %}
-            <option value="{{ vm.id }}" {% if agent.vm_target_id == vm.id %}selected{% endif %}>{{ vm.name }}</option>
-            {% endfor %}
-          </select>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <select name="vm_target_id" id="vm-target-select" style="flex: 1;">
+              <option value="" {% if not agent.vm_target_id %}selected{% endif %}>(none)</option>
+              {% for vm in vm_targets %}
+              <option value="{{ vm.id }}" {% if agent.vm_target_id == vm.id %}selected{% endif %}>{{ vm.name }}</option>
+              {% endfor %}
+            </select>
+            <a
+              id="vm-target-view-link"
+              href="/ui/vms/{{ agent.vm_target_id }}/edit"
+              target="_blank"
+              rel="noopener"
+              style="white-space: nowrap; font-size: 13px;{% if not agent.vm_target_id %} display: none;{% endif %}"
+            >view</a>
+          </div>
         </div>
+        <script>
+          (function() {
+            var select = document.getElementById('vm-target-select');
+            var link = document.getElementById('vm-target-view-link');
+            select.addEventListener('change', function() {
+              if (select.value) {
+                link.href = '/ui/vms/' + select.value + '/edit';
+                link.style.display = '';
+              } else {
+                link.style.display = 'none';
+              }
+            });
+          })();
+        </script>
         <div class="field-group">
           <label>Session File Config</label>
           <select name="session_file_config_id">

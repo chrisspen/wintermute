@@ -60,10 +60,49 @@
     return div.innerHTML;
   };
 
+  CommentStream.prototype.showThinkingPlaceholder = function() {
+    if (!this.listEl) {
+      console.warn('CommentStream: listEl not found, cannot show thinking placeholder');
+      return;
+    }
+    // Remove any existing thinking placeholder
+    this.hideThinkingPlaceholder();
+
+    // Remove empty placeholder
+    var emptyEl = this.listEl.querySelector('.muted');
+    if (emptyEl && !this.listEl.querySelector('.comment')) {
+      emptyEl.remove();
+    }
+
+    var div = document.createElement('div');
+    div.className = 'comment thinking-placeholder';
+    div.style.cssText = 'padding: 8px 12px; margin-bottom: 8px; background: var(--bg-alt); border-radius: 4px; border-left: 3px solid var(--accent);';
+    div.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">' +
+      '<strong>agent</strong></div>' +
+      '<div style="white-space: pre-wrap; color: var(--text-muted); font-style: italic;">' +
+      '<span class="typing-spinner"></span>thinking...</div>';
+    this.listEl.appendChild(div);
+    this.listEl.scrollTop = this.listEl.scrollHeight;
+  };
+
+  CommentStream.prototype.hideThinkingPlaceholder = function() {
+    if (!this.listEl) return;
+    var placeholder = this.listEl.querySelector('.thinking-placeholder');
+    if (placeholder) {
+      placeholder.remove();
+    }
+  };
+
   CommentStream.prototype.appendComment = function(c) {
     if (!this.listEl) return;
     if (this.seenIds.has(c.id)) return;
     this.seenIds.add(c.id);
+
+    // Remove thinking placeholder when agent responds
+    var isAgent = c.author !== 'user';
+    if (isAgent) {
+      this.hideThinkingPlaceholder();
+    }
 
     // Remove empty placeholder
     var emptyEl = this.listEl.querySelector('.muted');
@@ -103,11 +142,21 @@
         var msg = JSON.parse(event.data);
         if (msg.type === 'comment' && msg.data) {
           self.appendComment(msg.data);
-        } else if (msg.type === 'typing' && msg.data && self.typingEl) {
+        } else if (msg.type === 'typing' && msg.data) {
           if (msg.data.active) {
-            self.typingEl.classList.remove('hidden');
+            // Show thinking placeholder in conversation list
+            self.showThinkingPlaceholder();
+            // Also show header indicator if configured
+            if (self.typingEl) {
+              self.typingEl.classList.remove('hidden');
+            }
           } else {
-            self.typingEl.classList.add('hidden');
+            // Hide thinking placeholder
+            self.hideThinkingPlaceholder();
+            // Also hide header indicator
+            if (self.typingEl) {
+              self.typingEl.classList.add('hidden');
+            }
           }
         }
       } catch (err) {

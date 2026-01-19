@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Generator, Optional
 
-from sqlalchemy import Integer, String, Text, UniqueConstraint, create_engine, func, inspect, select, or_
+from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine, func, inspect, select, or_
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -309,6 +309,7 @@ class VMTargetRecord:
     host: str
     user: str
     port: int
+    required_reserve_memory_gb: float
     created_at: str
     updated_at: str
 
@@ -331,8 +332,29 @@ class AgentRecord:
     llm_api_key: Optional[str]
     llm_model: Optional[str]
     session_file_config_id: Optional[str]
+    average_memory_usage_mb: int
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class MetricDefinitionRecord:
+    id: str
+    metric_type: str # e.g., "MEMORY_USAGE"
+    recording_frequency_minutes: int
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class AgentMetricsLogRecord:
+    id: str
+    agent_id: str
+    metric_definition_id: str
+    value: float
+    recorded_at: str
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -635,6 +657,7 @@ class VMTargetModel(Base):
     host: Mapped[str] = mapped_column(String, nullable=False)
     user: Mapped[str] = mapped_column(String, nullable=False)
     port: Mapped[int] = mapped_column(Integer, nullable=False)
+    required_reserve_memory_gb: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -714,8 +737,37 @@ class AgentModel(Base):
     llm_api_key: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     llm_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     session_file_config_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    average_memory_usage_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class MetricDefinitionModel(Base):
+    __tablename__ = "metric_definitions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    metric_type: Mapped[str] = mapped_column(String, nullable=False, unique=True) # e.g., "MEMORY_USAGE"
+    recording_frequency_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class AgentMetricsLogModel(Base):
+    __tablename__ = "agent_metrics_logs"
+    __table_args__ = (
+        Index("ix_agent_metrics_logs_agent_id", "agent_id"),
+        Index("ix_agent_metrics_logs_metric_definition_id", "metric_definition_id"),
+        Index("ix_agent_metrics_logs_recorded_at", "recorded_at"),
+        Index("ix_agent_metrics_logs_agent_metric", "agent_id", "metric_definition_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agent_id: Mapped[str] = mapped_column(String, nullable=False)
+    metric_definition_id: Mapped[str] = mapped_column(String, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    recorded_at: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class AgentSessionModel(Base):
@@ -2938,12 +2990,19 @@ class Database:
                 ) for row in rows
             ]
 
-    def list_comments(self, ticket_id: Optional[str] = None, agent_session_id: Optional[str] = None) -> list[CommentRecord]:
+    def list_comments(
+        self,
+        ticket_id: Optional[str] = None,
+        agent_session_id: Optional[str] = None,
+        agent_session_ids: Optional[list[str]] = None,
+    ) -> list[CommentRecord]:
         with self.session() as session:
             stmt = select(CommentModel)
             if ticket_id:
                 stmt = stmt.where(CommentModel.ticket_id == ticket_id)
-            if agent_session_id:
+            if agent_session_ids:
+                stmt = stmt.where(CommentModel.agent_session_id.in_(agent_session_ids))
+            elif agent_session_id:
                 stmt = stmt.where(CommentModel.agent_session_id == agent_session_id)
             rows = session.execute(stmt.order_by(CommentModel.created_at.asc())).scalars().all()
         return [
@@ -2972,13 +3031,16 @@ class Database:
         self,
         ticket_id: Optional[str] = None,
         agent_session_id: Optional[str] = None,
+        agent_session_ids: Optional[list[str]] = None,
         since: Optional[str] = None,
     ) -> list[CommentRecord]:
         with self.session() as session:
             stmt = select(CommentModel)
             if ticket_id:
                 stmt = stmt.where(CommentModel.ticket_id == ticket_id)
-            if agent_session_id:
+            if agent_session_ids:
+                stmt = stmt.where(CommentModel.agent_session_id.in_(agent_session_ids))
+            elif agent_session_id:
                 stmt = stmt.where(CommentModel.agent_session_id == agent_session_id)
             if since:
                 stmt = stmt.where(CommentModel.created_at > since)
@@ -3149,23 +3211,35 @@ class Database:
                 host=row.host,
                 user=row.user,
                 port=row.port,
+                required_reserve_memory_gb=row.required_reserve_memory_gb,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
         ]
 
-    def insert_vm_target(self, vm_id: str, name: str, host: str, user: str, port: int) -> None:
+    def insert_vm_target(
+        self,
+        vm_id: str,
+        name: str,
+        host: str,
+        user: str,
+        port: int,
+        required_reserve_memory_gb: float = 0.0,
+    ) -> None:
         now = utc_now()
         with self.session() as session:
-            session.add(VMTargetModel(
-                id=vm_id,
-                name=name,
-                host=host,
-                user=user,
-                port=port,
-                created_at=now,
-                updated_at=now,
-            ))
+            session.add(
+                VMTargetModel(
+                    id=vm_id,
+                    name=name,
+                    host=host,
+                    user=user,
+                    port=port,
+                    required_reserve_memory_gb=required_reserve_memory_gb,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
 
     def update_vm_target(
         self,
@@ -3175,6 +3249,7 @@ class Database:
         host: Optional[str] = None,
         user: Optional[str] = None,
         port: Optional[int] = None,
+        required_reserve_memory_gb: Optional[float] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(VMTargetModel, vm_id)
@@ -3188,6 +3263,8 @@ class Database:
                 row.user = user
             if port is not None:
                 row.port = port
+            if required_reserve_memory_gb is not None:
+                row.required_reserve_memory_gb = required_reserve_memory_gb
             row.updated_at = utc_now()
 
     def delete_vm_target(self, vm_id: str) -> None:
@@ -3205,6 +3282,7 @@ class Database:
             host=row.host,
             user=row.user,
             port=row.port,
+            required_reserve_memory_gb=row.required_reserve_memory_gb,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3230,6 +3308,7 @@ class Database:
                 llm_api_key=row.llm_api_key,
                 llm_model=row.llm_model,
                 session_file_config_id=row.session_file_config_id,
+                average_memory_usage_mb=row.average_memory_usage_mb,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
@@ -3325,6 +3404,7 @@ class Database:
         llm_base_url: Optional[str] = None,
         llm_api_key: Optional[str] = None,
         llm_model: Optional[str] = None,
+        average_memory_usage_mb: int = 1000,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -3345,6 +3425,7 @@ class Database:
                     llm_base_url=llm_base_url,
                     llm_api_key=llm_api_key,
                     llm_model=llm_model,
+                    average_memory_usage_mb=average_memory_usage_mb,
                     created_at=now,
                     updated_at=now,
                 )
@@ -3369,6 +3450,7 @@ class Database:
         llm_api_key: Optional[str] = None,
         llm_model: Optional[str] = None,
         session_file_config_id: Optional[str] = None,
+        average_memory_usage_mb: Optional[int] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -3404,6 +3486,8 @@ class Database:
                 row.llm_model = llm_model
             if session_file_config_id is not None:
                 row.session_file_config_id = session_file_config_id
+            if average_memory_usage_mb is not None:
+                row.average_memory_usage_mb = average_memory_usage_mb
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -3432,6 +3516,7 @@ class Database:
             llm_api_key=row.llm_api_key,
             llm_model=row.llm_model,
             session_file_config_id=row.session_file_config_id,
+            average_memory_usage_mb=row.average_memory_usage_mb,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3458,6 +3543,7 @@ class Database:
             llm_api_key=row.llm_api_key,
             llm_model=row.llm_model,
             session_file_config_id=row.session_file_config_id,
+            average_memory_usage_mb=row.average_memory_usage_mb,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -4119,3 +4205,177 @@ class Database:
     def delete_session_files_for_agent(self, agent_id: str) -> None:
         with self.session() as session:
             session.query(SessionFileModel).filter(SessionFileModel.agent_id == agent_id).delete()
+
+    # MetricDefinition CRUD
+    def list_metric_definitions(self) -> list[MetricDefinitionRecord]:
+        with self.session() as session:
+            rows = session.execute(select(MetricDefinitionModel).order_by(MetricDefinitionModel.metric_type)).scalars().all()
+        return [
+            MetricDefinitionRecord(
+                id=row.id,
+                metric_type=row.metric_type,
+                recording_frequency_minutes=row.recording_frequency_minutes,
+                enabled=bool(row.enabled),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            ) for row in rows
+        ]
+
+    def get_metric_definition(self, definition_id: str) -> Optional[MetricDefinitionRecord]:
+        with self.session() as session:
+            row = session.get(MetricDefinitionModel, definition_id)
+        if not row:
+            return None
+        return MetricDefinitionRecord(
+            id=row.id,
+            metric_type=row.metric_type,
+            recording_frequency_minutes=row.recording_frequency_minutes,
+            enabled=bool(row.enabled),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def get_metric_definition_by_type(self, metric_type: str) -> Optional[MetricDefinitionRecord]:
+        with self.session() as session:
+            row = session.execute(select(MetricDefinitionModel).where(MetricDefinitionModel.metric_type == metric_type)).scalar_one_or_none()
+        if not row:
+            return None
+        return MetricDefinitionRecord(
+            id=row.id,
+            metric_type=row.metric_type,
+            recording_frequency_minutes=row.recording_frequency_minutes,
+            enabled=bool(row.enabled),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+
+    def insert_metric_definition(
+        self,
+        definition_id: str,
+        metric_type: str,
+        recording_frequency_minutes: int = 5,
+        enabled: bool = True,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                MetricDefinitionModel(
+                    id=definition_id,
+                    metric_type=metric_type,
+                    recording_frequency_minutes=recording_frequency_minutes,
+                    enabled=1 if enabled else 0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    def update_metric_definition(
+        self,
+        definition_id: str,
+        *,
+        metric_type: Optional[str] = None,
+        recording_frequency_minutes: Optional[int] = None,
+        enabled: Optional[bool] = None,
+    ) -> None:
+        with self.session() as session:
+            row = session.get(MetricDefinitionModel, definition_id)
+            if not row:
+                return
+            if metric_type is not None:
+                row.metric_type = metric_type
+            if recording_frequency_minutes is not None:
+                row.recording_frequency_minutes = recording_frequency_minutes
+            if enabled is not None:
+                row.enabled = 1 if enabled else 0
+            row.updated_at = utc_now()
+
+    def delete_metric_definition(self, definition_id: str) -> None:
+        with self.session() as session:
+            session.query(MetricDefinitionModel).filter(MetricDefinitionModel.id == definition_id).delete()
+
+    # AgentMetricsLog CRUD
+    def list_agent_metrics_logs(
+        self,
+        agent_id: Optional[str] = None,
+        metric_definition_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[AgentMetricsLogRecord]:
+        with self.session() as session:
+            stmt = select(AgentMetricsLogModel)
+            if agent_id:
+                stmt = stmt.where(AgentMetricsLogModel.agent_id == agent_id)
+            if metric_definition_id:
+                stmt = stmt.where(AgentMetricsLogModel.metric_definition_id == metric_definition_id)
+            stmt = stmt.order_by(AgentMetricsLogModel.recorded_at.desc()).limit(limit)
+            rows = session.execute(stmt).scalars().all()
+        return [
+            AgentMetricsLogRecord(
+                id=row.id,
+                agent_id=row.agent_id,
+                metric_definition_id=row.metric_definition_id,
+                value=row.value,
+                recorded_at=row.recorded_at,
+                created_at=row.created_at,
+            ) for row in rows
+        ]
+
+    def get_agent_metrics_log(self, log_id: str) -> Optional[AgentMetricsLogRecord]:
+        with self.session() as session:
+            row = session.get(AgentMetricsLogModel, log_id)
+        if not row:
+            return None
+        return AgentMetricsLogRecord(
+            id=row.id,
+            agent_id=row.agent_id,
+            metric_definition_id=row.metric_definition_id,
+            value=row.value,
+            recorded_at=row.recorded_at,
+            created_at=row.created_at,
+        )
+
+    def insert_agent_metrics_log(
+        self,
+        log_id: str,
+        agent_id: str,
+        metric_definition_id: str,
+        value: float,
+        recorded_at: Optional[str] = None,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                AgentMetricsLogModel(
+                    id=log_id,
+                    agent_id=agent_id,
+                    metric_definition_id=metric_definition_id,
+                    value=value,
+                    recorded_at=recorded_at or now,
+                    created_at=now,
+                )
+            )
+
+    def delete_agent_metrics_log(self, log_id: str) -> None:
+        with self.session() as session:
+            session.query(AgentMetricsLogModel).filter(AgentMetricsLogModel.id == log_id).delete()
+
+    def delete_agent_metrics_logs_for_agent(self, agent_id: str) -> None:
+        with self.session() as session:
+            session.query(AgentMetricsLogModel).filter(AgentMetricsLogModel.agent_id == agent_id).delete()
+
+    def get_agent_average_memory_usage(self, agent_id: str) -> Optional[float]:
+        """Get the arithmetic mean of MEMORY_USAGE metrics for an agent."""
+        memory_def = self.get_metric_definition_by_type("MEMORY_USAGE")
+        if not memory_def:
+            return None
+        with self.session() as session:
+            result = session.execute(
+                select(func.avg(AgentMetricsLogModel.value)).where(AgentMetricsLogModel.agent_id == agent_id
+                                                                   ).where(AgentMetricsLogModel.metric_definition_id == memory_def.id)
+            ).scalar()
+        return result
+
+    def refresh_agent_average_memory_usage(self, agent_id: str) -> None:
+        """Refresh the agent's average_memory_usage_mb from metrics logs."""
+        avg = self.get_agent_average_memory_usage(agent_id)
+        if avg is not None:
+            self.update_agent(agent_id, average_memory_usage_mb=int(avg))

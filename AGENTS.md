@@ -211,6 +211,8 @@ cat .<agent_name>/CONTEXT.md
 ├── TODO.md         # pending tasks
 └── CONTEXT.md      # compressed narrative summary
 
+After every major operation, update these files with any important notes or alterations incase you get killed and have to pickup from where you left off using these files.
+
 ## Logging
 
 Log all your actions in .<agent_name>/log.txt.

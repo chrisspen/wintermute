@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="panel">
+  <div class="grid">
+    <div class="tile">
+      <h3>{% if definition %}Edit{% else %}Create{% endif %} Metric Definition</h3>
+      <form method="post" action="{% if definition %}/metric-definitions/{{ definition.id }}/edit{% else %}/metric-definitions{% endif %}">
+        <div class="field-group">
+          <label>Metric Type</label>
+          <select name="metric_type" required>
+            <option value="">-- Select --</option>
+            <option value="MEMORY_USAGE" {% if definition and definition.metric_type == 'MEMORY_USAGE' %}selected{% endif %}>Memory Usage (MB)</option>
+          </select>
+          <small class="hint">Type of metric to collect. Currently only MEMORY_USAGE is implemented.</small>
+        </div>
+        <div class="field-group">
+          <label>Recording Frequency (minutes)</label>
+          <input type="number" name="recording_frequency_minutes" value="{{ definition.recording_frequency_minutes if definition else 5 }}" min="1" required />
+          <small class="hint">How often to collect this metric for running agents</small>
+        </div>
+        <div class="field-group">
+          <label>
+            <input type="checkbox" name="enabled" {% if not definition or definition.enabled %}checked{% endif %} />
+            Enabled
+          </label>
+        </div>
+        <button type="submit">{% if definition %}Save{% else %}Create{% endif %} Metric Definition</button>
+      </form>
+      {% if definition %}
+      <form method="post" action="/metric-definitions/{{ definition.id }}/delete">
+        <button type="button" class="danger" data-confirm data-confirm-message="Delete this metric definition? This cannot be undone.">Delete Metric Definition</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
