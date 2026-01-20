@@ -259,8 +259,15 @@
   </div>
 
   <div class="grid section-gap">
-    <div class="tile wide">
-      <h3>Conversation</h3>
+    <div class="tile wide" id="conversation-tile">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <h3 style="margin: 0;">Conversation</h3>
+        {% if standalone_session or standalone_comments %}
+        <button type="button" id="expand-conversation-btn" style="width: auto; background: transparent; border: none; padding: 4px 8px; cursor: pointer; color: var(--text);" title="Expand conversation (Esc to close)">
+          <i class="fa-solid fa-expand"></i>
+        </button>
+        {% endif %}
+      </div>
       {% if standalone_session %}
       <div class="conversation" id="conversation-list" style="max-height: 400px; overflow-y: auto; margin-bottom: 16px;">
         {% for comment in standalone_comments %}
@@ -336,6 +343,36 @@
   color: var(--text);
   font-size: inherit;
   font-family: inherit;
+}
+
+/* Expanded conversation modal */
+#conversation-tile.expanded {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  margin: 0;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+#conversation-tile.expanded #conversation-list {
+  flex: 1;
+  max-height: none !important;
+  min-height: 0;
+}
+#conversation-tile.expanded #message-form {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+#conversation-tile.expanded #message-form textarea {
+  max-height: 150px;
 }
 </style>
 
@@ -661,6 +698,45 @@
   if (listEl) {
     listEl.scrollTop = listEl.scrollHeight;
   }
+
+  // Expand/collapse conversation panel
+  var conversationTile = document.getElementById("conversation-tile");
+  var expandBtn = document.getElementById("expand-conversation-btn");
+  var expandIcon = expandBtn ? expandBtn.querySelector("i") : null;
+
+  function toggleExpand() {
+    if (!conversationTile) return;
+    var isExpanded = conversationTile.classList.toggle("expanded");
+    if (expandIcon) {
+      expandIcon.className = isExpanded ? "fa-solid fa-xmark" : "fa-solid fa-expand";
+    }
+    expandBtn.title = isExpanded ? "Close (Esc)" : "Expand conversation (Esc to close)";
+    // Scroll to bottom when expanding
+    if (isExpanded && listEl) {
+      listEl.scrollTop = listEl.scrollHeight;
+    }
+  }
+
+  function collapseConversation() {
+    if (conversationTile && conversationTile.classList.contains("expanded")) {
+      conversationTile.classList.remove("expanded");
+      if (expandIcon) {
+        expandIcon.className = "fa-solid fa-expand";
+      }
+      expandBtn.title = "Expand conversation (Esc to close)";
+    }
+  }
+
+  if (expandBtn) {
+    expandBtn.addEventListener("click", toggleExpand);
+  }
+
+  // ESC key to collapse
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+      collapseConversation();
+    }
+  });
 })();
 </script>
 {% endblock %}
