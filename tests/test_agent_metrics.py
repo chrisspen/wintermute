@@ -396,6 +396,8 @@ class MemoryCheckTests(unittest.TestCase):
             session_file_config_id=None,
             average_memory_usage_mb=1000,
             initial_prompt=None,
+            working_directory=None,
+            session_directory=None,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )
@@ -446,6 +448,8 @@ class MemoryCheckTests(unittest.TestCase):
             session_file_config_id=None,
             average_memory_usage_mb=1000,
             initial_prompt=None,
+            working_directory=None,
+            session_directory=None,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )
@@ -497,6 +501,8 @@ class MemoryCheckTests(unittest.TestCase):
             session_file_config_id=None,
             average_memory_usage_mb=1000,
             initial_prompt=None,
+            working_directory=None,
+            session_directory=None,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )
@@ -541,6 +547,8 @@ class MemoryCheckTests(unittest.TestCase):
             session_file_config_id=None,
             average_memory_usage_mb=1000,
             initial_prompt=None,
+            working_directory=None,
+            session_directory=None,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )

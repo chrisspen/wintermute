@@ -334,6 +334,8 @@ class AgentRecord:
     session_file_config_id: Optional[str]
     average_memory_usage_mb: int
     initial_prompt: Optional[str]
+    working_directory: Optional[str]
+    session_directory: Optional[str]
     created_at: str
     updated_at: str
 
@@ -740,6 +742,8 @@ class AgentModel(Base):
     session_file_config_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     average_memory_usage_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
     initial_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    working_directory: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    session_directory: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -3312,6 +3316,8 @@ class Database:
                 session_file_config_id=row.session_file_config_id,
                 average_memory_usage_mb=row.average_memory_usage_mb,
                 initial_prompt=row.initial_prompt,
+                working_directory=row.working_directory,
+                session_directory=row.session_directory,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
@@ -3409,6 +3415,8 @@ class Database:
         llm_model: Optional[str] = None,
         average_memory_usage_mb: int = 1000,
         initial_prompt: Optional[str] = None,
+        working_directory: Optional[str] = None,
+        session_directory: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -3431,6 +3439,8 @@ class Database:
                     llm_model=llm_model,
                     average_memory_usage_mb=average_memory_usage_mb,
                     initial_prompt=initial_prompt,
+                    working_directory=working_directory,
+                    session_directory=session_directory,
                     created_at=now,
                     updated_at=now,
                 )
@@ -3457,6 +3467,8 @@ class Database:
         session_file_config_id: Optional[str] = None,
         average_memory_usage_mb: Optional[int] = None,
         initial_prompt: Optional[str] = None,
+        working_directory: Optional[str] = None,
+        session_directory: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -3496,6 +3508,10 @@ class Database:
                 row.average_memory_usage_mb = average_memory_usage_mb
             if initial_prompt is not None:
                 row.initial_prompt = initial_prompt
+            if working_directory is not None:
+                row.working_directory = working_directory
+            if session_directory is not None:
+                row.session_directory = session_directory
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -3526,6 +3542,8 @@ class Database:
             session_file_config_id=row.session_file_config_id,
             average_memory_usage_mb=row.average_memory_usage_mb,
             initial_prompt=row.initial_prompt,
+            working_directory=row.working_directory,
+            session_directory=row.session_directory,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3554,6 +3572,8 @@ class Database:
             session_file_config_id=row.session_file_config_id,
             average_memory_usage_mb=row.average_memory_usage_mb,
             initial_prompt=row.initial_prompt,
+            working_directory=row.working_directory,
+            session_directory=row.session_directory,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
