@@ -4174,6 +4174,171 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # Standalone session API (JSON endpoints for AJAX)
     # -------------------------------------------------------------------------
 
+    @app.get("/api/sessions")
+    async def api_list_sessions(
+        status: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        user: str = Depends(_require_api_or_login),
+    ) -> dict:
+        """List sessions with optional filters."""
+        sessions = database.list_sessions(
+            status=status,
+            agent_id=agent_id,
+            project_id=project_id,
+        )
+        result = []
+        for sess in sessions:
+            agent = database.get_agent(sess.agent_id) if sess.agent_id else None
+            project = database.get_project(sess.project_id) if sess.project_id else None
+            vm = None
+            if agent and agent.vm_target_id:
+                vm = database.get_vm_target(agent.vm_target_id)
+            result.append({
+                "id": sess.id,
+                "status": sess.status,
+                "agent_id": sess.agent_id,
+                "agent_name": agent.name if agent else None,
+                "agent_slug": agent.slug if agent else None,
+                "agent_command": agent.command if agent else None,
+                "project_id": sess.project_id,
+                "project_name": project.name if project else None,
+                "project_slug": project.slug if project else None,
+                "vm_target_id": agent.vm_target_id if agent else None,
+                "vm_target_name": vm.name if vm else None,
+                "ticket_id": sess.ticket_id,
+                "workspace_path": sess.workspace_path,
+                "created_at": sess.created_at,
+            })
+        return {"sessions": result}
+
+    @app.get("/api/agents")
+    async def api_list_agents(
+        command: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
+        vm_target_name: Optional[str] = None,
+        slug: Optional[str] = None,
+        name: Optional[str] = None,
+        user: str = Depends(_require_api_or_login),
+    ) -> dict:
+        """List agents with optional filters."""
+        agents = database.list_agents()
+        result = []
+        for agent in agents:
+            # Apply filters
+            if command and command.lower() not in agent.command.lower():
+                continue
+            if vm_target_id and agent.vm_target_id != vm_target_id:
+                continue
+            if slug and slug.lower() not in agent.slug.lower():
+                continue
+            if name and name.lower() not in agent.name.lower():
+                continue
+
+            vm = database.get_vm_target(agent.vm_target_id) if agent.vm_target_id else None
+            if vm_target_name and (not vm or vm_target_name.lower() not in vm.name.lower()):
+                continue
+
+            # Check if running
+            running = False
+            session_id = None
+            all_sessions = database.list_sessions(agent_id=agent.id)
+            for sess in all_sessions:
+                if not sess.ticket_id and sess.status in ("running", "blocked"):
+                    running = True
+                    session_id = sess.id
+                    break
+
+            result.append({
+                "id": agent.id,
+                "name": agent.name,
+                "slug": agent.slug,
+                "command": agent.command,
+                "session_mode": agent.session_mode,
+                "vm_target_id": agent.vm_target_id,
+                "vm_target_name": vm.name if vm else None,
+                "session_file_config_id": agent.session_file_config_id,
+                "working_directory": agent.working_directory,
+                "session_directory": agent.session_directory,
+                "initial_prompt": agent.initial_prompt,
+                "running": running,
+                "session_id": session_id,
+            })
+        return {"agents": result}
+
+    @app.get("/api/agents/{agent_id}")
+    async def api_get_agent(agent_id: str, user: str = Depends(_require_api_or_login)) -> dict:
+        """Get a single agent by ID."""
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        vm = database.get_vm_target(agent.vm_target_id) if agent.vm_target_id else None
+
+        # Check if running
+        running = False
+        session_id = None
+        all_sessions = database.list_sessions(agent_id=agent.id)
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                running = True
+                session_id = sess.id
+                break
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "slug": agent.slug,
+            "command": agent.command,
+            "session_mode": agent.session_mode,
+            "vm_target_id": agent.vm_target_id,
+            "vm_target_name": vm.name if vm else None,
+            "required_ssh_options": agent.required_ssh_options,
+            "env_vars": agent.env_vars,
+            "mcp_config": agent.mcp_config,
+            "trust_level": agent.trust_level,
+            "input_echo_prefix": agent.input_echo_prefix,
+            "response_prefix": agent.response_prefix,
+            "llm_base_url": agent.llm_base_url,
+            "llm_api_key": agent.llm_api_key,
+            "llm_model": agent.llm_model,
+            "session_file_config_id": agent.session_file_config_id,
+            "average_memory_usage_mb": agent.average_memory_usage_mb,
+            "initial_prompt": agent.initial_prompt,
+            "working_directory": agent.working_directory,
+            "session_directory": agent.session_directory,
+            "running": running,
+            "session_id": session_id,
+            "created_at": agent.created_at,
+            "updated_at": agent.updated_at,
+        }
+
+    @app.patch("/api/agents/{agent_id}")
+    async def api_update_agent(agent_id: str, request: Request, user: str = Depends(_require_api_or_login)) -> dict:
+        """Update agent fields via JSON PATCH."""
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        data = await request.json()
+        # Build kwargs for update_agent - only include fields that are present
+        update_kwargs = {}
+        allowed_fields = [
+            "name", "slug", "command", "session_mode", "vm_target_id",
+            "required_ssh_options", "env_vars", "mcp_config", "trust_level",
+            "input_echo_prefix", "response_prefix", "llm_base_url", "llm_api_key",
+            "llm_model", "session_file_config_id", "average_memory_usage_mb",
+            "initial_prompt", "working_directory", "session_directory",
+        ]
+        for field in allowed_fields:
+            if field in data:
+                update_kwargs[field] = data[field]
+
+        if update_kwargs:
+            database.update_agent(agent_id, **update_kwargs)
+
+        # Return updated agent
+        return await api_get_agent(agent_id, user)
+
     @app.get("/api/agents/{agent_id}/session-status")
     async def api_agent_session_status(agent_id: str, user: str = Depends(_require_login)) -> dict:
         import subprocess
