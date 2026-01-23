@@ -499,5 +499,234 @@ class SessionFileSyncTests(unittest.TestCase):
         self.assertIn("no session file config", response.json()["detail"])
 
 
+class SessionFileTimestampConflictTests(unittest.TestCase):
+    """Tests for session file timestamp conflict detection on agent start."""
+
+    def setUp(self) -> None:
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
+        self.db = Database(self.temp_db.name)
+        self.db.initialize()
+        os.environ["WINTERMUTE_WEB_SECRET"] = "test-secret-key"
+        app = create_app(self.db)
+        self.client = TestClient(app)
+
+        # Create a test user and login
+        _create_test_user(self.db)
+        self.client.post(
+            "/login",
+            data={"username": "testuser", "password": "testpass"},
+            follow_redirects=False,
+        )
+
+        # Create a test VM target
+        self.vm_target_id = str(uuid.uuid4())
+        self.db.insert_vm_target(
+            vm_id=self.vm_target_id,
+            name="test-vm",
+            host="localhost",
+            user="testuser",
+            port=22,
+        )
+
+        # Create a session file config with definitions
+        self.config_id = str(uuid.uuid4())
+        self.db.insert_session_file_config(self.config_id, "Test Config", "Test")
+        self.def_state_id = str(uuid.uuid4())
+        self.db.insert_session_file_definition(
+            definition_id=self.def_state_id,
+            config_id=self.config_id,
+            filename="STATE.md",
+            default_content="# Default State",
+            description="State file",
+            required=True,
+            sync_on_exit=True,
+            sort_order=1,
+        )
+
+        # Create a test agent with session file config and working directory
+        self.agent_id = str(uuid.uuid4())
+        self.db.insert_agent(
+            agent_id=self.agent_id,
+            name="Test Agent",
+            slug="test-agent",
+            command="echo test",
+            session_mode="tmux",
+            vm_target_id=self.vm_target_id,
+            required_ssh_options=None,
+            env_vars=None,
+            mcp_config=None,
+            trust_level=None,
+            input_echo_prefix=None,
+            response_prefix=None,
+            working_directory="/home/testuser/project",
+            session_directory=".agent",
+        )
+        self.db.update_agent(self.agent_id, session_file_config_id=self.config_id)
+
+        # Create a session file with a known timestamp (old)
+        self.db.upsert_session_file(self.agent_id, self.def_state_id, "# Old content")
+
+    def tearDown(self) -> None:
+        self.temp_db.close()
+        os.unlink(self.temp_db.name)
+
+    def _create_mock_run(self, remote_timestamp: int):
+        """Create a mock for subprocess.run that returns specific timestamps."""
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            result.stdout = ""
+
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+
+            if "stat -c" in cmd_str:
+                # Return the mocked remote timestamp
+                result.stdout = f"{remote_timestamp} /home/testuser/project/.agent/STATE.md\n"
+            elif "test -d" in cmd_str:
+                result.stdout = "exists\n"
+            elif "which tmux" in cmd_str or "which echo" in cmd_str:
+                result.stdout = "/usr/bin/tmux\n"
+            elif "free -b" in cmd_str:
+                result.stdout = "Mem: 8000000000 2000000000 6000000000\n"
+
+            return result
+        return mock_run
+
+    @patch("wintermute.runner.start_session")
+    def test_start_returns_conflict_when_remote_files_newer(self, mock_start_session) -> None:
+        """Test that starting returns 409 conflict when remote files are newer."""
+        # Get the local file's timestamp
+        files = self.db.list_session_files(self.agent_id)
+        local_file = files[0]
+        from datetime import datetime
+        local_dt = datetime.fromisoformat(local_file.updated_at.replace("Z", "+00:00"))
+        local_ts = int(local_dt.timestamp())
+
+        # Remote is 1 hour newer
+        remote_ts = local_ts + 3600
+
+        with patch("subprocess.run", side_effect=self._create_mock_run(remote_ts)):
+            response = self.client.post(
+                f"/api/agents/{self.agent_id}/start-session",
+            )
+            self.assertEqual(response.status_code, 409)
+            data = response.json()
+            self.assertEqual(data["conflict"], "session_files_newer_on_target")
+            self.assertIn("files", data)
+            self.assertEqual(len(data["files"]), 1)
+            self.assertEqual(data["files"][0]["filename"], "STATE.md")
+
+    @patch("wintermute.runner.start_session")
+    def test_start_with_use_target_skips_file_copy(self, mock_start_session) -> None:
+        """Test that file_mode=use_target starts without copying Wintermute files."""
+        files = self.db.list_session_files(self.agent_id)
+        local_file = files[0]
+        from datetime import datetime
+        local_dt = datetime.fromisoformat(local_file.updated_at.replace("Z", "+00:00"))
+        local_ts = int(local_dt.timestamp())
+        remote_ts = local_ts + 3600  # Remote is newer
+
+        scp_called = []
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            result.stdout = ""
+
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+
+            if "scp" in cmd_str:
+                scp_called.append(cmd_str)
+            elif "stat -c" in cmd_str:
+                result.stdout = f"{remote_ts} /home/testuser/project/.agent/STATE.md\n"
+            elif "test -d" in cmd_str:
+                result.stdout = "exists\n"
+            elif "which tmux" in cmd_str or "which echo" in cmd_str:
+                result.stdout = "/usr/bin/tmux\n"
+            elif "free -b" in cmd_str:
+                result.stdout = "Mem: 8000000000 2000000000 6000000000\n"
+            elif "mkdir -p" in cmd_str:
+                pass
+
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            response = self.client.post(
+                f"/api/agents/{self.agent_id}/start-session",
+                json={"file_mode": "use_target"},
+            )
+            self.assertEqual(response.status_code, 200)
+            # SCP should NOT have been called to copy files TO the target
+            # (It may be called for other purposes)
+            scp_to_target = [c for c in scp_called if "testuser@localhost:" in c and not c.endswith("/")]
+            self.assertEqual(len(scp_to_target), 0, "SCP should not copy files to target when using use_target mode")
+
+    @patch("wintermute.runner.start_session")
+    def test_start_with_use_wintermute_copies_files(self, mock_start_session) -> None:
+        """Test that file_mode=use_wintermute copies Wintermute files even when remote is newer."""
+        files = self.db.list_session_files(self.agent_id)
+        local_file = files[0]
+        from datetime import datetime
+        local_dt = datetime.fromisoformat(local_file.updated_at.replace("Z", "+00:00"))
+        local_ts = int(local_dt.timestamp())
+        remote_ts = local_ts + 3600  # Remote is newer
+
+        scp_called = []
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            result.stdout = ""
+
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+
+            if "scp" in cmd_str:
+                scp_called.append(cmd_str)
+            elif "stat -c" in cmd_str:
+                result.stdout = f"{remote_ts} /home/testuser/project/.agent/STATE.md\n"
+            elif "test -d" in cmd_str:
+                result.stdout = "exists\n"
+            elif "which tmux" in cmd_str or "which echo" in cmd_str:
+                result.stdout = "/usr/bin/tmux\n"
+            elif "free -b" in cmd_str:
+                result.stdout = "Mem: 8000000000 2000000000 6000000000\n"
+            elif "mkdir -p" in cmd_str:
+                pass
+
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            response = self.client.post(
+                f"/api/agents/{self.agent_id}/start-session",
+                json={"file_mode": "use_wintermute"},
+            )
+            self.assertEqual(response.status_code, 200)
+            # SCP should have been called to copy files to the target
+            self.assertTrue(len(scp_called) > 0, "SCP should be called when using use_wintermute mode")
+
+    @patch("wintermute.runner.start_session")
+    def test_start_no_conflict_when_local_is_newer(self, mock_start_session) -> None:
+        """Test that no conflict is returned when local files are newer than remote."""
+        files = self.db.list_session_files(self.agent_id)
+        local_file = files[0]
+        from datetime import datetime
+        local_dt = datetime.fromisoformat(local_file.updated_at.replace("Z", "+00:00"))
+        local_ts = int(local_dt.timestamp())
+
+        # Remote is 1 hour older
+        remote_ts = local_ts - 3600
+
+        with patch("subprocess.run", side_effect=self._create_mock_run(remote_ts)):
+            response = self.client.post(
+                f"/api/agents/{self.agent_id}/start-session",
+            )
+            # Should succeed, not return conflict
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("session_id", response.json())
+
+
 if __name__ == "__main__":
     unittest.main()

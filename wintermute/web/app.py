@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 import aiohttp
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi import Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -4179,7 +4179,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         status: Optional[str] = None,
         agent_id: Optional[str] = None,
         project_id: Optional[str] = None,
-        user: str = Depends(_require_api_or_login),
+        user: str = Depends(_require_login),
     ) -> dict:
         """List sessions with optional filters."""
         sessions = database.list_sessions(
@@ -4219,7 +4219,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         vm_target_name: Optional[str] = None,
         slug: Optional[str] = None,
         name: Optional[str] = None,
-        user: str = Depends(_require_api_or_login),
+        user: str = Depends(_require_login),
     ) -> dict:
         """List agents with optional filters."""
         agents = database.list_agents()
@@ -4267,7 +4267,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"agents": result}
 
     @app.get("/api/agents/{agent_id}")
-    async def api_get_agent(agent_id: str, user: str = Depends(_require_api_or_login)) -> dict:
+    async def api_get_agent(agent_id: str, user: str = Depends(_require_login)) -> dict:
         """Get a single agent by ID."""
         agent = database.get_agent(agent_id)
         if not agent:
@@ -4313,7 +4313,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         }
 
     @app.patch("/api/agents/{agent_id}")
-    async def api_update_agent(agent_id: str, request: Request, user: str = Depends(_require_api_or_login)) -> dict:
+    async def api_update_agent(agent_id: str, request: Request, user: str = Depends(_require_login)) -> dict:
         """Update agent fields via JSON PATCH."""
         agent = database.get_agent(agent_id)
         if not agent:
