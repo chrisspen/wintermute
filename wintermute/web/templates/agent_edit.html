@@ -239,10 +239,15 @@
 
   <div class="grid section-gap">
     <div class="tile wide">
-      <h3>Session Files</h3>
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+        <h3 style="margin: 0;">Session Files</h3>
+        {% if session_file_definitions and agent.vm_target_id %}
+        <button type="button" id="pull-session-files-btn" style="font-size: 12px; padding: 4px 12px;">Pull from VM</button>
+        {% endif %}
+      </div>
       <p class="muted" style="font-size: 12px; margin-bottom: 12px;">Agent memory files that persist across sessions. Copied to agent workspace on start, synced back on exit.</p>
       {% if session_file_definitions %}
-      <table class="data-table" style="width: 100%;">
+      <table class="data-table" style="width: 100%;" id="session-files-table">
         <thead>
           <tr>
             <th style="text-align: left;">Name</th>
@@ -253,14 +258,14 @@
         <tbody>
           {% for def in session_file_definitions %}
           {% set file = file_contents.get(def.id) %}
-          <tr>
+          <tr data-definition-id="{{ def.id }}">
             <td>
               {{ def.filename }}
               {% if def.required %}<span class="muted">(required)</span>{% endif %}
               {% if def.description %}<span class="muted" style="font-weight: normal;"> - {{ def.description }}</span>{% endif %}
             </td>
-            <td class="muted">{% if file %}{{ file.updated_at[:16].replace('T', ' ') }}{% else %}-{% endif %}</td>
-            <td>
+            <td class="muted session-file-updated-at" data-file-id="{{ file.id if file else '' }}">{% if file %}{{ file.updated_at[:16].replace('T', ' ') }}{% else %}-{% endif %}</td>
+            <td class="session-file-actions">
               {% if file %}
               <a href="/ui/session-files/{{ file.id }}/edit" target="_blank" style="font-size: 12px;">View</a>
               {% else %}
@@ -764,6 +769,67 @@
       collapseConversation();
     }
   });
+
+  // Pull session files from VM
+  var pullBtn = document.getElementById("pull-session-files-btn");
+  if (pullBtn) {
+    pullBtn.addEventListener("click", async function() {
+      pullBtn.disabled = true;
+      pullBtn.textContent = "Pulling...";
+      try {
+        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/pull-session-files", {
+          method: "POST"
+        });
+        var payload = await response.json();
+        if (!response.ok) {
+          showGrowl(payload.detail || "Unable to pull files", "error");
+          pullBtn.disabled = false;
+          pullBtn.textContent = "Pull from VM";
+          return;
+        }
+        // Update the timestamps in the table
+        var updatedFiles = payload.files || [];
+        updatedFiles.forEach(function(f) {
+          var row = document.querySelector('[data-definition-id="' + f.definition_id + '"]');
+          if (row) {
+            var updatedCell = row.querySelector('.session-file-updated-at');
+            var actionsCell = row.querySelector('.session-file-actions');
+            if (updatedCell) {
+              updatedCell.textContent = f.updated_at.substring(0, 16).replace('T', ' ');
+              updatedCell.dataset.fileId = f.id;
+            }
+            if (actionsCell && !actionsCell.querySelector('a')) {
+              actionsCell.innerHTML = '<a href="/ui/session-files/' + f.id + '/edit" target="_blank" style="font-size: 12px;">View</a>';
+            }
+          }
+        });
+        showGrowl("Files pulled successfully (" + updatedFiles.length + " files)", "success");
+      } catch (err) {
+        showGrowl("Unable to pull files: " + err, "error");
+      }
+      pullBtn.disabled = false;
+      pullBtn.textContent = "Pull from VM";
+    });
+  }
+
+  // Growl notification helper
+  function showGrowl(message, type) {
+    var existing = document.querySelector('.growl-notification');
+    if (existing) existing.remove();
+    var growl = document.createElement('div');
+    growl.className = 'growl-notification growl-' + type;
+    growl.textContent = message;
+    growl.style.cssText = 'position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 4px; z-index: 10000; font-size: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);';
+    if (type === 'success') {
+      growl.style.background = '#22c55e';
+      growl.style.color = 'white';
+    } else {
+      growl.style.background = '#ef4444';
+      growl.style.color = 'white';
+    }
+    document.body.appendChild(growl);
+    setTimeout(function() { growl.remove(); }, 4000);
+  }
 })();
 </script>
 {% endblock %}

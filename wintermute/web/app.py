@@ -4542,6 +4542,85 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             } for c in comments]
         }
 
+    @app.post("/api/agents/{agent_id}/pull-session-files")
+    async def api_pull_session_files(agent_id: str, user: str = Depends(_require_login)) -> dict:
+        """Pull session files from the VM and save them to Wintermute."""
+        import subprocess
+        import tempfile
+
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if not agent.vm_target_id:
+            raise HTTPException(status_code=400, detail="Agent has no VM target configured")
+        if not agent.session_file_config_id:
+            raise HTTPException(status_code=400, detail="Agent has no session file config")
+
+        vm = database.get_vm_target(agent.vm_target_id)
+        if not vm:
+            raise HTTPException(status_code=400, detail="VM target not found")
+
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+
+        # Determine working directory and session files directory
+        if agent.working_directory:
+            workspace = agent.working_directory
+        else:
+            # No working directory set - check if there's an active session
+            all_sessions = database.list_sessions(agent_id=agent_id)
+            active_session = None
+            for sess in all_sessions:
+                if not sess.ticket_id and sess.status in ("running", "blocked"):
+                    active_session = sess
+                    break
+            if active_session and active_session.workspace_path:
+                workspace = active_session.workspace_path
+            else:
+                raise HTTPException(status_code=400, detail="No working directory configured and no active session")
+
+        # Calculate session files directory
+        if agent.session_directory:
+            if agent.session_directory.startswith("/"):
+                session_files_dir = agent.session_directory
+            else:
+                session_files_dir = f"{workspace}/{agent.session_directory}"
+        else:
+            session_files_dir = workspace
+
+        definitions = database.list_session_file_definitions(agent.session_file_config_id)
+        updated_files = []
+
+        # Create a local temp dir to receive files
+        with tempfile.TemporaryDirectory() as local_tmp:
+            # SCP files from VM
+            scp_cmd = [
+                "scp", "-P", str(spec.port), *spec.options, "-r",
+                f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"
+            ]
+            scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
+            if scp_result.returncode != 0:
+                raise HTTPException(status_code=500, detail=f"Failed to pull files from VM: {scp_result.stderr}")
+
+            for defn in definitions:
+                local_path = os.path.join(local_tmp, defn.filename)
+                if os.path.exists(local_path):
+                    with open(local_path, "r") as f:
+                        content = f.read()
+                    database.upsert_session_file(agent_id, defn.id, content)
+                    # Get the updated file record
+                    session_files = database.list_session_files(agent_id)
+                    for sf in session_files:
+                        if sf.definition_id == defn.id:
+                            updated_files.append({
+                                "id": sf.id,
+                                "definition_id": defn.id,
+                                "filename": defn.filename,
+                                "updated_at": sf.updated_at,
+                            })
+                            break
+
+        return {"success": True, "files": updated_files}
+
     @app.websocket("/ws/agents/{agent_id}/comments")
     async def ws_agent_comments(websocket: WebSocket, agent_id: str) -> None:
 
