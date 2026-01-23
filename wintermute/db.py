@@ -333,6 +333,7 @@ class AgentRecord:
     llm_model: Optional[str]
     session_file_config_id: Optional[str]
     average_memory_usage_mb: int
+    initial_prompt: Optional[str]
     created_at: str
     updated_at: str
 
@@ -738,6 +739,7 @@ class AgentModel(Base):
     llm_model: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     session_file_config_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     average_memory_usage_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
+    initial_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -3309,6 +3311,7 @@ class Database:
                 llm_model=row.llm_model,
                 session_file_config_id=row.session_file_config_id,
                 average_memory_usage_mb=row.average_memory_usage_mb,
+                initial_prompt=row.initial_prompt,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
@@ -3405,6 +3408,7 @@ class Database:
         llm_api_key: Optional[str] = None,
         llm_model: Optional[str] = None,
         average_memory_usage_mb: int = 1000,
+        initial_prompt: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -3426,6 +3430,7 @@ class Database:
                     llm_api_key=llm_api_key,
                     llm_model=llm_model,
                     average_memory_usage_mb=average_memory_usage_mb,
+                    initial_prompt=initial_prompt,
                     created_at=now,
                     updated_at=now,
                 )
@@ -3451,6 +3456,7 @@ class Database:
         llm_model: Optional[str] = None,
         session_file_config_id: Optional[str] = None,
         average_memory_usage_mb: Optional[int] = None,
+        initial_prompt: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -3488,6 +3494,8 @@ class Database:
                 row.session_file_config_id = session_file_config_id
             if average_memory_usage_mb is not None:
                 row.average_memory_usage_mb = average_memory_usage_mb
+            if initial_prompt is not None:
+                row.initial_prompt = initial_prompt
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -3517,6 +3525,7 @@ class Database:
             llm_model=row.llm_model,
             session_file_config_id=row.session_file_config_id,
             average_memory_usage_mb=row.average_memory_usage_mb,
+            initial_prompt=row.initial_prompt,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3544,6 +3553,7 @@ class Database:
             llm_model=row.llm_model,
             session_file_config_id=row.session_file_config_id,
             average_memory_usage_mb=row.average_memory_usage_mb,
+            initial_prompt=row.initial_prompt,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3639,6 +3649,10 @@ class Database:
         mcp_conversation_id: Optional[str] = None,
         initial_prompt: Optional[str] = None,
         workspace_path: Optional[str] = None,
+        queued_user_messages: Optional[str] = None,
+        awaiting_response: int = 0,
+        last_user_message: Optional[str] = None,
+        prompt_sent_at: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -3657,11 +3671,11 @@ class Database:
                     output_buffer=None,
                     output_buffer_updated_at=None,
                     prompt_pending=None,
-                    prompt_sent_at=None,
+                    prompt_sent_at=prompt_sent_at,
                     last_output_at=None,
-                    awaiting_response=0,
-                    last_user_message=None,
-                    queued_user_messages=None,
+                    awaiting_response=awaiting_response,
+                    last_user_message=last_user_message,
+                    queued_user_messages=queued_user_messages,
                     awaiting_response_offset=0,
                     initial_prompt=initial_prompt,
                     workspace_path=workspace_path,

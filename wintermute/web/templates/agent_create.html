@@ -1,16 +1,27 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+.field-error {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 2px #ef444433;
+}
+</style>
 <div class="panel">
   <div class="grid">
     <div class="tile">
       <h3>Add Agent</h3>
+      {% if error_message %}
+      <div class="form-error-banner" style="background: #ef444422; border: 1px solid #ef4444; border-radius: 4px; padding: 12px; margin-bottom: 16px; color: #ef4444;">
+        <strong>Error:</strong> {{ error_message }}
+      </div>
+      {% endif %}
       <form method="post" action="/agents">
         <input type="hidden" name="return_to" value="{{ return_to }}" />
         <label>Name</label>
-        <input type="text" name="name" required />
+        <input type="text" name="name" required {% if error_field == 'name' %}class="field-error"{% endif %} />
         <label>Slug</label>
-        <input type="text" name="slug" required />
+        <input type="text" name="slug" required {% if error_field == 'slug' %}class="field-error"{% endif %} />
         <label>Command</label>
         <input type="text" name="command" required />
         <label>Session Mode</label>

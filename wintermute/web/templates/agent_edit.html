@@ -36,14 +36,19 @@
   <div class="grid section-gap">
     <div class="tile">
       <h3>Edit Agent</h3>
+      {% if error_message %}
+      <div class="form-error-banner" style="background: #ef444422; border: 1px solid #ef4444; border-radius: 4px; padding: 12px; margin-bottom: 16px; color: #ef4444;">
+        <strong>Error:</strong> {{ error_message }}
+      </div>
+      {% endif %}
       <form method="post" action="/agents/{{ agent.id }}/edit">
         <div class="field-group">
           <label>Name</label>
-          <input type="text" name="name" value="{{ agent.name }}" required />
+          <input type="text" name="name" value="{{ agent.name }}" required {% if error_field == 'name' %}class="field-error"{% endif %} />
         </div>
         <div class="field-group">
           <label>Slug</label>
-          <input type="text" name="slug" value="{{ agent.slug }}" required />
+          <input type="text" name="slug" value="{{ agent.slug }}" required {% if error_field == 'slug' %}class="field-error"{% endif %} />
         </div>
         <div class="field-group">
           <label>Command</label>
@@ -127,6 +132,11 @@
         <div class="field-group">
           <label>Response Prefix</label>
           <input type="text" name="response_prefix" value="{{ agent.response_prefix or '' }}" placeholder="e.g. •" />
+        </div>
+        <div class="field-group">
+          <label>Initial Prompt</label>
+          <textarea name="initial_prompt" rows="3" placeholder="Message sent to agent when session starts">{{ agent.initial_prompt or 'Read your AGENTS.md file and then wait for further instructions.' }}</textarea>
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Auto-sent as first message after session files are copied to VM.</p>
         </div>
         <h4>LLM API Configuration (for decision path)</h4>
         <div class="field-group">
@@ -315,6 +325,10 @@
 </div>
 
 <style>
+.field-error {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 2px #ef444433;
+}
 .status-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -477,6 +491,9 @@
           return;
         }
         var payload = await response.json();
+        if (payload.warning) {
+          alert(payload.warning);
+        }
         updateStatus(true, payload.session_id, payload.location, null, null);
         window.location.reload();
       } catch (err) {

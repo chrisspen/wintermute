@@ -36,6 +36,7 @@ class ClaudeResult:
     total_cost_usd: Optional[float] = None
     duration_ms: Optional[int] = None
     error: Optional[str] = None
+    had_activity: bool = False # True if any stream data was received (even without response_text)
 
 
 @dataclass
@@ -70,10 +71,14 @@ def _build_claude_shell(agent: AgentRecord, cwd: str) -> str:
     # --verbose is required when using --output-format=stream-json with -p
     # --dangerously-skip-permissions allows full access within the repo
     args = [
-        cmd, "-p", "--verbose",
+        cmd,
+        "-p",
+        "--verbose",
         "--dangerously-skip-permissions",
-        "--input-format", "stream-json",
-        "--output-format", "stream-json",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
     ]
 
     # Parse additional config from agent.mcp_config
@@ -144,10 +149,14 @@ def _start_claude_process(spec: SSHSpec, agent: AgentRecord, cwd: str) -> subpro
     ssh_cmd = [
         "ssh",
         "-T",
-        "-o", "RequestTTY=no",
-        "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=10",
-        "-p", str(spec.port),
+        "-o",
+        "RequestTTY=no",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-p",
+        str(spec.port),
         *spec.options,
         f"{spec.user}@{spec.host}",
         f"cd {shlex.quote(cwd)} && bash -lc {shlex.quote(shell_cmd)}",
@@ -203,14 +212,16 @@ def _read_stream_response(
     deadline: float,
     idle_seconds: float = 2.0,
     log_path: Optional[str] = None,
-) -> tuple[str, Optional[str], Optional[str], Optional[dict[str, Any]]]:
+) -> tuple[str, Optional[str], Optional[str], Optional[dict[str, Any]], bool]:
     """Read streaming JSON response from Claude.
 
-    Returns: (response_text, session_id, error, usage)
+    Returns: (response_text, session_id, error, usage, had_activity)
+    The had_activity flag is True if any data was received from the stream,
+    even if there's no final response_text (e.g., Claude is running tools).
     """
     logger = logging.getLogger(__name__)
     if not proc.stdout:
-        return "", None, "Claude process stdout closed", None
+        return "", None, "Claude process stdout closed", None, False
 
     selector = selectors.DefaultSelector()
     selector.register(proc.stdout, selectors.EVENT_READ)
@@ -224,6 +235,7 @@ def _read_stream_response(
     usage: Optional[dict[str, Any]] = None
     last_activity = time.time()
     result_received = False
+    had_activity = False
 
     done = False
     while time.time() < deadline and not done:
@@ -245,8 +257,9 @@ def _read_stream_response(
 
             if not chunk:
                 selector.close()
-                return "\n".join(texts), session_id, error, usage
+                return "\n".join(texts), session_id, error, usage, had_activity
 
+            had_activity = True
             text = chunk.decode("utf-8", errors="ignore")
 
             if is_stderr:
@@ -303,7 +316,7 @@ def _read_stream_response(
                     break
 
     selector.close()
-    return "\n".join(texts), session_id, error, usage
+    return "\n".join(texts), session_id, error, usage, had_activity
 
 
 def get_claude_process(
@@ -377,7 +390,7 @@ def poll_claude(wintermute_session_id: str, timeout_seconds: int = 5) -> ClaudeR
     log_path = _get_claude_log_path(wintermute_session_id)
     deadline = time.time() + timeout_seconds
 
-    response_text, session_id, error, usage = _read_stream_response(
+    response_text, session_id, error, usage, had_activity = _read_stream_response(
         claude.proc,
         deadline=deadline,
         idle_seconds=0.5,
@@ -389,6 +402,7 @@ def poll_claude(wintermute_session_id: str, timeout_seconds: int = 5) -> ClaudeR
         session_id=session_id or claude.session_id,
         usage=usage,
         error=error,
+        had_activity=had_activity,
     )
 
 
@@ -443,7 +457,7 @@ def run_claude_prompt(
 
     # Read response
     deadline = time.time() + timeout_seconds
-    response_text, new_session_id, error, usage = _read_stream_response(
+    response_text, new_session_id, error, usage, had_activity = _read_stream_response(
         claude.proc,
         deadline=deadline,
         idle_seconds=2.0,
@@ -466,4 +480,5 @@ def run_claude_prompt(
         session_id=claude.session_id,
         usage=usage,
         error=error,
+        had_activity=had_activity,
     )

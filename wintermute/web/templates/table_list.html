@@ -121,7 +121,7 @@
               </span>
               {% else %}
               <span class="{% if not has_inline %}block max-w-[280px] truncate {% endif %}text-slate-700 dark:text-slate-200"{% if has_inline %} style="display: inline-flex; align-items: center; gap: 6px;"{% endif %}>
-                {% if cell.html %}{{ cell.html | safe }}{% endif %}{{ cell.text if cell and cell.text else "n/a" }}{% if cell and cell.html_suffix %}{{ cell.html_suffix | safe }}{% endif %}
+                {% if cell.html %}{{ cell.html | safe }}{% endif %}{% if cell and cell.badge_url and cell.badge_link %}<a href="{{ cell.badge_link }}" target="_blank" rel="noopener" title="Build status" onclick="event.stopPropagation();"><img src="{{ cell.badge_url }}" alt="Build" style="height: 16px;"/></a>{% elif cell and cell.text %}{{ cell.text }}{% elif not cell or not cell.badge_url %}n/a{% endif %}{% if cell and cell.html_suffix %}{{ cell.html_suffix | safe }}{% endif %}
               </span>
               {% endif %}
             </td>

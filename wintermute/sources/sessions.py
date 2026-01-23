@@ -287,6 +287,7 @@ async def _run_mcp_session(
     if not message.strip():
         return
     logger.info("MCP reply queued for session %s", session.id)
+    # Note: Comment already created by the source (web API, Slack, initial_prompt)
     # Set last_user_message before sending so typing indicator shows immediately
     ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
     result = _send_prompt(message)
@@ -414,6 +415,10 @@ async def _run_claude_session(
                     sender=lambda text: _send_prompt(text),
                 )
                 ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+            elif poll_result.had_activity:
+                # Claude is outputting data (tool calls, etc.) but no final response yet
+                # Update last_output_at to keep the typing indicator alive
+                ctx.db.update_session(session.id, last_output_at=utc_now())
         else:
             # Check for keepalive
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
@@ -436,6 +441,7 @@ async def _run_claude_session(
         return
 
     logger.info("Claude processing queued message for session %s", session.id)
+    # Note: Comment already created by the source (web API, Slack, initial_prompt)
     # Set last_user_message before sending so typing indicator shows immediately
     ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
     result = _send_prompt(message)
@@ -585,6 +591,7 @@ async def _run_gemini_session(
         return
 
     logger.info("Gemini reply queued for session %s", session.id)
+    # Note: Comment already created by the source (web API, Slack, initial_prompt)
     # Set last_user_message before sending so typing indicator shows immediately
     ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
     result = _send_prompt(message)
@@ -1070,6 +1077,7 @@ async def _maybe_send_queued_input(
     message = str(queue.pop(0))
     if agent and agent.response_prefix and agent.response_prefix not in message:
         message = f"{message}\n\nPlease reply with lines starting with '{agent.response_prefix}'."
+    # Note: Comment already created by the source (web API, Slack, initial_prompt)
     send_input(spec, session, message)
     ctx.db.update_session(
         session.id,

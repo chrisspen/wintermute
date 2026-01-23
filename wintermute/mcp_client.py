@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 try:
     import tomllib as toml
-except ImportError:  # pragma: no cover - py<3.11
+except ImportError: # pragma: no cover - py<3.11
     import tomli as toml
 
 from wintermute.db import AgentRecord
@@ -294,6 +294,11 @@ def _collect_response(messages: list[dict[str, Any]]) -> tuple[str, Optional[str
             params = payload.get("params") or {}
             if isinstance(params, dict):
                 conv = params.get("session_id") or params.get("sessionId")
+                # session_id can also be inside params.msg (session_configured event)
+                if not conv:
+                    msg_dict = params.get("msg")
+                    if isinstance(msg_dict, dict):
+                        conv = msg_dict.get("session_id") or msg_dict.get("sessionId")
                 if conv:
                     conversation_id = str(conv)
                 text = params.get("message") or params.get("content") or params.get("text") or ""
@@ -338,9 +343,12 @@ def _extract_assistant_text(payload: dict[str, Any]) -> tuple[list[str], Optiona
     params = payload.get("params") or {}
     if not isinstance(params, dict):
         return [], None, None
+    # session_id can be at params level or inside params.msg (session_configured event)
     conv = params.get("session_id") or params.get("sessionId")
-    conversation_id = str(conv) if conv else None
     msg = params.get("msg")
+    if not conv and isinstance(msg, dict):
+        conv = msg.get("session_id") or msg.get("sessionId")
+    conversation_id = str(conv) if conv else None
     if not isinstance(msg, dict):
         return [], conversation_id, None
     msg_type = msg.get("type")
@@ -474,7 +482,10 @@ def _ensure_initialized(mcp: MCPProcess) -> Optional[str]:
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "wintermute", "version": "0.1.0"},
+                "clientInfo": {
+                    "name": "wintermute",
+                    "version": "0.1.0"
+                },
             },
         },
     )
@@ -552,7 +563,10 @@ def _send_tool_call(
             "jsonrpc": "2.0",
             "id": call_id,
             "method": "tools/call",
-            "params": {"name": tool, "arguments": arguments},
+            "params": {
+                "name": tool,
+                "arguments": arguments
+            },
         },
     )
     deadline = time.time() + stream_timeout_seconds
@@ -661,13 +675,10 @@ def run_codex_mcp(
     sandbox_permissions = config_overrides.get("sandbox_permissions")
     network_access_override = config_overrides.get("network_access")
     sandbox_override = config_overrides.get("sandbox")
-    network_access_enabled = bool(
-        (isinstance(network_access_override, str) and network_access_override.lower() == "enabled")
-        or (isinstance(sandbox_permissions, list) and "network-full-access" in sandbox_permissions)
-        or re.search(r"network_access\\s*=\\s*\"?enabled\"?", config_text)
-        or re.search(r"features\\.network\\s*=\\s*true", config_text)
-        or "network-full-access" in config_text
-    )
+    network_access_enabled = bool((isinstance(network_access_override, str) and network_access_override.lower() == "enabled")
+                                  or (isinstance(sandbox_permissions, list) and "network-full-access" in sandbox_permissions)
+                                  or re.search(r"network_access\\s*=\\s*\"?enabled\"?", config_text)
+                                  or re.search(r"features\\.network\\s*=\\s*true", config_text) or "network-full-access" in config_text)
     sandbox_mode = "workspace-write"
     if isinstance(sandbox_override, str) and sandbox_override:
         sandbox_mode = sandbox_override

@@ -50,6 +50,104 @@ def build_ssh_spec(vm: VMTargetRecord, extra_options: Optional[str]) -> SSHSpec:
     return build_ssh_spec_with_options(vm, parse_ssh_options(extra_options))
 
 
+def ensure_vm_tools(spec: SSHSpec, agent_command: str, session_mode: str) -> tuple[bool, str]:
+    """Check that required tools are available on the VM, installing if possible.
+
+    Returns (ok, error_message). If ok is False, error_message explains what's missing.
+    """
+    logger = logging.getLogger(__name__)
+
+    def _ssh_cmd(cmd: str, timeout: int = 30) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", cmd],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+
+    def _check_command(cmd: str, with_profile: bool = False) -> bool:
+        """Check if a command exists on the VM.
+
+        If with_profile is True, sources user profile first (for commands installed
+        via nvm, pyenv, etc. that require profile setup).
+        """
+        if with_profile:
+            # Source profile like claude_client does for nvm-installed commands
+            check_cmd = (
+                "source ~/.profile >/dev/null 2>&1; "
+                "source ~/.bash_profile >/dev/null 2>&1; "
+                "export NVM_DIR=\"$HOME/.nvm\"; "
+                "[ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; "
+                f"command -v {shlex.quote(cmd)}"
+            )
+            result = _ssh_cmd(f"bash -c {shlex.quote(check_cmd)}")
+        else:
+            result = _ssh_cmd(f"command -v {shlex.quote(cmd)}")
+        return result.returncode == 0
+
+    def _detect_package_manager() -> Optional[str]:
+        """Detect which package manager is available."""
+        for pm in ["apt-get", "dnf", "yum", "pacman", "apk"]:
+            if _check_command(pm):
+                return pm
+        return None
+
+    def _install_package(package: str) -> tuple[bool, str]:
+        """Try to install a package using the detected package manager."""
+        pm = _detect_package_manager()
+        if not pm:
+            return False, "No supported package manager found (apt-get, dnf, yum, pacman, apk)"
+
+        install_cmds = {
+            "apt-get": f"sudo DEBIAN_FRONTEND=noninteractive apt-get install -y {package}",
+            "dnf": f"sudo dnf install -y {package}",
+            "yum": f"sudo yum install -y {package}",
+            "pacman": f"sudo pacman -S --noconfirm {package}",
+            "apk": f"sudo apk add {package}",
+        }
+
+        cmd = install_cmds.get(pm)
+        if not cmd:
+            return False, f"Unknown package manager: {pm}"
+
+        logger.info("Attempting to install %s on VM using %s", package, pm)
+        result = _ssh_cmd(cmd, timeout=120)
+        if result.returncode != 0:
+            stderr = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            return False, f"Failed to install {package}: {stderr}"
+
+        return True, ""
+
+    # For tmux mode, ensure tmux is installed
+    if session_mode == "tmux":
+        if not _check_command("tmux"):
+            logger.warning("tmux not found on VM %s, attempting to install", spec.host)
+            ok, err = _install_package("tmux")
+            if not ok:
+                return False, f"tmux is required but not installed on {spec.host}. {err}"
+            # Verify installation succeeded
+            if not _check_command("tmux"):
+                return False, f"tmux installation appeared to succeed but command still not found on {spec.host}"
+            logger.info("Successfully installed tmux on VM %s", spec.host)
+
+    # Check if the agent command exists
+    # Extract the base command (first word, handle env prefix)
+    base_cmd = agent_command.strip().split()[0]
+    if base_cmd == "env":
+        # Skip "env VAR=val" prefix to get actual command
+        parts = agent_command.strip().split()
+        for i, part in enumerate(parts[1:], 1):
+            if "=" not in part:
+                base_cmd = part
+                break
+
+    # Check with profile sourcing for commands installed via nvm/npm (like claude)
+    if not _check_command(base_cmd, with_profile=True):
+        return False, f"Agent command '{base_cmd}' not found on {spec.host}. Please install it on the VM."
+
+    return True, ""
+
+
 def build_ssh_spec_with_options(vm: VMTargetRecord, options: list[str]) -> SSHSpec:
     return SSHSpec(host=vm.host, user=vm.user, port=vm.port, options=options)
 

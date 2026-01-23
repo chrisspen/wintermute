@@ -113,6 +113,7 @@ def _make_spec(
 
 
 class TestIsLocalHost(unittest.TestCase):
+
     def test_localhost(self):
         self.assertTrue(_is_local_host("localhost"))
         self.assertTrue(_is_local_host("LOCALHOST"))
@@ -130,6 +131,7 @@ class TestIsLocalHost(unittest.TestCase):
 
 
 class TestBuildClaudeShell(unittest.TestCase):
+
     def test_basic_command(self):
         agent = _make_agent()
         shell = _build_claude_shell(agent, "/tmp/test")
@@ -163,6 +165,7 @@ class TestBuildClaudeShell(unittest.TestCase):
 
 
 class TestClaudeResult(unittest.TestCase):
+
     def test_dataclass_creation(self):
         result = ClaudeResult(
             response_text="Hello",
@@ -183,6 +186,7 @@ class TestClaudeResult(unittest.TestCase):
 
 
 class TestClaudeProcess(unittest.TestCase):
+
     def test_dataclass_creation(self):
         mock_proc = MagicMock()
         proc = ClaudeProcess(proc=mock_proc, session_id="sess-123", last_used=100.0)
@@ -191,6 +195,7 @@ class TestClaudeProcess(unittest.TestCase):
 
 
 class TestSendUserMessage(unittest.TestCase):
+
     def test_sends_json_message(self):
         mock_proc = MagicMock()
         mock_stdin = MagicMock()
@@ -217,6 +222,7 @@ class TestSendUserMessage(unittest.TestCase):
 
 
 class TestCloseClaudeProcess(unittest.TestCase):
+
     def setUp(self):
         # Clear the global process dict
         with _CLAUDE_LOCK:
@@ -240,6 +246,7 @@ class TestCloseClaudeProcess(unittest.TestCase):
 
 
 class TestPollClaude(unittest.TestCase):
+
     def setUp(self):
         with _CLAUDE_LOCK:
             _CLAUDE_PROCESSES.clear()
@@ -251,7 +258,7 @@ class TestPollClaude(unittest.TestCase):
 
     def test_poll_exited_process(self):
         mock_proc = MagicMock()
-        mock_proc.poll.return_value = 0  # Process exited
+        mock_proc.poll.return_value = 0 # Process exited
 
         with _CLAUDE_LOCK:
             _CLAUDE_PROCESSES["test-session"] = ClaudeProcess(proc=mock_proc)
@@ -262,6 +269,7 @@ class TestPollClaude(unittest.TestCase):
 
 
 class TestRunClaudePrompt(unittest.TestCase):
+
     def setUp(self):
         with _CLAUDE_LOCK:
             _CLAUDE_PROCESSES.clear()
@@ -274,12 +282,12 @@ class TestRunClaudePrompt(unittest.TestCase):
 
         # Setup mock process
         mock_proc = MagicMock()
-        mock_proc.poll.return_value = None  # Process is running
+        mock_proc.poll.return_value = None # Process is running
         mock_proc.stdin = MagicMock()
         mock_start.return_value = mock_proc
 
-        # Setup mock response
-        mock_read.return_value = ("Hello from Claude", "claude-sess-123", None, None)
+        # Setup mock response (response_text, session_id, error, usage, had_activity)
+        mock_read.return_value = ("Hello from Claude", "claude-sess-123", None, None, True)
 
         agent = _make_agent()
         spec = _make_spec()
@@ -306,7 +314,7 @@ class TestRunClaudePrompt(unittest.TestCase):
         mock_getuser.return_value = "testuser"
 
         mock_proc = MagicMock()
-        mock_proc.poll.return_value = 1  # Process exited
+        mock_proc.poll.return_value = 1 # Process exited
         mock_start.return_value = mock_proc
 
         agent = _make_agent()
@@ -334,7 +342,7 @@ class TestRunClaudePrompt(unittest.TestCase):
         mock_proc.stdin = MagicMock()
         mock_start.return_value = mock_proc
 
-        mock_read.return_value = ("Response 1", "sess-1", None, None)
+        mock_read.return_value = ("Response 1", "sess-1", None, None, True)
 
         agent = _make_agent()
         spec = _make_spec()
@@ -343,7 +351,7 @@ class TestRunClaudePrompt(unittest.TestCase):
         run_claude_prompt(spec, agent, session_id="reuse-sess", prompt="First", cwd="/tmp")
 
         # Second call should reuse the process
-        mock_read.return_value = ("Response 2", "sess-1", None, None)
+        mock_read.return_value = ("Response 2", "sess-1", None, None, True)
         run_claude_prompt(spec, agent, session_id="reuse-sess", prompt="Second", cwd="/tmp")
 
         # Process should only be started once
@@ -373,8 +381,15 @@ class TestStreamingJsonParsing(unittest.TestCase):
             "type": "assistant",
             "message": {
                 "content": [
-                    {"type": "text", "text": "Hello! I can help with that."},
-                    {"type": "tool_use", "id": "tool-1", "name": "Read"},
+                    {
+                        "type": "text",
+                        "text": "Hello! I can help with that."
+                    },
+                    {
+                        "type": "tool_use",
+                        "id": "tool-1",
+                        "name": "Read"
+                    },
                 ]
             }
         }
@@ -389,7 +404,10 @@ class TestStreamingJsonParsing(unittest.TestCase):
             "subtype": "success",
             "session_id": "test-session-123",
             "result": "Task completed successfully.",
-            "usage": {"input_tokens": 100, "output_tokens": 50},
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50
+            },
             "total_cost_usd": 0.0015,
             "duration_ms": 2500,
             "is_error": False,

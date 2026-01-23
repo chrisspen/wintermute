@@ -275,5 +275,143 @@ class BulkActionCloneTests(unittest.TestCase):
         self.assertIn("Clone", response.text)
 
 
+class SessionFileConfigsBulkActionTests(unittest.TestCase):
+    """Tests for the session file configs bulk clone action endpoint."""
+
+    def setUp(self) -> None:
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
+        self.db = Database(self.temp_db.name)
+        self.db.initialize()
+        os.environ["WINTERMUTE_WEB_SECRET"] = "test-secret-key"
+        self.app = create_app(self.db)
+        self.client = TestClient(self.app)
+        # Create a test user with properly hashed password
+        password = "testpass"
+        salt = os.urandom(16)
+        salt_b64 = base64.b64encode(salt).decode("ascii")
+        password_hash = base64.b64encode(hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=2**14,
+            r=8,
+            p=1,
+        )).decode("ascii")
+        self.db.insert_user(
+            user_id=str(uuid.uuid4()),
+            username="testuser",
+            password_hash=password_hash,
+            salt=salt_b64,
+        )
+        # Login to get session cookie
+        self.client.post(
+            "/login",
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
+            follow_redirects=False,
+        )
+
+    def tearDown(self) -> None:
+        self.temp_db.close()
+        os.unlink(self.temp_db.name)
+
+    def test_clone_single_session_file_config(self) -> None:
+        """Clone action creates a copy of a session file config with definitions."""
+        # Create a session file config with some definitions
+        config_id = str(uuid.uuid4())
+        self.db.insert_session_file_config(config_id, "Test Config", "A test config")
+        self.db.insert_session_file_definition(
+            definition_id=str(uuid.uuid4()),
+            config_id=config_id,
+            filename="STATE.md",
+            default_content="# State",
+            description="State file",
+            required=True,
+            sync_on_exit=True,
+            sort_order=1,
+        )
+        self.db.insert_session_file_definition(
+            definition_id=str(uuid.uuid4()),
+            config_id=config_id,
+            filename="TODO.md",
+            default_content="# TODO",
+            description="Todo file",
+            required=False,
+            sync_on_exit=True,
+            sort_order=2,
+        )
+
+        response = self.client.post(
+            "/ui/session_file_configs/bulk-action",
+            data={
+                "action": "clone",
+                "ids": [config_id]
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("cloned_1", response.headers["location"])
+
+        # Verify the clone was created
+        configs = self.db.list_session_file_configs()
+        self.assertEqual(len(configs), 2)
+
+        # Find the cloned config
+        cloned = [c for c in configs if c.id != config_id][0]
+        self.assertEqual(cloned.name, "Test Config2")
+        self.assertEqual(cloned.description, "A test config")
+
+        # Verify definitions were also cloned
+        cloned_definitions = self.db.list_session_file_definitions(cloned.id)
+        self.assertEqual(len(cloned_definitions), 2)
+
+        filenames = {d.filename for d in cloned_definitions}
+        self.assertIn("STATE.md", filenames)
+        self.assertIn("TODO.md", filenames)
+
+    def test_clone_multiple_session_file_configs(self) -> None:
+        """Clone action creates copies of multiple configs."""
+        config_id_1 = str(uuid.uuid4())
+        config_id_2 = str(uuid.uuid4())
+        self.db.insert_session_file_config(config_id_1, "Config Alpha", None)
+        self.db.insert_session_file_config(config_id_2, "Config Beta", None)
+
+        response = self.client.post(
+            "/ui/session_file_configs/bulk-action",
+            data={
+                "action": "clone",
+                "ids": [config_id_1, config_id_2],
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn("cloned_2", response.headers["location"])
+
+        configs = self.db.list_session_file_configs()
+        self.assertEqual(len(configs), 4)
+
+        names = {c.name for c in configs}
+        self.assertIn("Config Alpha", names)
+        self.assertIn("Config Alpha2", names)
+        self.assertIn("Config Beta", names)
+        self.assertIn("Config Beta2", names)
+
+    def test_session_file_configs_page_shows_bulk_actions(self) -> None:
+        """Session file configs list page includes bulk action UI elements."""
+        response = self.client.get("/ui/session-file-configs")
+        self.assertEqual(response.status_code, 200)
+
+        # Check for bulk action elements
+        self.assertIn("data-bulk-actions", response.text)
+        self.assertIn("data-bulk-model", response.text)
+        self.assertIn("data-select-all", response.text)
+        self.assertIn("data-bulk-action-select", response.text)
+        self.assertIn("data-bulk-action-go", response.text)
+        self.assertIn("Clone", response.text)
+
+
 if __name__ == "__main__":
     unittest.main()

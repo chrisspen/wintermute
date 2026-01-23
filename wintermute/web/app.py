@@ -31,6 +31,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 from slack_sdk.web.client import WebClient
+from sqlalchemy.exc import IntegrityError
 
 from wintermute.db import Database, utc_now
 from wintermute.prompts import DEFAULT_PROJECT_PROMPT_TEMPLATE, render_prompt_template
@@ -41,6 +42,7 @@ from wintermute.runner import (
     check_vm_memory_available,
     configure_git_push_auth,
     ensure_repo,
+    ensure_vm_tools,
     is_codex_command,
     is_session_running,
     parse_ssh_options,
@@ -245,7 +247,7 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
         ],
     },
     "projects": {
-        "default": ["name", "slug", "slack_channel_id", "actions"],
+        "default": ["name", "build_status", "slug", "slack_channel_id", "actions"],
         "columns": [
             {
                 "key": "id",
@@ -255,6 +257,10 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {
                 "key": "name",
                 "label": "Project"
+            },
+            {
+                "key": "build_status",
+                "label": "Build Status"
             },
             {
                 "key": "slug",
@@ -910,6 +916,40 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "session_file_configs": {
+        "default": ["name", "description"],
+        "columns": [
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Name"
+            },
+            {
+                "key": "description",
+                "label": "Description"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+        ],
+        "bulk_actions": [
+            {
+                "key": "clone",
+                "label": "Clone"
+            },
+        ],
+    },
 }
 
 
@@ -1271,6 +1311,9 @@ def _build_project_rows(projects: list[Any], database: Any) -> list[dict[str, An
                 "href": f"/ui/projects/{project.id}/edit",
                 "provider": provider,
                 "repo_url": repo_url,
+            },
+            "build_status": {
+                "text": "",
                 "badge_url": badge_url,
                 "badge_link": badge_link,
             },
@@ -2091,6 +2134,27 @@ def _create_agent_slack_channel(database: Database, agent: Any, channel_name: st
                     logger.warning("Failed to invite admin to channel %s: %s", slack_channel_name, exc)
 
     return channel_id, error_msg
+
+
+def _parse_integrity_error(exc: IntegrityError) -> tuple[Optional[str], str]:
+    """Parse an IntegrityError to extract field name and user-friendly message.
+
+    Returns (field_name, message). field_name may be None if we can't determine it.
+    """
+    error_str = str(exc.orig) if exc.orig else str(exc)
+
+    # SQLite: "UNIQUE constraint failed: table.column"
+    if "UNIQUE constraint failed:" in error_str:
+        match = re.search(r"UNIQUE constraint failed: (\w+)\.(\w+)", error_str)
+        if match:
+            table, column = match.groups()
+            return column, f"A record with this {column} already exists. Please choose a different value."
+
+    # Generic fallback
+    if "UNIQUE" in error_str.upper():
+        return None, "This value is already in use. Please choose a different value."
+
+    return None, f"Database constraint violation: {error_str}"
 
 
 def _growl_message(saved: Optional[str]) -> Optional[str]:
@@ -4176,6 +4240,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Build SSH spec
         spec = build_ssh_spec(vm, agent.required_ssh_options)
 
+        # Check that required tools are available (tmux for tmux mode, agent command)
+        tools_ok, tools_error = ensure_vm_tools(spec, agent.command, agent.session_mode)
+        if not tools_ok:
+            raise HTTPException(status_code=400, detail=tools_error)
+
         # Memory check before starting agent
         database.refresh_agent_average_memory_usage(agent.id)
         agent = database.get_agent(agent.id) # Refresh to get updated memory avg
@@ -4193,19 +4262,57 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
         # Create the session record
         session_id = str(uuid.uuid4())
-        initial_prompt = "Read your AGENTS.md file and standby for further instructions."
-        database.insert_session(
-            session_id=session_id,
-            project_id=None,
-            agent_id=agent_id,
-            ticket_id=None,
-            status="running",
-            repo_path=workspace,
-            thread_ts=None,
-            mcp_conversation_id=None,
-            initial_prompt=initial_prompt,
-            workspace_path=workspace,
-        )
+        default_initial_prompt = "Read your AGENTS.md file and then wait for further instructions."
+        initial_prompt = agent.initial_prompt or default_initial_prompt
+
+        # For non-tmux modes, queue the initial prompt atomically at insert time
+        # to avoid race condition with SessionSource polling
+        if agent.session_mode != "tmux" and initial_prompt:
+            database.insert_session(
+                session_id=session_id,
+                project_id=None,
+                agent_id=agent_id,
+                ticket_id=None,
+                status="running",
+                repo_path=workspace,
+                thread_ts=None,
+                mcp_conversation_id=None,
+                initial_prompt=initial_prompt,
+                workspace_path=workspace,
+                queued_user_messages=json.dumps([initial_prompt]),
+                awaiting_response=1,
+                last_user_message=initial_prompt,
+                prompt_sent_at=utc_now(),
+            )
+            # Record initial prompt as comment so it shows in conversation with correct username
+            database.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=None,
+                session_id=session_id,
+                project_id=None,
+                agent_id=agent_id,
+                author=user,
+                source_id=None,
+                issue_number=None,
+                body=initial_prompt,
+                public=False,
+                approved=False,
+                agent_session_id=session_id,
+                origin="initial_prompt",
+            )
+        else:
+            database.insert_session(
+                session_id=session_id,
+                project_id=None,
+                agent_id=agent_id,
+                ticket_id=None,
+                status="running",
+                repo_path=workspace,
+                thread_ts=None,
+                mcp_conversation_id=None,
+                initial_prompt=initial_prompt,
+                workspace_path=workspace,
+            )
 
         # Copy session files to workspace on VM
         if agent.session_file_config_id:
@@ -4229,10 +4336,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 if scp_result.returncode != 0:
                     logging.getLogger(__name__).warning("Failed to copy session files: %s", scp_result.stderr)
 
-        # Start the tmux session
-        start_session(spec, session_id, agent, workspace)
+        # Start the tmux session (for tmux mode only)
+        if agent.session_mode == "tmux":
+            start_session(spec, session_id, agent, workspace)
 
-        return {"session_id": session_id, "location": workspace}
+        # Send the initial prompt to tmux agents directly
+        initial_prompt_error = None
+        if initial_prompt and agent.session_mode == "tmux":
+            session_record = database.get_session(session_id)
+            if session_record:
+                try:
+                    send_input(spec, session_record, initial_prompt)
+                except Exception as exc:
+                    initial_prompt_error = str(exc)
+                    logging.getLogger(__name__).warning("Failed to send initial prompt: %s", exc)
+
+        result = {"session_id": session_id, "location": workspace}
+        if initial_prompt_error:
+            result["warning"] = f"Session started but initial prompt failed: {initial_prompt_error}"
+        return result
 
     @app.post("/api/agents/{agent_id}/session/stop")
     async def api_stop_agent_session(agent_id: str, user: str = Depends(_require_login)) -> dict:
@@ -5387,23 +5509,28 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/agents"
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
-        database.insert_agent(
-            str(uuid.uuid4()),
-            name,
-            slug,
-            command,
-            session_mode,
-            vm_target_id,
-            ssh_options,
-            env_vars,
-            mcp_config,
-            trust_level,
-            input_echo_prefix,
-            response_prefix,
-            llm_base_url=llm_base_url,
-            llm_api_key=llm_api_key,
-            llm_model=llm_model,
-        )
+        try:
+            database.insert_agent(
+                str(uuid.uuid4()),
+                name,
+                slug,
+                command,
+                session_mode,
+                vm_target_id,
+                ssh_options,
+                env_vars,
+                mcp_config,
+                trust_level,
+                input_echo_prefix,
+                response_prefix,
+                llm_base_url=llm_base_url,
+                llm_api_key=llm_api_key,
+                llm_model=llm_model,
+            )
+        except IntegrityError as exc:
+            field, message = _parse_integrity_error(exc)
+            error_param = urllib.parse.quote(f"{field}:{message}" if field else message)
+            return RedirectResponse(f"/ui/agents/create?error={error_param}&return_to={urllib.parse.quote(return_to)}", status_code=303)
         return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
 
     @app.post("/ui/agents/bulk-action")
@@ -5490,6 +5617,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         standalone_comments: list = []
         if standalone_session_ids:
             standalone_comments = database.list_comments(agent_session_ids=standalone_session_ids)
+
+        # Parse error from query params (e.g., "field:message" or just "message")
+        error_param = request.query_params.get("error")
+        error_field = None
+        error_message = None
+        if error_param:
+            if ":" in error_param:
+                error_field, error_message = error_param.split(":", 1)
+            else:
+                error_message = error_param
+
         return _render_template(
             request,
             "agent_edit.html",
@@ -5506,6 +5644,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "file_contents": file_contents,
                 "standalone_session": standalone_session,
                 "standalone_comments": standalone_comments,
+                "error_field": error_field,
+                "error_message": error_message,
             },
         )
 
@@ -5527,26 +5667,33 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         llm_api_key = str(form.get("llm_api_key", "")).strip() or None
         llm_model = str(form.get("llm_model", "")).strip() or None
         session_file_config_id = str(form.get("session_file_config_id", "")).strip() or None
+        initial_prompt = str(form.get("initial_prompt", "")).strip() or None
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
-        database.update_agent(
-            agent_id,
-            name=name,
-            slug=slug,
-            command=command,
-            session_mode=session_mode,
-            vm_target_id=vm_target_id,
-            required_ssh_options=ssh_options,
-            env_vars=env_vars,
-            mcp_config=mcp_config,
-            trust_level=trust_level,
-            input_echo_prefix=input_echo_prefix,
-            response_prefix=response_prefix,
-            llm_base_url=llm_base_url,
-            llm_api_key=llm_api_key,
-            llm_model=llm_model,
-            session_file_config_id=session_file_config_id,
-        )
+        try:
+            database.update_agent(
+                agent_id,
+                name=name,
+                slug=slug,
+                command=command,
+                session_mode=session_mode,
+                vm_target_id=vm_target_id,
+                required_ssh_options=ssh_options,
+                env_vars=env_vars,
+                mcp_config=mcp_config,
+                trust_level=trust_level,
+                input_echo_prefix=input_echo_prefix,
+                response_prefix=response_prefix,
+                llm_base_url=llm_base_url,
+                llm_api_key=llm_api_key,
+                llm_model=llm_model,
+                session_file_config_id=session_file_config_id,
+                initial_prompt=initial_prompt,
+            )
+        except IntegrityError as exc:
+            field, message = _parse_integrity_error(exc)
+            error_param = urllib.parse.quote(f"{field}:{message}" if field else message)
+            return RedirectResponse(f"/ui/agents/{agent_id}/edit?error={error_param}", status_code=303)
         # Auto-generate session file records if config is set
         if session_file_config_id:
             definitions = database.list_session_file_definitions(session_file_config_id)
@@ -5647,7 +5794,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         workspace = tempfile.mkdtemp(prefix=f"agent_{agent.slug}_")
         # Create the session
         session_id = str(uuid.uuid4())
-        initial_prompt = "Read your AGENTS.md file and standby for further instructions."
+        default_initial_prompt = "Read your AGENTS.md file and then wait for further instructions."
+        initial_prompt = agent.initial_prompt or default_initial_prompt
         database.insert_session(
             session_id=session_id,
             project_id=None,
@@ -6214,6 +6362,17 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
         vm_targets = database.list_vm_targets()
+
+        # Parse error from query params (e.g., "field:message" or just "message")
+        error_param = request.query_params.get("error")
+        error_field = None
+        error_message = None
+        if error_param:
+            if ":" in error_param:
+                error_field, error_message = error_param.split(":", 1)
+            else:
+                error_message = error_param
+
         return _render_template(
             request,
             "agent_create.html",
@@ -6223,6 +6382,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "return_to": return_to,
                 "vm_targets": vm_targets,
+                "error_field": error_field,
+                "error_message": error_message,
             },
         )
 
@@ -6827,6 +6988,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         rows = []
         for config in configs:
             rows.append({
+                "id": config.id,
                 "cells": {
                     "id": {
                         "text": config.id[:8],
@@ -6936,6 +7098,56 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     async def delete_session_file_config(config_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_session_file_config(config_id)
         return RedirectResponse("/ui/session-file-configs?saved=config_deleted", status_code=303)
+
+    @app.post("/ui/session_file_configs/bulk-action")
+    async def session_file_configs_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        """Handle bulk actions on session file configs (e.g., clone)."""
+        form = await request.form()
+        action = str(form.get("action", "")).strip()
+        ids = form.getlist("ids")
+        if not action or not ids:
+            raise HTTPException(status_code=400, detail="Missing action or ids")
+
+        cloned_count = 0
+        if action == "clone":
+            # Get all existing configs to check for unique name conflicts
+            existing_configs = database.list_session_file_configs()
+            existing_names = {c.name for c in existing_configs}
+
+            for config_id in ids:
+                config = database.get_session_file_config(config_id)
+                if not config:
+                    continue
+
+                # Generate unique name
+                new_name = _generate_unique_string(config.name, existing_names)
+                existing_names.add(new_name)
+
+                # Create the clone with new UUID
+                new_config_id = str(uuid.uuid4())
+                database.insert_session_file_config(
+                    config_id=new_config_id,
+                    name=new_name,
+                    description=config.description,
+                )
+
+                # Clone all file definitions
+                definitions = database.list_session_file_definitions(config_id)
+                for defn in definitions:
+                    database.insert_session_file_definition(
+                        definition_id=str(uuid.uuid4()),
+                        config_id=new_config_id,
+                        filename=defn.filename,
+                        default_content=defn.default_content,
+                        description=defn.description,
+                        required=defn.required,
+                        sync_on_exit=defn.sync_on_exit,
+                        sort_order=defn.sort_order,
+                    )
+
+                cloned_count += 1
+
+        return RedirectResponse(f"/ui/session-file-configs?saved=cloned_{cloned_count}", status_code=303)
 
     # -------------------------------------------------------------------------
     # Session File Definitions
