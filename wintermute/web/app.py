@@ -4382,10 +4382,23 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"running": False, "session_id": None, "location": None, "pid": None, "log_path": None}
 
     @app.post("/api/agents/{agent_id}/start-session")
-    async def api_start_agent_session(agent_id: str, user: str = Depends(_require_login)) -> dict:
+    async def api_start_agent_session(
+        agent_id: str,
+        request: Request,
+        user: str = Depends(_require_login),
+    ) -> dict:
         import subprocess
         import tempfile
         import shlex
+        from datetime import datetime
+
+        # Parse optional JSON body for file_mode
+        file_mode = "check"  # default: check timestamps
+        try:
+            body = await request.json()
+            file_mode = body.get("file_mode", "check")
+        except Exception:
+            pass  # No body or invalid JSON is fine
 
         agent = database.get_agent(agent_id)
         if not agent:
@@ -4412,7 +4425,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
         # Memory check before starting agent
         database.refresh_agent_average_memory_usage(agent.id)
-        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
+        agent = database.get_agent(agent.id)  # Refresh to get updated memory avg
         if agent and vm.required_reserve_memory_gb > 0:
             mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
             if not mem_ok:
@@ -4447,6 +4460,62 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=30)
         else:
             session_files_dir = workspace
+
+        # Check timestamps if file_mode is "check" and session files exist
+        if file_mode == "check" and agent.session_file_config_id:
+            definitions = database.list_session_file_definitions(agent.session_file_config_id)
+            session_files = database.list_session_files(agent_id)
+            file_map = {sf.definition_id: sf for sf in session_files}
+
+            # Get timestamps of remote files
+            filenames = [defn.filename for defn in definitions]
+            if filenames:
+                # Build command to get timestamps of all files at once
+                stat_parts = " ".join([f"{shlex.quote(session_files_dir)}/{shlex.quote(fn)}" for fn in filenames])
+                stat_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}",
+                            f"stat -c '%Y %n' {stat_parts} 2>/dev/null || true"]
+                stat_result = subprocess.run(stat_cmd, capture_output=True, text=True, timeout=30)
+
+                newer_files = []
+                if stat_result.returncode == 0 and stat_result.stdout.strip():
+                    for line in stat_result.stdout.strip().split("\n"):
+                        if not line.strip():
+                            continue
+                        parts = line.split(" ", 1)
+                        if len(parts) == 2:
+                            try:
+                                remote_ts = int(parts[0])
+                                remote_path = parts[1]
+                                remote_filename = os.path.basename(remote_path)
+                                # Find corresponding definition and session file
+                                for defn in definitions:
+                                    if defn.filename == remote_filename:
+                                        sf = file_map.get(defn.id)
+                                        if sf and sf.updated_at:
+                                            # Parse updated_at (ISO format)
+                                            local_dt = datetime.fromisoformat(sf.updated_at.replace("Z", "+00:00"))
+                                            local_ts = int(local_dt.timestamp())
+                                            if remote_ts > local_ts:
+                                                newer_files.append({
+                                                    "filename": remote_filename,
+                                                    "remote_timestamp": remote_ts,
+                                                    "local_timestamp": local_ts,
+                                                })
+                                        break
+                            except (ValueError, IndexError):
+                                pass
+
+                if newer_files:
+                    # Return conflict response - files on target are newer
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "conflict": "session_files_newer_on_target",
+                            "message": "Session files on target are newer than in Wintermute",
+                            "files": newer_files,
+                            "workspace": workspace,
+                        }
+                    )
 
         # Create the session record
         session_id = str(uuid.uuid4())
@@ -4502,8 +4571,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 workspace_path=workspace,
             )
 
-        # Copy session files to session_files_dir on VM
-        if agent.session_file_config_id:
+        # Copy session files to session_files_dir on VM (unless using target files)
+        if agent.session_file_config_id and file_mode != "use_target":
             definitions = database.list_session_file_definitions(agent.session_file_config_id)
             session_files = database.list_session_files(agent_id)
             file_map = {sf.definition_id: sf for sf in session_files}

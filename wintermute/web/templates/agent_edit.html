@@ -491,30 +491,103 @@
     commentStream.appendComment(c);
   };
 
-  if (startBtn) {
-    startBtn.addEventListener("click", async function() {
-      if (startBtn.disabled) return;
-      startBtn.disabled = true;
-      try {
-        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/start-session", {
-          method: "POST"
-        });
-        if (!response.ok) {
-          var err = await response.json();
-          alert(err.detail || "Failed to start session");
-          startBtn.disabled = false;
-          return;
-        }
-        var payload = await response.json();
-        if (payload.warning) {
-          alert(payload.warning);
-        }
-        updateStatus(true, payload.session_id, payload.location, null, null);
-        window.location.reload();
-      } catch (err) {
-        alert("Failed to start session");
-        startBtn.disabled = false;
+  // Start session with optional file_mode
+  async function startSessionWithMode(fileMode) {
+    startBtn.disabled = true;
+    try {
+      var fetchOptions = { method: "POST" };
+      if (fileMode) {
+        fetchOptions.headers = { "Content-Type": "application/json" };
+        fetchOptions.body = JSON.stringify({ file_mode: fileMode });
       }
+      var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/start-session", fetchOptions);
+      var payload = await response.json();
+
+      if (response.status === 409 && payload.conflict === "session_files_newer_on_target") {
+        // Show conflict modal
+        showFileConflictModal(payload);
+        startBtn.disabled = false;
+        return;
+      }
+
+      if (!response.ok) {
+        alert(payload.detail || "Failed to start session");
+        startBtn.disabled = false;
+        return;
+      }
+
+      if (payload.warning) {
+        alert(payload.warning);
+      }
+      updateStatus(true, payload.session_id, payload.location, null, null);
+      window.location.reload();
+    } catch (err) {
+      alert("Failed to start session");
+      startBtn.disabled = false;
+    }
+  }
+
+  function showFileConflictModal(payload) {
+    // Remove existing modal if any
+    var existing = document.getElementById("file-conflict-modal");
+    if (existing) existing.remove();
+
+    var fileList = payload.files.map(function(f) {
+      var localDate = new Date(f.local_timestamp * 1000).toLocaleString();
+      var remoteDate = new Date(f.remote_timestamp * 1000).toLocaleString();
+      return '<li><strong>' + f.filename + '</strong><br>' +
+             '<span class="muted">Wintermute: ' + localDate + '</span><br>' +
+             '<span style="color: #f59e0b;">Target: ' + remoteDate + '</span></li>';
+    }).join('');
+
+    var modal = document.createElement("div");
+    modal.id = "file-conflict-modal";
+    modal.innerHTML = `
+      <div class="modal-overlay" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
+        <div class="modal-content" style="background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 24px; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+          <h3 style="margin: 0 0 12px 0; color: #f59e0b;">⚠️ Session Files Conflict</h3>
+          <p style="margin: 0 0 12px 0;">Session files on the target VM are newer than in Wintermute:</p>
+          <ul style="margin: 0 0 16px 0; padding-left: 20px; font-size: 13px;">${fileList}</ul>
+          <p style="margin: 0 0 16px 0; font-size: 13px;" class="muted">What would you like to do?</p>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" id="conflict-use-target" style="flex: 1; min-width: 120px; background: #f59e0b; color: white; border: none;">Use Target Files</button>
+            <button type="button" id="conflict-use-ours" style="flex: 1; min-width: 120px;">Use Wintermute Files</button>
+            <button type="button" id="conflict-cancel" class="danger" style="flex: 1; min-width: 120px;">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById("conflict-use-target").addEventListener("click", function() {
+      modal.remove();
+      startSessionWithMode("use_target");
+    });
+    document.getElementById("conflict-use-ours").addEventListener("click", function() {
+      modal.remove();
+      startSessionWithMode("use_ours");
+    });
+    document.getElementById("conflict-cancel").addEventListener("click", function() {
+      modal.remove();
+    });
+    // Close on overlay click
+    modal.querySelector(".modal-overlay").addEventListener("click", function(e) {
+      if (e.target === e.currentTarget) modal.remove();
+    });
+    // Close on Escape
+    var escHandler = function(e) {
+      if (e.key === "Escape") {
+        modal.remove();
+        document.removeEventListener("keydown", escHandler);
+      }
+    };
+    document.addEventListener("keydown", escHandler);
+  }
+
+  if (startBtn) {
+    startBtn.addEventListener("click", function() {
+      if (startBtn.disabled) return;
+      startSessionWithMode(null);  // null = check mode (default)
     });
   }
 
