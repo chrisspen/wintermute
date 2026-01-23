@@ -398,6 +398,7 @@ class MemoryCheckTests(unittest.TestCase):
             initial_prompt=None,
             working_directory=None,
             session_directory=None,
+            autostart=False,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )
@@ -450,6 +451,7 @@ class MemoryCheckTests(unittest.TestCase):
             initial_prompt=None,
             working_directory=None,
             session_directory=None,
+            autostart=False,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )
@@ -503,6 +505,7 @@ class MemoryCheckTests(unittest.TestCase):
             initial_prompt=None,
             working_directory=None,
             session_directory=None,
+            autostart=False,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )
@@ -549,6 +552,7 @@ class MemoryCheckTests(unittest.TestCase):
             initial_prompt=None,
             working_directory=None,
             session_directory=None,
+            autostart=False,
             created_at="2024-01-01",
             updated_at="2024-01-01",
         )

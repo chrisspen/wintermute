@@ -148,6 +148,13 @@
           <input type="text" name="session_directory" value="{{ agent.session_directory or '' }}" placeholder="e.g. .claude (relative) or /home/user/.agent (absolute)" />
           <p class="muted" style="font-size: 12px; margin-top: 4px;">Where session files are stored. Relative paths are relative to working directory.</p>
         </div>
+        <div class="field-group">
+          <label style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" name="autostart" value="1" {% if agent.autostart %}checked{% endif %} style="width: auto; margin: 0;" />
+            Autostart
+          </label>
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">If enabled, supervisor will automatically start this agent every 5 minutes if not running.</p>
+        </div>
         <h4>LLM API Configuration (for decision path)</h4>
         <div class="field-group">
           <label>LLM Base URL</label>

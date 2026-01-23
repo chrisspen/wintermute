@@ -5851,6 +5851,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         llm_model = str(form.get("llm_model", "")).strip() or None
         working_directory = str(form.get("working_directory", "")).strip() or None
         session_directory = str(form.get("session_directory", "")).strip() or None
+        autostart = str(form.get("autostart", "")).strip() in ("1", "true", "on")
         return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
@@ -5875,6 +5876,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 llm_model=llm_model,
                 working_directory=working_directory,
                 session_directory=session_directory,
+                autostart=autostart,
             )
         except IntegrityError as exc:
             field, message = _parse_integrity_error(exc)
@@ -5931,6 +5933,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     average_memory_usage_mb=agent.average_memory_usage_mb,
                     working_directory=agent.working_directory,
                     session_directory=agent.session_directory,
+                    autostart=agent.autostart,
                 )
                 cloned_count += 1
 
@@ -6021,6 +6024,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         initial_prompt = str(form.get("initial_prompt", "")).strip() or None
         working_directory = str(form.get("working_directory", "")).strip() or None
         session_directory = str(form.get("session_directory", "")).strip() or None
+        autostart = str(form.get("autostart", "")).strip() in ("1", "true", "on")
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
         try:
@@ -6044,6 +6048,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 initial_prompt=initial_prompt,
                 working_directory=working_directory,
                 session_directory=session_directory,
+                autostart=autostart,
             )
         except IntegrityError as exc:
             field, message = _parse_integrity_error(exc)
