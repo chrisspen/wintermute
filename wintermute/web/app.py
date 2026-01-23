@@ -4253,12 +4253,35 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             if not mem_ok:
                 raise HTTPException(status_code=503, detail=mem_error)
 
-        # Create temp workspace on VM target
-        mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
-        result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Failed to create workspace: {result.stderr}")
-        workspace = result.stdout.strip()
+        # Determine workspace: use working_directory if set, otherwise create temp
+        if agent.working_directory:
+            # Verify the working directory exists on the VM
+            check_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"]
+            result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip() != "exists":
+                raise HTTPException(status_code=400, detail=f"Working directory does not exist on VM: {agent.working_directory}")
+            workspace = agent.working_directory
+        else:
+            # Create temp workspace on VM target
+            mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
+            result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
+            if result.returncode != 0:
+                raise HTTPException(status_code=500, detail=f"Failed to create workspace: {result.stderr}")
+            workspace = result.stdout.strip()
+
+        # Determine session files directory
+        if agent.session_directory:
+            if agent.session_directory.startswith("/"):
+                # Absolute path
+                session_files_dir = agent.session_directory
+            else:
+                # Relative to workspace
+                session_files_dir = f"{workspace}/{agent.session_directory}"
+            # Ensure session directory exists
+            mkdir_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mkdir -p {shlex.quote(session_files_dir)}"]
+            subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=30)
+        else:
+            session_files_dir = workspace
 
         # Create the session record
         session_id = str(uuid.uuid4())
@@ -4314,7 +4337,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 workspace_path=workspace,
             )
 
-        # Copy session files to workspace on VM
+        # Copy session files to session_files_dir on VM
         if agent.session_file_config_id:
             definitions = database.list_session_file_definitions(agent.session_file_config_id)
             session_files = database.list_session_files(agent_id)
@@ -4330,8 +4353,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     local_path = os.path.join(local_tmp, defn.filename)
                     with open(local_path, "w") as f:
                         f.write(file_content)
-                # SCP files to VM
-                scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{workspace}/"]
+                # SCP files to VM (to session_files_dir, not workspace)
+                scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{session_files_dir}/"]
                 scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                 if scp_result.returncode != 0:
                     logging.getLogger(__name__).warning("Failed to copy session files: %s", scp_result.stderr)
@@ -4374,18 +4397,27 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not standalone_session:
             raise HTTPException(status_code=404, detail="No running session")
 
-        # Sync files back from workspace on VM
+        # Sync files back from session_files_dir on VM
         if agent.session_file_config_id and standalone_session.workspace_path and agent.vm_target_id:
             vm = database.get_vm_target(agent.vm_target_id)
             if vm:
                 spec = build_ssh_spec(vm, agent.required_ssh_options)
                 definitions = database.list_session_file_definitions(agent.session_file_config_id)
+                # Determine session files directory (same logic as start)
+                workspace = standalone_session.workspace_path
+                if agent.session_directory:
+                    if agent.session_directory.startswith("/"):
+                        session_files_dir = agent.session_directory
+                    else:
+                        session_files_dir = f"{workspace}/{agent.session_directory}"
+                else:
+                    session_files_dir = workspace
                 # Create a local temp dir to receive files
                 with tempfile.TemporaryDirectory() as local_tmp:
-                    # SCP files from VM
+                    # SCP files from VM (from session_files_dir)
                     scp_cmd = [
                         "scp", "-P",
-                        str(spec.port), *spec.options, "-r", f"{spec.user}@{spec.host}:{standalone_session.workspace_path}/.", f"{local_tmp}/"
+                        str(spec.port), *spec.options, "-r", f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"
                     ]
                     scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                     if scp_result.returncode == 0:
@@ -5504,6 +5536,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         llm_base_url = str(form.get("llm_base_url", "")).strip() or None
         llm_api_key = str(form.get("llm_api_key", "")).strip() or None
         llm_model = str(form.get("llm_model", "")).strip() or None
+        working_directory = str(form.get("working_directory", "")).strip() or None
+        session_directory = str(form.get("session_directory", "")).strip() or None
         return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
@@ -5526,6 +5560,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 llm_base_url=llm_base_url,
                 llm_api_key=llm_api_key,
                 llm_model=llm_model,
+                working_directory=working_directory,
+                session_directory=session_directory,
             )
         except IntegrityError as exc:
             field, message = _parse_integrity_error(exc)
@@ -5580,6 +5616,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     llm_api_key=agent.llm_api_key,
                     llm_model=agent.llm_model,
                     average_memory_usage_mb=agent.average_memory_usage_mb,
+                    working_directory=agent.working_directory,
+                    session_directory=agent.session_directory,
                 )
                 cloned_count += 1
 
@@ -5668,6 +5706,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         llm_model = str(form.get("llm_model", "")).strip() or None
         session_file_config_id = str(form.get("session_file_config_id", "")).strip() or None
         initial_prompt = str(form.get("initial_prompt", "")).strip() or None
+        working_directory = str(form.get("working_directory", "")).strip() or None
+        session_directory = str(form.get("session_directory", "")).strip() or None
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
         try:
@@ -5689,6 +5729,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 llm_model=llm_model,
                 session_file_config_id=session_file_config_id,
                 initial_prompt=initial_prompt,
+                working_directory=working_directory,
+                session_directory=session_directory,
             )
         except IntegrityError as exc:
             field, message = _parse_integrity_error(exc)

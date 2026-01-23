@@ -54,6 +54,12 @@
         <input type="text" name="input_echo_prefix" placeholder="e.g. ›" />
         <label>Response Prefix</label>
         <input type="text" name="response_prefix" placeholder="e.g. •" />
+        <label>Working Directory</label>
+        <input type="text" name="working_directory" placeholder="e.g. /home/user/project" />
+        <p class="muted" style="font-size: 12px; margin-top: 4px;">If set, agent runs from this path instead of a temp directory.</p>
+        <label>Session Directory</label>
+        <input type="text" name="session_directory" placeholder="e.g. .claude (relative) or /home/user/.agent (absolute)" />
+        <p class="muted" style="font-size: 12px; margin-top: 4px;">Where session files are stored. Relative paths are relative to working directory.</p>
         <h4>LLM API Configuration (for decision path)</h4>
         <label>LLM Base URL</label>
         <input type="text" name="llm_base_url" placeholder="e.g. http://localhost:11434/v1" />

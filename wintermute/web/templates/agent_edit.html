@@ -138,6 +138,16 @@
           <textarea name="initial_prompt" rows="3" placeholder="Message sent to agent when session starts">{{ agent.initial_prompt or 'Read your AGENTS.md file and then wait for further instructions.' }}</textarea>
           <p class="muted" style="font-size: 12px; margin-top: 4px;">Auto-sent as first message after session files are copied to VM.</p>
         </div>
+        <div class="field-group">
+          <label>Working Directory</label>
+          <input type="text" name="working_directory" value="{{ agent.working_directory or '' }}" placeholder="e.g. /home/user/project" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">If set, agent runs from this path instead of a temp directory. Path must exist on VM.</p>
+        </div>
+        <div class="field-group">
+          <label>Session Directory</label>
+          <input type="text" name="session_directory" value="{{ agent.session_directory or '' }}" placeholder="e.g. .claude (relative) or /home/user/.agent (absolute)" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Where session files are stored. Relative paths are relative to working directory.</p>
+        </div>
         <h4>LLM API Configuration (for decision path)</h4>
         <div class="field-group">
           <label>LLM Base URL</label>
