@@ -11,7 +11,7 @@
           <label>Agent</label>
           <select name="agent_id" required>
             {% for agent in agents %}
-            <option value="{{ agent.id }}" {% if agent.id == agent_id %}selected{% endif %}>{{ agent.name }}</option>
+            <option value="{{ agent.id }}" {% if agent.id == agent_id %}selected{% endif %}>{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
             {% endfor %}
           </select>
         </div>

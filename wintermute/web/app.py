@@ -5112,6 +5112,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Project not found")
         remote_tokens = database.list_remote_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         mirror_repo_path_base = os.environ.get("WINTERMUTE_MIRROR_REPO_PATH_BASE", "/home/user/git")
         # Compute external repo URL and build badge from project's source settings
         external_repo_url = None
@@ -5156,6 +5157,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
                 "remote_tokens": remote_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "external_repo_url": external_repo_url,
                 "external_repo_provider": external_repo_provider,
                 "build_badge_url": build_badge_url,
@@ -5503,6 +5505,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "ticket": ticket,
                 "projects": database.list_projects(),
                 "agents": database.list_agents(),
+                "vm_names": {vm.id: vm.name for vm in database.list_vm_targets()},
                 "users": database.list_users(),
                 "sprints": database.list_sprints(),
                 "description_html": description_html,
@@ -6628,6 +6631,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/projects"
         remote_tokens = database.list_remote_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         mirror_repo_path_base = os.environ.get("WINTERMUTE_MIRROR_REPO_PATH_BASE", "/home/user/git")
         return _render_template(
             request,
@@ -6640,6 +6644,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
                 "remote_tokens": remote_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "mirror_repo_path_base": mirror_repo_path_base,
             },
         )
@@ -6783,6 +6788,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/agent-responses"
         agent_id = request.query_params.get("agent_id")
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         return _render_template(
             request,
             "agent_response_create.html",
@@ -6791,6 +6797,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "active_nav": "agent_responses",
                 "growl_message": None,
                 "agents": agents,
+                "vm_names": vm_names,
                 "agent_id": agent_id,
                 "return_to": return_to,
             },
@@ -6805,6 +6812,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not return_to.startswith("/ui"):
             return_to = "/ui/agent-responses"
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         growl_message = _growl_message(request.query_params.get("saved"))
         return _render_template(
             request,
@@ -6815,6 +6823,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": growl_message,
                 "response": response,
                 "agents": agents,
+                "vm_names": vm_names,
                 "return_to": return_to,
             },
         )
@@ -7101,6 +7110,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         github_tokens = database.list_github_tokens()
         gitlab_tokens = database.list_gitlab_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         return_to = request.query_params.get("return_to", "/ui/issue-sources")
         if not return_to.startswith("/ui"):
             return_to = "/ui/issue-sources"
@@ -7118,6 +7128,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "github_tokens": github_tokens,
                 "gitlab_tokens": gitlab_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "return_to": return_to,
                 "token_notice": token_notice,
             },
@@ -7132,6 +7143,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         github_tokens = database.list_github_tokens()
         gitlab_tokens = database.list_gitlab_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         labels = ", ".join(source.labels)
         return _render_template(
             request,
@@ -7145,6 +7157,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "github_tokens": github_tokens,
                 "gitlab_tokens": gitlab_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "labels": labels,
             },
         )
@@ -7286,6 +7299,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         agents = database.list_agents()
+        vm_targets = database.list_vm_targets()
+        vm_names = {vm.id: vm.name for vm in vm_targets}
         sprints = database.list_sprints(status="active")
         users = database.list_users()
         return_to = request.query_params.get("return_to", "/ui/tickets")
@@ -7301,6 +7316,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "projects": projects,
                 "agents": agents,
+                "vm_names": vm_names,
                 "sprints": sprints,
                 "users": users,
                 "return_to": return_to,

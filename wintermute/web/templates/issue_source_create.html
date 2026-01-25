@@ -47,7 +47,7 @@
         <select name="agent_id">
           <option value="">None</option>
           {% for agent in agents %}
-          <option value="{{ agent.id }}">{{ agent.name }}</option>
+          <option value="{{ agent.id }}">{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
           {% endfor %}
         </select>
         <label>Repository Path</label>

@@ -20,7 +20,7 @@
           <select name="agent_id">
             <option value="">(none)</option>
             {% for agent in agents %}
-            <option value="{{ agent.id }}">{{ agent.name }}</option>
+            <option value="{{ agent.id }}">{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
             {% endfor %}
           </select>
         </div>
@@ -54,7 +54,7 @@
             {% if agents %}
             <optgroup label="Agents">
               {% for agent in agents %}
-              <option value="agent:{{ agent.id }}">{{ agent.name }}</option>
+              <option value="agent:{{ agent.id }}">{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
               {% endfor %}
             </optgroup>
             {% endif %}
