@@ -176,6 +176,15 @@ API_PERMISSION_ACTIONS = ["create", "read", "update", "delete"]
 LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
     "tickets": {
         "default": ["name", "title", "project_id", "status"],
+        "filters": [
+            {
+                "key": "project_id",
+                "label": "Project",
+                "type": "select",
+                "options_source": "projects",
+            },
+        ],
+        "sortable": ["updated_at"],
         "columns": [
             {
                 "key": "id",
@@ -961,6 +970,74 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {
                 "key": "clone",
                 "label": "Clone"
+            },
+        ],
+    },
+    "agent_wakes": {
+        "default": ["agent_session_id", "context", "wake_at", "status"],
+        "filters": [
+            {
+                "key": "status",
+                "label": "Status",
+                "type": "select",
+                "options": [
+                    ("", "All"),
+                    ("pending", "Pending"),
+                    ("fired", "Fired"),
+                    ("cancelled", "Cancelled"),
+                ],
+            },
+        ],
+        "columns": [
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "agent_session_id",
+                "label": "Session"
+            },
+            {
+                "key": "context",
+                "label": "Context"
+            },
+            {
+                "key": "duration_seconds",
+                "label": "Duration"
+            },
+            {
+                "key": "wake_at",
+                "label": "Wake At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "status",
+                "label": "Status"
+            },
+            {
+                "key": "fired_at",
+                "label": "Fired At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "cancelled_at",
+                "label": "Cancelled At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "cancelled_by",
+                "label": "Cancelled By"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
             },
         ],
     },
@@ -1816,6 +1893,65 @@ def _build_session_rows(sessions: list[Any], project_lookup: dict[str, str], age
     return rows
 
 
+def _format_duration(seconds: int) -> str:
+    """Format duration in human-readable form."""
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes}m"
+    if seconds < 86400:
+        hours = seconds // 3600
+        return f"{hours}h"
+    days = seconds // 86400
+    return f"{days}d"
+
+
+def _build_agent_wake_rows(wakes: list[Any], session_lookup: dict[str, str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for wake in wakes:
+        session_label = session_lookup.get(wake.agent_session_id, wake.agent_session_id[:8] + "...")
+        cells = {
+            "id": {
+                "text": _display_value(wake.id),
+                "href": f"/ui/agent-wakes/{wake.id}"
+            },
+            "agent_session_id": {
+                "text": _display_value(session_label),
+                "href": f"/ui/sessions/{wake.agent_session_id}"
+            },
+            "context": {
+                "text": _display_value(wake.context[:50] + "..." if wake.context and len(wake.context) > 50 else wake.context)
+            },
+            "duration_seconds": {
+                "text": _format_duration(wake.duration_seconds)
+            },
+            "wake_at": {
+                "text": _format_timestamp(wake.wake_at)
+            },
+            "status": {
+                "text": _display_value(wake.status)
+            },
+            "fired_at": {
+                "text": _format_timestamp(wake.fired_at) if wake.fired_at else ""
+            },
+            "cancelled_at": {
+                "text": _format_timestamp(wake.cancelled_at) if wake.cancelled_at else ""
+            },
+            "cancelled_by": {
+                "text": _display_value(wake.cancelled_by)
+            },
+            "created_at": {
+                "text": _format_timestamp(wake.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(wake.updated_at)
+            },
+        }
+        rows.append({"id": wake.id, "cells": cells})
+    return rows
+
+
 def _build_metric_definition_rows(definitions: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for defn in definitions:
@@ -1886,6 +2022,7 @@ def _build_table_context(
     create_url: Optional[str],
     rows: list[dict[str, Any]],
     empty_message: str,
+    filter_options: Optional[dict[str, list[tuple[str, str]]]] = None,
 ) -> dict[str, Any]:
     config = LIST_TABLE_CONFIGS.get(model)
     if not config:
@@ -1894,6 +2031,38 @@ def _build_table_context(
     available_keys = [column["key"] for column in columns]
     selected = _resolve_table_columns(database, user, model, available_keys, config["default"])
     bulk_actions = config.get("bulk_actions", [])
+    filters_config = config.get("filters", [])
+    sortable_columns = config.get("sortable", [])
+
+    # Build filters with current values and options
+    table_filters: list[dict[str, Any]] = []
+    for filter_cfg in filters_config:
+        key = filter_cfg["key"]
+        current_value = request.query_params.get(key, "")
+        # Try filter_options first, then fall back to static options in config
+        if filter_options and key in filter_options:
+            options = filter_options[key]
+        else:
+            options = filter_cfg.get("options", [])
+        table_filters.append({
+            "key": key,
+            "label": filter_cfg["label"],
+            "type": filter_cfg.get("type", "select"),
+            "options": options,
+            "value": current_value,
+        })
+
+    # Parse sort params from URL (format: sort=col1,-col2 for asc/desc)
+    sort_param = request.query_params.get("sort", "")
+    sort_columns: list[dict[str, str]] = []
+    if sort_param:
+        for part in sort_param.split(","):
+            part = part.strip()
+            if part.startswith("-"):
+                sort_columns.append({"key": part[1:], "dir": "desc"})
+            elif part:
+                sort_columns.append({"key": part, "dir": "asc"})
+
     return {
         "table_model": model,
         "table_title": title,
@@ -1917,6 +2086,9 @@ def _build_table_context(
         "table_search_query": request.query_params.get("q", "").strip(),
         "table_search_placeholder": "Search",
         "table_bulk_actions": bulk_actions,
+        "table_filters": table_filters,
+        "table_sortable": sortable_columns,
+        "table_sort_columns": sort_columns,
     }
 
 
@@ -3630,6 +3802,77 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             password_hash=password_hash,
             salt=salt,
         )
+
+    # -------------------------------------------------------------------------
+    # Agent Wakes API (must be before catch-all /api/{model} route)
+    # -------------------------------------------------------------------------
+
+    @app.get("/api/agent-wakes")
+    async def api_list_agent_wakes(
+        status: Optional[str] = None,
+        agent_session_id: Optional[str] = None,
+        user: str = Depends(_require_login),
+    ) -> dict:
+        """List agent wakes with optional filters."""
+        wakes = database.list_agent_wakes(
+            agent_session_id=agent_session_id,
+            status=status,
+        )
+        return {
+            "wakes": [{
+                "id": w.id,
+                "agent_session_id": w.agent_session_id,
+                "created_at": w.created_at,
+                "wake_at": w.wake_at,
+                "duration_seconds": w.duration_seconds,
+                "context": w.context,
+                "status": w.status,
+                "fired_at": w.fired_at,
+                "cancelled_at": w.cancelled_at,
+                "cancelled_by": w.cancelled_by,
+                "updated_at": w.updated_at,
+            } for w in wakes]
+        }
+
+    @app.get("/api/agent-wakes/{wake_id}")
+    async def api_get_agent_wake(wake_id: str, user: str = Depends(_require_login)) -> dict:
+        """Get a single agent wake by ID."""
+        wake = database.get_agent_wake(wake_id)
+        if not wake:
+            raise HTTPException(status_code=404, detail="Agent wake not found")
+        return {
+            "id": wake.id,
+            "agent_session_id": wake.agent_session_id,
+            "created_at": wake.created_at,
+            "wake_at": wake.wake_at,
+            "duration_seconds": wake.duration_seconds,
+            "context": wake.context,
+            "status": wake.status,
+            "fired_at": wake.fired_at,
+            "cancelled_at": wake.cancelled_at,
+            "cancelled_by": wake.cancelled_by,
+            "updated_at": wake.updated_at,
+        }
+
+    @app.post("/api/agent-wakes/{wake_id}/cancel")
+    async def api_cancel_agent_wake(wake_id: str, user: str = Depends(_require_login)) -> dict:
+        """Cancel a pending agent wake."""
+        wake = database.get_agent_wake(wake_id)
+        if not wake:
+            raise HTTPException(status_code=404, detail="Agent wake not found")
+        if wake.status != "pending":
+            raise HTTPException(status_code=400, detail="Can only cancel pending wakes")
+        database.cancel_agent_wake(wake_id, "user")
+        return {"ok": True, "wake_id": wake_id}
+
+    @app.post("/api/sessions/{session_id}/clear-wakes")
+    async def api_clear_session_wakes(session_id: str, user: str = Depends(_require_login)) -> dict:
+        """Cancel all pending wakes for a session."""
+        session = database.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        count = database.cancel_agent_wakes_for_session(session_id, "user")
+        return {"ok": True, "cancelled": count, "session_id": session_id}
 
     @app.get("/api/{model}")
     async def api_list(model: str, request: Request) -> dict[str, Any]:
@@ -6591,6 +6834,72 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.delete_session(session_id)
         return RedirectResponse("/ui/sessions", status_code=303)
 
+    @app.get("/ui/agent-wakes")
+    def agent_wakes_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        status_filter = request.query_params.get("status")
+        wakes = database.list_agent_wakes(status=status_filter) if status_filter else database.list_agent_wakes()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        sessions = database.list_sessions()
+        session_lookup = {s.id: s.id[:8] + "..." for s in sessions}
+
+        # Build filter options
+        filter_options = {
+            "status": [
+                ("", "All"),
+                ("pending", "Pending"),
+                ("fired", "Fired"),
+                ("cancelled", "Cancelled"),
+            ],
+        }
+
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="agent_wakes",
+            title="Agent Wakes",
+            description="Scheduled agent wake-up timers.",
+            create_label=None,
+            create_url=None,
+            rows=_build_agent_wake_rows(wakes, session_lookup),
+            empty_message="No agent wakes yet.",
+            filter_options=filter_options,
+        )
+        return _render_template(
+            request,
+            "agent_wakes.html",
+            {
+                "title": "Agent Wakes",
+                "active_nav": "agent_wakes",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/agent-wakes/{wake_id}")
+    def agent_wake_detail_ui(wake_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        wake = database.get_agent_wake(wake_id)
+        if not wake:
+            raise HTTPException(status_code=404, detail="Agent wake not found")
+        session = database.get_session(wake.agent_session_id)
+        return _render_template(
+            request,
+            "agent_wake_detail.html",
+            {
+                "title": "Agent Wake Detail",
+                "active_nav": "agent_wakes",
+                "growl_message": None,
+                "wake": wake,
+                "session": session,
+                "duration_label": _format_duration(wake.duration_seconds),
+            },
+        )
+
+    @app.post("/agent-wakes/{wake_id}/cancel")
+    async def cancel_agent_wake_ui(wake_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.cancel_agent_wake(wake_id, "user")
+        return RedirectResponse(f"/ui/agent-wakes/{wake_id}", status_code=303)
+
     @app.get("/logs/tail")
     def tail_logs(limit: int = Query(default=100, ge=1, le=1000), user: str = Depends(_require_login)) -> dict[str, Any]:
         return {"entries": [], "limit": limit}
@@ -7478,7 +7787,24 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.get("/ui/tickets")
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        tickets = database.list_tickets()
+        # Extract filter params
+        filter_project_id = request.query_params.get("project_id", "").strip() or None
+
+        # Extract sort params
+        sort_param = request.query_params.get("sort", "")
+        order_by: list[tuple[str, str]] = []
+        sortable_cols = LIST_TABLE_CONFIGS["tickets"].get("sortable", [])
+        if sort_param:
+            for part in sort_param.split(","):
+                part = part.strip()
+                if part.startswith("-"):
+                    col = part[1:]
+                    if col in sortable_cols:
+                        order_by.append((col, "desc"))
+                elif part and part in sortable_cols:
+                    order_by.append((part, "asc"))
+
+        tickets = database.list_tickets(project_id=filter_project_id, order_by=order_by if order_by else None)
         projects = database.list_projects()
         agents = database.list_agents()
         users = database.list_users()
@@ -7486,6 +7812,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         agent_lookup = {agent.id: agent.name for agent in agents}
         user_lookup = {u.id: u.username for u in users}
         growl_message = _growl_message(request.query_params.get("saved"))
+
+        # Build filter options for dropdowns
+        filter_options = {
+            "project_id": [("", "All Projects")] + [(p.id, p.name) for p in projects],
+        }
+
         table_context = _build_table_context(
             database=database,
             request=request,
@@ -7497,6 +7829,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             create_url="/ui/tickets/create?return_to=/ui/tickets",
             rows=_build_ticket_rows(tickets, project_lookup, agent_lookup, user_lookup),
             empty_message="No tickets yet.",
+            filter_options=filter_options,
         )
         return _render_template(
             request,

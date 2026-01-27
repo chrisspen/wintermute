@@ -465,6 +465,21 @@ class ChannelRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class AgentWakeRecord:
+    id: str
+    agent_session_id: str
+    created_at: str
+    wake_at: str
+    duration_seconds: int
+    context: Optional[str]
+    status: str # pending, fired, cancelled
+    fired_at: Optional[str]
+    cancelled_at: Optional[str]
+    cancelled_by: Optional[str] # user, agent, system
+    updated_at: str
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -888,6 +903,26 @@ class ChannelModel(Base):
     external_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class AgentWakeModel(Base):
+    __tablename__ = "agent_wakes"
+    __table_args__ = (
+        Index("ix_agent_wakes_agent_session_id", "agent_session_id"),
+        Index("ix_agent_wakes_status_wake_at", "status", "wake_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agent_session_id: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    wake_at: Mapped[str] = mapped_column(String, nullable=False)
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False) # pending, fired, cancelled
+    fired_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    cancelled_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    cancelled_by: Mapped[Optional[str]] = mapped_column(String, nullable=True) # user, agent, system
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
@@ -2591,7 +2626,12 @@ class Database:
             project_symbol=project_symbol,
         )
 
-    def list_tickets(self, project_id: Optional[str] = None, sprint_id: Optional[str] = None) -> list[TicketRecord]:
+    def list_tickets(
+        self,
+        project_id: Optional[str] = None,
+        sprint_id: Optional[str] = None,
+        order_by: Optional[list[tuple[str, str]]] = None,
+    ) -> list[TicketRecord]:
         with self.session() as session:
             # Join with projects to get symbol for ticket name
             stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id, isouter=True)
@@ -2599,7 +2639,18 @@ class Database:
                 stmt = stmt.where(TicketModel.project_id == project_id)
             if sprint_id:
                 stmt = stmt.where(TicketModel.sprint_id == sprint_id)
-            results = session.execute(stmt.order_by(TicketModel.created_at.desc())).all()
+            # Apply custom ordering if provided
+            if order_by:
+                for col_name, direction in order_by:
+                    col = getattr(TicketModel, col_name, None)
+                    if col is not None:
+                        if direction == "desc":
+                            stmt = stmt.order_by(col.desc())
+                        else:
+                            stmt = stmt.order_by(col.asc())
+            else:
+                stmt = stmt.order_by(TicketModel.created_at.desc())
+            results = session.execute(stmt).all()
             return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:
@@ -3934,6 +3985,157 @@ class Database:
     def delete_channel(self, channel_id: str) -> None:
         with self.session() as session:
             session.query(ChannelModel).filter(ChannelModel.id == channel_id).delete()
+
+    # -------------------------------------------------------------------------
+    # AgentWake CRUD
+    # -------------------------------------------------------------------------
+
+    def list_agent_wakes(
+        self,
+        agent_session_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> list[AgentWakeRecord]:
+        with self.session() as session:
+            stmt = select(AgentWakeModel).order_by(AgentWakeModel.wake_at.desc())
+            if agent_session_id:
+                stmt = stmt.where(AgentWakeModel.agent_session_id == agent_session_id)
+            if status:
+                stmt = stmt.where(AgentWakeModel.status == status)
+            rows = session.execute(stmt).scalars().all()
+        return [
+            AgentWakeRecord(
+                id=row.id,
+                agent_session_id=row.agent_session_id,
+                created_at=row.created_at,
+                wake_at=row.wake_at,
+                duration_seconds=row.duration_seconds,
+                context=row.context,
+                status=row.status,
+                fired_at=row.fired_at,
+                cancelled_at=row.cancelled_at,
+                cancelled_by=row.cancelled_by,
+                updated_at=row.updated_at,
+            ) for row in rows
+        ]
+
+    def get_agent_wake(self, wake_id: str) -> Optional[AgentWakeRecord]:
+        with self.session() as session:
+            row = session.get(AgentWakeModel, wake_id)
+        if not row:
+            return None
+        return AgentWakeRecord(
+            id=row.id,
+            agent_session_id=row.agent_session_id,
+            created_at=row.created_at,
+            wake_at=row.wake_at,
+            duration_seconds=row.duration_seconds,
+            context=row.context,
+            status=row.status,
+            fired_at=row.fired_at,
+            cancelled_at=row.cancelled_at,
+            cancelled_by=row.cancelled_by,
+            updated_at=row.updated_at,
+        )
+
+    def get_pending_agent_wakes(self, before: Optional[str] = None) -> list[AgentWakeRecord]:
+        """Get all pending wakes that should fire by the given time."""
+        with self.session() as session:
+            stmt = select(AgentWakeModel).where(AgentWakeModel.status == "pending")
+            if before:
+                stmt = stmt.where(AgentWakeModel.wake_at <= before)
+            stmt = stmt.order_by(AgentWakeModel.wake_at.asc())
+            rows = session.execute(stmt).scalars().all()
+        return [
+            AgentWakeRecord(
+                id=row.id,
+                agent_session_id=row.agent_session_id,
+                created_at=row.created_at,
+                wake_at=row.wake_at,
+                duration_seconds=row.duration_seconds,
+                context=row.context,
+                status=row.status,
+                fired_at=row.fired_at,
+                cancelled_at=row.cancelled_at,
+                cancelled_by=row.cancelled_by,
+                updated_at=row.updated_at,
+            ) for row in rows
+        ]
+
+    def insert_agent_wake(
+        self,
+        wake_id: str,
+        agent_session_id: str,
+        wake_at: str,
+        duration_seconds: int,
+        context: Optional[str] = None,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                AgentWakeModel(
+                    id=wake_id,
+                    agent_session_id=agent_session_id,
+                    created_at=now,
+                    wake_at=wake_at,
+                    duration_seconds=duration_seconds,
+                    context=context,
+                    status="pending",
+                    fired_at=None,
+                    cancelled_at=None,
+                    cancelled_by=None,
+                    updated_at=now,
+                )
+            )
+
+    def fire_agent_wake(self, wake_id: str) -> bool:
+        """Mark an agent wake as fired. Returns True if successful."""
+        now = utc_now()
+        with self.session() as session:
+            row = session.get(AgentWakeModel, wake_id)
+            if not row or row.status != "pending":
+                return False
+            row.status = "fired"
+            row.fired_at = now
+            row.updated_at = now
+        return True
+
+    def cancel_agent_wake(self, wake_id: str, cancelled_by: str) -> bool:
+        """Cancel an agent wake. Returns True if successful."""
+        now = utc_now()
+        with self.session() as session:
+            row = session.get(AgentWakeModel, wake_id)
+            if not row or row.status != "pending":
+                return False
+            row.status = "cancelled"
+            row.cancelled_at = now
+            row.cancelled_by = cancelled_by
+            row.updated_at = now
+        return True
+
+    def cancel_agent_wakes_for_session(
+        self,
+        agent_session_id: str,
+        cancelled_by: str,
+    ) -> int:
+        """Cancel all pending wakes for a session. Returns count of cancelled wakes."""
+        now = utc_now()
+        with self.session() as session:
+            rows = session.execute(select(AgentWakeModel).where(
+                AgentWakeModel.agent_session_id == agent_session_id,
+                AgentWakeModel.status == "pending",
+            )).scalars().all()
+            count = 0
+            for row in rows:
+                row.status = "cancelled"
+                row.cancelled_at = now
+                row.cancelled_by = cancelled_by
+                row.updated_at = now
+                count += 1
+        return count
+
+    def delete_agent_wake(self, wake_id: str) -> None:
+        with self.session() as session:
+            session.query(AgentWakeModel).filter(AgentWakeModel.id == wake_id).delete()
 
     # -------------------------------------------------------------------------
     # SessionFileConfig CRUD

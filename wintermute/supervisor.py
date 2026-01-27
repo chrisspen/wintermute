@@ -31,6 +31,7 @@ from wintermute.sources.sessions import SessionSource
 from wintermute.sources.tickets import TicketAutoStartSource
 from wintermute.sources.standup import StandupSource
 from wintermute.sources.autostart import AutostartSource
+from wintermute.sources.agent_wakes import AgentWakeSource
 from wintermute.sources.registry import all_sources, register
 from wintermute.tools.base import ToolRegistry
 from wintermute.runner import build_ssh_spec, delete_repo_path, get_session_memory_usage_mb
@@ -472,6 +473,7 @@ async def main() -> None:
     register(TicketAutoStartSource())
     register(StandupSource())
     register(AutostartSource())
+    register(AgentWakeSource())
     db = Database()
 
     # Reset any work items stuck in "running" state from previous crash/kill
