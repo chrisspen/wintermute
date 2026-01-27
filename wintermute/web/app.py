@@ -1225,6 +1225,10 @@ def _build_ticket_rows(
             "id": {
                 "text": _display_value(ticket.id)
             },
+            "name": {
+                "text": ticket.name if ticket.name else "-",
+                "href": f"/ui/tickets/{ticket.id}/edit"
+            },
             "title": {
                 "text": _display_value(ticket.title),
                 "href": f"/ui/tickets/{ticket.id}/edit"

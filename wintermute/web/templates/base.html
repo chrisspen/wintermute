@@ -431,6 +431,8 @@
         var selectedSelect = modal.querySelector('[data-column-picker-selected]');
         var addButton = modal.querySelector('[data-column-picker-add]');
         var removeButton = modal.querySelector('[data-column-picker-remove]');
+        var upButton = modal.querySelector('[data-column-picker-up]');
+        var downButton = modal.querySelector('[data-column-picker-down]');
         var cancelButtons = modal.querySelectorAll('[data-column-picker-cancel]');
         var hiddenField = modal.querySelector('[data-column-picker-field]');
 
@@ -499,6 +501,34 @@
         removeButton.addEventListener('click', function () {
           moveSelected(selectedSelect, availableSelect);
         });
+
+        function moveSelectedUp() {
+          var options = selectedSelect.options;
+          for (var i = 1; i < options.length; i += 1) {
+            if (options[i].selected && !options[i - 1].selected) {
+              var prev = options[i - 1];
+              selectedSelect.insertBefore(options[i], prev);
+            }
+          }
+        }
+
+        function moveSelectedDown() {
+          var options = selectedSelect.options;
+          for (var i = options.length - 2; i >= 0; i -= 1) {
+            if (options[i].selected && !options[i + 1].selected) {
+              var next = options[i + 1];
+              selectedSelect.insertBefore(next, options[i]);
+            }
+          }
+        }
+
+        if (upButton) {
+          upButton.addEventListener('click', moveSelectedUp);
+        }
+
+        if (downButton) {
+          downButton.addEventListener('click', moveSelectedDown);
+        }
 
         cancelButtons.forEach(function (button) {
           button.addEventListener('click', function () {

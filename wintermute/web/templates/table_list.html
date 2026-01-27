@@ -210,6 +210,24 @@
           <option value="{{ column_key }}">{{ table_columns_lookup[column_key] }}</option>
           {% endfor %}
         </select>
+        <div class="column-picker-arrows col-start-4 row-start-2">
+          <button
+            type="button"
+            class="column-picker-button"
+            data-column-picker-up
+            aria-label="Move column up"
+          >
+            <i class="fa-solid fa-arrow-up"></i>
+          </button>
+          <button
+            type="button"
+            class="column-picker-button"
+            data-column-picker-down
+            aria-label="Move column down"
+          >
+            <i class="fa-solid fa-arrow-down"></i>
+          </button>
+        </div>
       </div>
       <div class="mt-6 flex items-center justify-end gap-2">
         <button
