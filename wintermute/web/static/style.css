@@ -115,6 +115,11 @@
         background: var(--input-bg);
         color: var(--ink);
       }
+      select[data-table-filter],
+      select[data-bulk-action-select] {
+        padding-top: 0;
+        padding-bottom: 0;
+      }
       input:focus,
       select:focus,
       textarea:focus {

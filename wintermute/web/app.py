@@ -183,6 +183,21 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
                 "type": "select",
                 "options_source": "projects",
             },
+            {
+                "key": "status",
+                "label": "Status",
+                "type": "select",
+            },
+        ],
+        "bulk_actions": [
+            {
+                "key": "close",
+                "label": "Close (set status to done)"
+            },
+            {
+                "key": "cancel",
+                "label": "Cancel (set status to cancelled)"
+            },
         ],
         "sortable": ["updated_at"],
         "columns": [
@@ -5945,6 +5960,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         } for row in comment_rows]
         last_comment_ts = comment_rows[-1].created_at if comment_rows else None
         created_by_user = database.get_user_by_id(ticket.created_by_id) if ticket.created_by_id else None
+        ticket_history = database.list_ticket_history(ticket_id)
         return _render_template(
             request,
             "ticket_edit.html",
@@ -5982,6 +5998,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "source_label": source_label,
                 "source_href": source_href,
                 "created_by_user": created_by_user,
+                "ticket_history": ticket_history,
             },
         )
 
@@ -6007,6 +6024,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         story_points = float(story_points_str) if story_points_str else None
         if not project_id or not title:
             raise HTTPException(status_code=400, detail="Missing ticket fields")
+        # Get user_id for history recording
+        current_user = database.get_user(user)
+        user_id = current_user.id if current_user else None
         database.update_ticket(
             ticket_id,
             project_id=project_id,
@@ -6025,8 +6045,42 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             priority=priority,
             hours=hours,
             story_points=story_points,
+            record_history_user_id=user_id,
         )
         return RedirectResponse(f"/ui/tickets/{ticket_id}/edit", status_code=303)
+
+    @app.post("/ui/tickets/bulk-action")
+    async def tickets_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        """Handle bulk actions on tickets (e.g., close)."""
+        form = await request.form()
+        action = str(form.get("action", "")).strip()
+        ids = form.getlist("ids")
+        return_to = str(form.get("return_to", "")).strip()
+        if not action or not ids:
+            raise HTTPException(status_code=400, detail="Missing action or ids")
+
+        updated_count = 0
+        if action == "close":
+            for ticket_id in ids:
+                ticket = database.get_ticket(ticket_id)
+                if not ticket:
+                    continue
+                database.update_ticket(ticket_id, status="done")
+                updated_count += 1
+        elif action == "cancel":
+            for ticket_id in ids:
+                ticket = database.get_ticket(ticket_id)
+                if not ticket:
+                    continue
+                database.update_ticket(ticket_id, status="cancelled")
+                updated_count += 1
+
+        # Redirect back to original page with filters preserved
+        if return_to and return_to.startswith("/ui/"):
+            # Add saved param to existing URL
+            separator = "&" if "?" in return_to else "?"
+            return RedirectResponse(f"{return_to}{separator}saved={updated_count}", status_code=303)
+        return RedirectResponse(f"/ui/tickets?saved={updated_count}", status_code=303)
 
     @app.post("/api/tickets/{ticket_id}/description")
     async def api_ticket_update_description(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -6051,7 +6105,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         updates: dict[str, Any] = {}
         if "status" in payload:
             status = str(payload["status"]).strip()
-            if status not in ("open", "in-progress", "needs-feedback", "done"):
+            if status not in ("open", "in-progress", "needs-feedback", "done", "cancelled"):
                 raise HTTPException(status_code=400, detail="Invalid status")
             updates["status"] = status
         if "priority" in payload:
@@ -6350,6 +6404,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         action = str(form.get("action", "")).strip()
         ids = form.getlist("ids")
+        return_to = str(form.get("return_to", "")).strip()
         if not action or not ids:
             raise HTTPException(status_code=400, detail="Missing action or ids")
 
@@ -6397,7 +6452,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 )
                 cloned_count += 1
 
-            return RedirectResponse(f"/ui/agents", status_code=303)
+            # Redirect back to original page with filters preserved
+            if return_to and return_to.startswith("/ui/"):
+                separator = "&" if "?" in return_to else "?"
+                return RedirectResponse(f"{return_to}{separator}saved={cloned_count}", status_code=303)
+            return RedirectResponse(f"/ui/agents?saved={cloned_count}", status_code=303)
 
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
 
@@ -7789,6 +7848,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         # Extract filter params
         filter_project_id = request.query_params.get("project_id", "").strip() or None
+        filter_status = request.query_params.get("status", "").strip() or None
 
         # Extract sort params
         sort_param = request.query_params.get("sort", "")
@@ -7804,7 +7864,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 elif part and part in sortable_cols:
                     order_by.append((part, "asc"))
 
-        tickets = database.list_tickets(project_id=filter_project_id, order_by=order_by if order_by else None)
+        tickets = database.list_tickets(project_id=filter_project_id, status=filter_status, order_by=order_by if order_by else None)
         projects = database.list_projects()
         agents = database.list_agents()
         users = database.list_users()
@@ -7816,6 +7876,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Build filter options for dropdowns
         filter_options = {
             "project_id": [("", "All Projects")] + [(p.id, p.name) for p in projects],
+            "status": [("", "All Statuses"), ("open", "Open"), ("in-progress", "In Progress"), ("needs-feedback", "Needs Feedback"), ("done", "Done"), ("cancelled", "Cancelled")],
         }
 
         table_context = _build_table_context(

@@ -59,7 +59,7 @@
 <div class="panel">
   <div class="grid section-gap">
     <div class="tile">
-      <h3>Edit Ticket{% if ticket.name %} {{ ticket.name }}{% endif %}</h3>
+      <h3>Edit Ticket{% if ticket.name %} {{ ticket.name }}{% endif %} <span style="font-weight: normal; color: var(--muted);">({{ ticket.status }})</span></h3>
       <form method="post" action="/tickets/{{ ticket.id }}/edit">
         <div class="field-group">
           <label>Project</label>
@@ -220,6 +220,7 @@
             <option value="in-progress" {% if ticket.status == 'in-progress' %}selected{% endif %}>in-progress</option>
             <option value="needs-feedback" {% if ticket.status == 'needs-feedback' %}selected{% endif %}>needs-feedback</option>
             <option value="done" {% if ticket.status == 'done' %}selected{% endif %}>done</option>
+            <option value="cancelled" {% if ticket.status == 'cancelled' %}selected{% endif %}>cancelled</option>
           </select>
         </div>
         {% if not is_external_ticket %}
@@ -256,6 +257,26 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+  <div class="grid section-gap">
+    <div class="tile wide">
+      <h3 style="cursor: pointer; user-select: none;" onclick="document.getElementById('history-list').classList.toggle('hidden'); this.querySelector('i').classList.toggle('fa-chevron-right'); this.querySelector('i').classList.toggle('fa-chevron-down');">
+        <i class="fa-solid fa-chevron-right" style="font-size: 12px; margin-right: 8px;"></i>History
+      </h3>
+      <ul id="history-list" class="hidden" style="list-style: none; padding: 0; margin: 0;">
+        {% for h in ticket_history %}
+        <li style="padding: 4px 0; border-bottom: 1px solid var(--edge); font-size: 13px;">
+          <span class="muted">{{ h.created_at }}</span>:
+          user <strong>{{ h.username or 'unknown' }}</strong>
+          changed <strong>{{ h.field_name }}</strong>
+          from <code style="background: var(--input-bg); padding: 2px 4px; border-radius: 3px;">{{ h.old_value or '(empty)' }}</code>
+          to <code style="background: var(--input-bg); padding: 2px 4px; border-radius: 3px;">{{ h.new_value or '(empty)' }}</code>
+        </li>
+        {% else %}
+        <li class="muted" style="padding: 4px 0;">No history recorded</li>
+        {% endfor %}
+      </ul>
     </div>
   </div>
   <div class="grid section-gap">

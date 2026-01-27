@@ -114,6 +114,7 @@ Agents can include special markers in their output to trigger Wintermute actions
 - `WM:STATUS:in-progress` — Set ticket status to in-progress
 - `WM:STATUS:needs-feedback` — Set ticket status to needs-feedback
 - `WM:STATUS:done` — Set ticket status to done
+- `WM:STATUS:cancelled` — Set ticket status to cancelled
 
 Example: When an agent completes a task, it should include:
 ```

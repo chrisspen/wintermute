@@ -813,7 +813,7 @@ def _process_wm_action(
             logger.warning("WM:STATUS missing value for ticket %s", ticket.id)
             return
         status = arg.lower()
-        valid_statuses = {"open", "in-progress", "needs-feedback", "done"}
+        valid_statuses = {"open", "in-progress", "needs-feedback", "done", "cancelled"}
         if status not in valid_statuses:
             logger.warning("WM:STATUS invalid status '%s' for ticket %s", status, ticket.id)
             return
