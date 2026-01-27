@@ -289,6 +289,19 @@ class TicketRecord:
 
 
 @dataclass(frozen=True)
+class TicketHistoryRecord:
+    id: str
+    ticket_id: str
+    user_id: Optional[str]
+    field_name: str
+    old_value: Optional[str]
+    new_value: Optional[str]
+    created_at: str
+    # Populated from join
+    username: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class CommentRecord:
     id: str
     ticket_id: Optional[str] # nullable for standalone agent session comments
@@ -584,7 +597,7 @@ class ProjectModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    symbol: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
     slack_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     prompt_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     max_repo_resources: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
@@ -653,6 +666,18 @@ class TicketModel(Base):
     created_by_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class TicketHistoryModel(Base):
+    __tablename__ = "ticket_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    field_name: Mapped[str] = mapped_column(String, nullable=False)
+    old_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class CommentModel(Base):
@@ -2630,6 +2655,7 @@ class Database:
         self,
         project_id: Optional[str] = None,
         sprint_id: Optional[str] = None,
+        status: Optional[str] = None,
         order_by: Optional[list[tuple[str, str]]] = None,
     ) -> list[TicketRecord]:
         with self.session() as session:
@@ -2639,6 +2665,8 @@ class Database:
                 stmt = stmt.where(TicketModel.project_id == project_id)
             if sprint_id:
                 stmt = stmt.where(TicketModel.sprint_id == sprint_id)
+            if status:
+                stmt = stmt.where(TicketModel.status == status)
             # Apply custom ordering if provided
             if order_by:
                 for col_name, direction in order_by:
@@ -2742,54 +2770,93 @@ class Database:
         clear_story_points: bool = False,
         clear_priority: bool = False,
         clear_vm_target: bool = False,
+        record_history_user_id: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(TicketModel, ticket_id)
             if not row:
                 return
+
+            # Helper to record history when user_id is provided
+            def record_change(field: str, old_val: Optional[str], new_val: Optional[str]) -> None:
+                if record_history_user_id is not None and old_val != new_val:
+                    session.add(
+                        TicketHistoryModel(
+                            id=str(uuid.uuid4()),
+                            ticket_id=ticket_id,
+                            user_id=record_history_user_id,
+                            field_name=field,
+                            old_value=old_val,
+                            new_value=new_val,
+                            created_at=utc_now(),
+                        )
+                    )
+
             if project_id is not None:
+                record_change("project_id", row.project_id, project_id)
                 row.project_id = project_id
             if agent_id is not None:
+                record_change("agent_id", row.agent_id, agent_id or None)
                 row.agent_id = agent_id or None
             if vm_target_id is not None:
+                record_change("vm_target_id", row.vm_target_id, vm_target_id or None)
                 row.vm_target_id = vm_target_id or None
             if clear_vm_target:
+                record_change("vm_target_id", row.vm_target_id, None)
                 row.vm_target_id = None
             if sprint_id is not None:
+                record_change("sprint_id", row.sprint_id, sprint_id or None)
                 row.sprint_id = sprint_id or None
             if clear_sprint:
+                record_change("sprint_id", row.sprint_id, None)
                 row.sprint_id = None
             if title is not None:
+                record_change("title", row.title, title)
                 row.title = title
             if description is not None:
+                record_change("description", row.description, description)
                 row.description = description
             if internal_notes is not None:
+                record_change("internal_notes", row.internal_notes, internal_notes)
                 row.internal_notes = internal_notes
             if assigned_to is not None:
+                record_change("assigned_to", row.assigned_to, assigned_to)
                 row.assigned_to = assigned_to
             if estimate is not None:
+                record_change("estimate", row.estimate, estimate)
                 row.estimate = estimate
             if hours is not None:
+                record_change("hours", row.hours, str(hours))
                 row.hours = str(hours)
             if clear_hours:
+                record_change("hours", row.hours, None)
                 row.hours = None
             if story_points is not None:
+                record_change("story_points", row.story_points, str(story_points))
                 row.story_points = str(story_points)
             if clear_story_points:
+                record_change("story_points", row.story_points, None)
                 row.story_points = None
             if priority is not None:
+                record_change("priority", row.priority, priority or None)
                 row.priority = priority or None
             if clear_priority:
+                record_change("priority", row.priority, None)
                 row.priority = None
             if status is not None:
+                record_change("status", row.status, status)
                 row.status = status
             if source_url is not None:
+                record_change("source_url", row.source_url, source_url)
                 row.source_url = source_url
             if github_comments_json is not None:
                 row.github_comments_json = github_comments_json
             if github_comments_fetched_at is not None:
                 row.github_comments_fetched_at = github_comments_fetched_at
             if auto_start is not None:
+                old_auto_start = "true" if row.auto_start else "false"
+                new_auto_start = "true" if auto_start else "false"
+                record_change("auto_start", old_auto_start, new_auto_start)
                 row.auto_start = 1 if auto_start else 0
             row.updated_at = utc_now()
 
@@ -3019,6 +3086,52 @@ class Database:
                 stmt = stmt.where(TicketModel.status.in_(status_filter))
             results = session.execute(stmt.order_by(TicketModel.created_at.desc())).all()
             return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
+
+    # ── Ticket History ─────────────────────────────────────────────────────────
+
+    def insert_ticket_history(
+        self,
+        history_id: str,
+        ticket_id: str,
+        user_id: Optional[str],
+        field_name: str,
+        old_value: Optional[str],
+        new_value: Optional[str],
+    ) -> None:
+        with self.session() as session:
+            session.add(
+                TicketHistoryModel(
+                    id=history_id,
+                    ticket_id=ticket_id,
+                    user_id=user_id,
+                    field_name=field_name,
+                    old_value=old_value,
+                    new_value=new_value,
+                    created_at=utc_now(),
+                )
+            )
+
+    def list_ticket_history(self, ticket_id: str) -> list[TicketHistoryRecord]:
+        with self.session() as session:
+            stmt = (
+                select(TicketHistoryModel,
+                       UserModel.username).outerjoin(UserModel,
+                                                     TicketHistoryModel.user_id == UserModel.id).where(TicketHistoryModel.ticket_id == ticket_id
+                                                                                                       ).order_by(TicketHistoryModel.created_at.asc())
+            )
+            results = session.execute(stmt).all()
+            return [
+                TicketHistoryRecord(
+                    id=row.id,
+                    ticket_id=row.ticket_id,
+                    user_id=row.user_id,
+                    field_name=row.field_name,
+                    old_value=row.old_value,
+                    new_value=row.new_value,
+                    created_at=row.created_at,
+                    username=username,
+                ) for row, username in results
+            ]
 
     def list_comments(
         self,
