@@ -132,6 +132,7 @@ class ProjectRecord:
     id: str
     name: str
     slug: str
+    symbol: Optional[str]
     slack_channel_id: Optional[str]
     prompt_template: Optional[str]
     max_repo_resources: int
@@ -272,9 +273,19 @@ class TicketRecord:
     github_comments_json: Optional[str]
     github_comments_fetched_at: Optional[str]
     auto_start: bool
+    count: Optional[int]
     created_by_id: Optional[str]
     created_at: str
     updated_at: str
+    # Populated when joined with project
+    project_symbol: Optional[str] = None
+
+    @property
+    def name(self) -> Optional[str]:
+        """Return ticket name like 'WM-3' (project symbol + count)."""
+        if self.project_symbol and self.count is not None:
+            return f"{self.project_symbol}-{self.count}"
+        return None
 
 
 @dataclass(frozen=True)
@@ -558,6 +569,7 @@ class ProjectModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     slack_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     prompt_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     max_repo_resources: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
@@ -622,6 +634,7 @@ class TicketModel(Base):
     github_comments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     github_comments_fetched_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     auto_start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_by_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
@@ -1452,6 +1465,7 @@ class Database:
             id=row.id,
             name=row.name,
             slug=row.slug,
+            symbol=row.symbol,
             slack_channel_id=row.slack_channel_id,
             prompt_template=row.prompt_template,
             max_repo_resources=row.max_repo_resources,
@@ -1498,6 +1512,7 @@ class Database:
         name: str,
         slug: str,
         slack_channel_id: Optional[str],
+        symbol: Optional[str] = None,
         prompt_template: Optional[str] = None,
         max_repo_resources: int = 3,
         repo_mode: Optional[str] = None,
@@ -1516,12 +1531,15 @@ class Database:
         poll_interval_seconds: int = 300,
     ) -> None:
         now = utc_now()
+        # Default symbol to uppercase slug if not provided
+        effective_symbol = symbol if symbol else slug.upper()
         with self.session() as session:
             session.add(
                 ProjectModel(
                     id=project_id,
                     name=name,
                     slug=slug,
+                    symbol=effective_symbol,
                     slack_channel_id=slack_channel_id,
                     prompt_template=prompt_template,
                     max_repo_resources=max_repo_resources,
@@ -1550,6 +1568,7 @@ class Database:
         *,
         name: Optional[str] = None,
         slug: Optional[str] = None,
+        symbol: Optional[str] = None,
         slack_channel_id: Optional[str] = None,
         prompt_template: Optional[str] = None,
         max_repo_resources: Optional[int] = None,
@@ -1576,6 +1595,8 @@ class Database:
                 row.name = name
             if slug is not None:
                 row.slug = slug
+            if symbol is not None:
+                row.symbol = symbol
             if slack_channel_id is not None:
                 row.slack_channel_id = slack_channel_id
             if prompt_template is not None:
@@ -2413,34 +2434,13 @@ class Database:
 
     def list_auto_start_tickets(self) -> list[TicketRecord]:
         with self.session() as session:
-            rows = session.execute(
-                select(TicketModel).where(TicketModel.auto_start == 1).where(TicketModel.status == "open").order_by(TicketModel.updated_at.desc())
-            ).scalars().all()
-        return [
-            TicketRecord(
-                id=row.id,
-                project_id=row.project_id,
-                agent_id=row.agent_id,
-                vm_target_id=row.vm_target_id,
-                sprint_id=row.sprint_id,
-                title=row.title,
-                description=row.description,
-                internal_notes=row.internal_notes,
-                assigned_to=row.assigned_to,
-                estimate=row.estimate,
-                hours=float(row.hours) if row.hours else None,
-                story_points=float(row.story_points) if row.story_points else None,
-                priority=row.priority,
-                status=row.status,
-                source_url=row.source_url,
-                github_comments_json=row.github_comments_json,
-                github_comments_fetched_at=row.github_comments_fetched_at,
-                auto_start=bool(row.auto_start),
-                created_by_id=row.created_by_id,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            ) for row in rows
-        ]
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel,
+                          ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id,
+                                                    isouter=True).where(TicketModel.auto_start == 1).where(TicketModel.status == "open"
+                                                                                                           ).order_by(TicketModel.updated_at.desc())
+            results = session.execute(stmt).all()
+        return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def list_gitlab_sources(self, project_id: Optional[str] = None) -> list[GitLabSourceRecord]:
         """List GitLab sources from projects with provider='gitlab'."""
@@ -2563,68 +2563,55 @@ class Database:
     def delete_gitlab_source(self, source_id: str) -> None:
         self.delete_issue_source(source_id)
 
+    def _ticket_record_from_row(self, row: TicketModel, project_symbol: Optional[str] = None) -> TicketRecord:
+        """Helper to build TicketRecord from a model row."""
+        return TicketRecord(
+            id=row.id,
+            project_id=row.project_id,
+            agent_id=row.agent_id,
+            vm_target_id=row.vm_target_id,
+            sprint_id=row.sprint_id,
+            title=row.title,
+            description=row.description,
+            internal_notes=row.internal_notes,
+            assigned_to=row.assigned_to,
+            estimate=row.estimate,
+            hours=float(row.hours) if row.hours else None,
+            story_points=float(row.story_points) if row.story_points else None,
+            priority=row.priority,
+            status=row.status,
+            source_url=row.source_url,
+            github_comments_json=row.github_comments_json,
+            github_comments_fetched_at=row.github_comments_fetched_at,
+            auto_start=bool(row.auto_start),
+            count=row.count,
+            created_by_id=row.created_by_id,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            project_symbol=project_symbol,
+        )
+
     def list_tickets(self, project_id: Optional[str] = None, sprint_id: Optional[str] = None) -> list[TicketRecord]:
         with self.session() as session:
-            stmt = select(TicketModel)
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id, isouter=True)
             if project_id:
                 stmt = stmt.where(TicketModel.project_id == project_id)
             if sprint_id:
                 stmt = stmt.where(TicketModel.sprint_id == sprint_id)
-            rows = session.execute(stmt.order_by(TicketModel.created_at.desc())).scalars().all()
-            return [
-                TicketRecord(
-                    id=row.id,
-                    project_id=row.project_id,
-                    agent_id=row.agent_id,
-                    vm_target_id=row.vm_target_id,
-                    sprint_id=row.sprint_id,
-                    title=row.title,
-                    description=row.description,
-                    internal_notes=row.internal_notes,
-                    assigned_to=row.assigned_to,
-                    estimate=row.estimate,
-                    hours=float(row.hours) if row.hours else None,
-                    story_points=float(row.story_points) if row.story_points else None,
-                    priority=row.priority,
-                    status=row.status,
-                    source_url=row.source_url,
-                    github_comments_json=row.github_comments_json,
-                    github_comments_fetched_at=row.github_comments_fetched_at,
-                    auto_start=bool(row.auto_start),
-                    created_by_id=row.created_by_id,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                ) for row in rows
-            ]
+            results = session.execute(stmt.order_by(TicketModel.created_at.desc())).all()
+            return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:
         with self.session() as session:
-            row = session.get(TicketModel, ticket_id)
-            if not row:
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id,
+                                                                 isouter=True).where(TicketModel.id == ticket_id)
+            result = session.execute(stmt).first()
+            if not result:
                 return None
-            return TicketRecord(
-                id=row.id,
-                project_id=row.project_id,
-                agent_id=row.agent_id,
-                vm_target_id=row.vm_target_id,
-                sprint_id=row.sprint_id,
-                title=row.title,
-                description=row.description,
-                internal_notes=row.internal_notes,
-                assigned_to=row.assigned_to,
-                estimate=row.estimate,
-                hours=float(row.hours) if row.hours else None,
-                story_points=float(row.story_points) if row.story_points else None,
-                priority=row.priority,
-                status=row.status,
-                source_url=row.source_url,
-                github_comments_json=row.github_comments_json,
-                github_comments_fetched_at=row.github_comments_fetched_at,
-                auto_start=bool(row.auto_start),
-                created_by_id=row.created_by_id,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
+            row, symbol = result
+            return self._ticket_record_from_row(row, symbol)
 
     def insert_ticket(
         self,
@@ -2648,6 +2635,9 @@ class Database:
     ) -> None:
         now = utc_now()
         with self.session() as session:
+            # Get next count for this project
+            max_count = session.execute(select(func.max(TicketModel.count)).where(TicketModel.project_id == project_id)).scalar() or 0
+            next_count = max_count + 1
             session.add(
                 TicketModel(
                     id=ticket_id,
@@ -2668,6 +2658,7 @@ class Database:
                     github_comments_json=None,
                     github_comments_fetched_at=None,
                     auto_start=1 if auto_start else 0,
+                    count=next_count,
                     created_by_id=created_by_id,
                     created_at=now,
                     updated_at=now,
@@ -2958,69 +2949,25 @@ class Database:
             ticket_ids = session.execute(select(TicketSprintModel.ticket_id).where(TicketSprintModel.sprint_id == sprint_id)).scalars().all()
             if not ticket_ids:
                 return []
-            rows = session.execute(select(TicketModel).where(TicketModel.id.in_(ticket_ids)).order_by(TicketModel.created_at.desc())).scalars().all()
-            return [
-                TicketRecord(
-                    id=row.id,
-                    project_id=row.project_id,
-                    agent_id=row.agent_id,
-                    vm_target_id=row.vm_target_id,
-                    sprint_id=row.sprint_id,
-                    title=row.title,
-                    description=row.description,
-                    internal_notes=row.internal_notes,
-                    assigned_to=row.assigned_to,
-                    estimate=row.estimate,
-                    hours=float(row.hours) if row.hours else None,
-                    story_points=float(row.story_points) if row.story_points else None,
-                    priority=row.priority,
-                    status=row.status,
-                    source_url=row.source_url,
-                    github_comments_json=row.github_comments_json,
-                    github_comments_fetched_at=row.github_comments_fetched_at,
-                    auto_start=bool(row.auto_start),
-                    created_by_id=row.created_by_id,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                ) for row in rows
-            ]
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id,
+                                                                 isouter=True).where(TicketModel.id.in_(ticket_ids)).order_by(TicketModel.created_at.desc())
+            results = session.execute(stmt).all()
+            return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def list_tickets_not_in_sprint(self, sprint_id: str, status_filter: Optional[list[str]] = None) -> list[TicketRecord]:
         """List all tickets not in the given sprint, optionally filtered by status."""
         with self.session() as session:
             # Get ticket IDs already in this sprint
             in_sprint_ids = session.execute(select(TicketSprintModel.ticket_id).where(TicketSprintModel.sprint_id == sprint_id)).scalars().all()
-            stmt = select(TicketModel)
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id, isouter=True)
             if in_sprint_ids:
                 stmt = stmt.where(TicketModel.id.notin_(in_sprint_ids))
             if status_filter:
                 stmt = stmt.where(TicketModel.status.in_(status_filter))
-            rows = session.execute(stmt.order_by(TicketModel.created_at.desc())).scalars().all()
-            return [
-                TicketRecord(
-                    id=row.id,
-                    project_id=row.project_id,
-                    agent_id=row.agent_id,
-                    vm_target_id=row.vm_target_id,
-                    sprint_id=row.sprint_id,
-                    title=row.title,
-                    description=row.description,
-                    internal_notes=row.internal_notes,
-                    assigned_to=row.assigned_to,
-                    estimate=row.estimate,
-                    hours=float(row.hours) if row.hours else None,
-                    story_points=float(row.story_points) if row.story_points else None,
-                    priority=row.priority,
-                    status=row.status,
-                    source_url=row.source_url,
-                    github_comments_json=row.github_comments_json,
-                    github_comments_fetched_at=row.github_comments_fetched_at,
-                    auto_start=bool(row.auto_start),
-                    created_by_id=row.created_by_id,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                ) for row in rows
-            ]
+            results = session.execute(stmt.order_by(TicketModel.created_at.desc())).all()
+            return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def list_comments(
         self,

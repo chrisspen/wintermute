@@ -15,6 +15,11 @@
           <input type="text" name="slug" id="project-slug" value="{{ project.slug }}" required />
         </div>
         <div class="field-group">
+          <label>Symbol</label>
+          <input type="text" name="symbol" value="{{ project.symbol or '' }}" placeholder="e.g. WM" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Short abbreviation for ticket names (e.g., WM-1). Defaults to uppercase slug.</p>
+        </div>
+        <div class="field-group">
           <label>Slack Channel ID</label>
           <input type="text" name="slack_channel_id" value="{{ project.slack_channel_id or '' }}" />
         </div>

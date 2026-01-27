@@ -175,12 +175,17 @@ API_PERMISSION_ACTIONS = ["create", "read", "update", "delete"]
 
 LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
     "tickets": {
-        "default": ["title", "project_id", "status"],
+        "default": ["name", "title", "project_id", "status"],
         "columns": [
             {
                 "key": "id",
                 "label": "ID",
                 "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Name",
+                "cell_class": "font-mono text-sm"
             },
             {
                 "key": "title",
@@ -2417,6 +2422,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             data = asdict(record)
             if isinstance(data.get("checkpoint"), (dict, list)):
                 data["checkpoint"] = data["checkpoint"]
+            # Include computed property TicketRecord.name if present
+            if hasattr(record, "name") and isinstance(getattr(type(record), "name", None), property):
+                data["name"] = record.name
             return data
         return dict(record)
 
@@ -5181,6 +5189,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not name:
             raise HTTPException(status_code=400, detail="Missing project name")
         slug = slug_raw or _slugify(name)
+        symbol = str(form.get("symbol", "")).strip() or None
         channel_name = slug
         channel_id = None
         prompt_template = str(form.get("prompt_template", "")).strip() or None
@@ -5256,8 +5265,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             name,
             slug,
             channel_id,
-            prompt_template,
-            max_repo_resources,
+            symbol=symbol,
+            prompt_template=prompt_template,
+            max_repo_resources=max_repo_resources,
             repo_mode=repo_mode,
             repo_path=repo_path,
             repo_url=repo_url,
@@ -5385,6 +5395,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         name = str(form.get("name", "")).strip()
         slug = str(form.get("slug", "")).strip()
+        symbol = str(form.get("symbol", "")).strip() or None
         channel_id = str(form.get("slack_channel_id", "")).strip() or None
         prompt_template = str(form.get("prompt_template", "")).strip() or None
         max_repo_raw = str(form.get("max_repo_resources", "")).strip()
@@ -5414,6 +5425,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             project_id,
             name=name,
             slug=slug,
+            symbol=symbol,
             slack_channel_id=channel_id,
             prompt_template=prompt_template,
             max_repo_resources=max_repo_resources,

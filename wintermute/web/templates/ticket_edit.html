@@ -59,7 +59,7 @@
 <div class="panel">
   <div class="grid section-gap">
     <div class="tile">
-      <h3>Edit Ticket</h3>
+      <h3>Edit Ticket{% if ticket.name %} {{ ticket.name }}{% endif %}</h3>
       <form method="post" action="/tickets/{{ ticket.id }}/edit">
         <div class="field-group">
           <label>Project</label>
