@@ -342,11 +342,11 @@ class SessionFileSyncTests(unittest.TestCase):
 
             if "mktemp" in cmd_str:
                 result.stdout = "/tmp/agent_test-agent_mock123\n"
-            elif "scp" in cmd_str and "-r" in cmd:
+            elif "scp" in cmd_str:
                 # Find the local destination path from the command
-                # SCP command format: scp -P port ... -r user@host:remote/. local/
+                # SCP command format: scp -P port ... [-r] user@host:remote... local/
                 for i, part in enumerate(cmd):
-                    if part.endswith("/") and not "@" in part:
+                    if part.endswith("/") and "@" not in part:
                         local_dir = part.rstrip("/")
                         # Write the mock files to the local temp dir
                         for filename, content in files_content.items():
