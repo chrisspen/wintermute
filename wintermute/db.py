@@ -2591,7 +2591,12 @@ class Database:
             project_symbol=project_symbol,
         )
 
-    def list_tickets(self, project_id: Optional[str] = None, sprint_id: Optional[str] = None) -> list[TicketRecord]:
+    def list_tickets(
+        self,
+        project_id: Optional[str] = None,
+        sprint_id: Optional[str] = None,
+        order_by: Optional[list[tuple[str, str]]] = None,
+    ) -> list[TicketRecord]:
         with self.session() as session:
             # Join with projects to get symbol for ticket name
             stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id, isouter=True)
@@ -2599,7 +2604,18 @@ class Database:
                 stmt = stmt.where(TicketModel.project_id == project_id)
             if sprint_id:
                 stmt = stmt.where(TicketModel.sprint_id == sprint_id)
-            results = session.execute(stmt.order_by(TicketModel.created_at.desc())).all()
+            # Apply custom ordering if provided
+            if order_by:
+                for col_name, direction in order_by:
+                    col = getattr(TicketModel, col_name, None)
+                    if col is not None:
+                        if direction == "desc":
+                            stmt = stmt.order_by(col.desc())
+                        else:
+                            stmt = stmt.order_by(col.asc())
+            else:
+                stmt = stmt.order_by(TicketModel.created_at.desc())
+            results = session.execute(stmt).all()
             return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:

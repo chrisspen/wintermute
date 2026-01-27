@@ -176,6 +176,15 @@ API_PERMISSION_ACTIONS = ["create", "read", "update", "delete"]
 LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
     "tickets": {
         "default": ["name", "title", "project_id", "status"],
+        "filters": [
+            {
+                "key": "project_id",
+                "label": "Project",
+                "type": "select",
+                "options_source": "projects",
+            },
+        ],
+        "sortable": ["updated_at"],
         "columns": [
             {
                 "key": "id",
@@ -1886,6 +1895,7 @@ def _build_table_context(
     create_url: Optional[str],
     rows: list[dict[str, Any]],
     empty_message: str,
+    filter_options: Optional[dict[str, list[tuple[str, str]]]] = None,
 ) -> dict[str, Any]:
     config = LIST_TABLE_CONFIGS.get(model)
     if not config:
@@ -1894,6 +1904,34 @@ def _build_table_context(
     available_keys = [column["key"] for column in columns]
     selected = _resolve_table_columns(database, user, model, available_keys, config["default"])
     bulk_actions = config.get("bulk_actions", [])
+    filters_config = config.get("filters", [])
+    sortable_columns = config.get("sortable", [])
+
+    # Build filters with current values and options
+    table_filters: list[dict[str, Any]] = []
+    for filter_cfg in filters_config:
+        key = filter_cfg["key"]
+        current_value = request.query_params.get(key, "")
+        options = filter_options.get(key, []) if filter_options else []
+        table_filters.append({
+            "key": key,
+            "label": filter_cfg["label"],
+            "type": filter_cfg.get("type", "select"),
+            "options": options,
+            "value": current_value,
+        })
+
+    # Parse sort params from URL (format: sort=col1,-col2 for asc/desc)
+    sort_param = request.query_params.get("sort", "")
+    sort_columns: list[dict[str, str]] = []
+    if sort_param:
+        for part in sort_param.split(","):
+            part = part.strip()
+            if part.startswith("-"):
+                sort_columns.append({"key": part[1:], "dir": "desc"})
+            elif part:
+                sort_columns.append({"key": part, "dir": "asc"})
+
     return {
         "table_model": model,
         "table_title": title,
@@ -1917,6 +1955,9 @@ def _build_table_context(
         "table_search_query": request.query_params.get("q", "").strip(),
         "table_search_placeholder": "Search",
         "table_bulk_actions": bulk_actions,
+        "table_filters": table_filters,
+        "table_sortable": sortable_columns,
+        "table_sort_columns": sort_columns,
     }
 
 
@@ -7478,7 +7519,24 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.get("/ui/tickets")
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        tickets = database.list_tickets()
+        # Extract filter params
+        filter_project_id = request.query_params.get("project_id", "").strip() or None
+
+        # Extract sort params
+        sort_param = request.query_params.get("sort", "")
+        order_by: list[tuple[str, str]] = []
+        sortable_cols = LIST_TABLE_CONFIGS["tickets"].get("sortable", [])
+        if sort_param:
+            for part in sort_param.split(","):
+                part = part.strip()
+                if part.startswith("-"):
+                    col = part[1:]
+                    if col in sortable_cols:
+                        order_by.append((col, "desc"))
+                elif part and part in sortable_cols:
+                    order_by.append((part, "asc"))
+
+        tickets = database.list_tickets(project_id=filter_project_id, order_by=order_by if order_by else None)
         projects = database.list_projects()
         agents = database.list_agents()
         users = database.list_users()
@@ -7486,6 +7544,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         agent_lookup = {agent.id: agent.name for agent in agents}
         user_lookup = {u.id: u.username for u in users}
         growl_message = _growl_message(request.query_params.get("saved"))
+
+        # Build filter options for dropdowns
+        filter_options = {
+            "project_id": [("", "All Projects")] + [(p.id, p.name) for p in projects],
+        }
+
         table_context = _build_table_context(
             database=database,
             request=request,
@@ -7497,6 +7561,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             create_url="/ui/tickets/create?return_to=/ui/tickets",
             rows=_build_ticket_rows(tickets, project_lookup, agent_lookup, user_lookup),
             empty_message="No tickets yet.",
+            filter_options=filter_options,
         )
         return _render_template(
             request,

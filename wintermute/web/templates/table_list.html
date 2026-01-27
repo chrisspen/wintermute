@@ -42,6 +42,24 @@
     </div>
   </div>
 
+  {% if table_filters %}
+  <div class="flex flex-wrap items-center gap-3">
+    {% for filter in table_filters %}
+    <div class="flex items-center gap-2">
+      <label class="text-sm font-medium text-slate-600 dark:text-slate-400">{{ filter.label }}:</label>
+      <select
+        data-table-filter="{{ filter.key }}"
+        class="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 shadow-sm outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-emerald-500 dark:focus:ring-emerald-500/30"
+      >
+        {% for opt_val, opt_label in filter.options %}
+        <option value="{{ opt_val }}"{% if opt_val == filter.value %} selected{% endif %}>{{ opt_label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% if table_bulk_actions %}
   <div style="display: flex; align-items: center; gap: 12px;">
     <select
@@ -82,7 +100,31 @@
             </th>
             {% endif %}
             {% for column_key in table_selected_columns %}
-            <th class="px-4 py-3 text-left font-semibold">{{ table_columns_lookup[column_key] }}</th>
+            {% set is_sortable = column_key in table_sortable %}
+            {% set sort_info = namespace(dir=None, found=False) %}
+            {% for sc in table_sort_columns %}
+            {% if sc.key == column_key %}
+            {% set sort_info.dir = sc.dir %}
+            {% set sort_info.found = True %}
+            {% endif %}
+            {% endfor %}
+            <th class="px-4 py-3 text-left font-semibold{% if is_sortable %} cursor-pointer select-none{% endif %}"{% if is_sortable %} data-sortable-column="{{ column_key }}"{% endif %}>
+              <span class="inline-flex items-center gap-1">
+                {{ table_columns_lookup[column_key] }}
+                {% if is_sortable and sort_info.found %}
+                <span class="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                  {% if sort_info.dir == 'asc' %}
+                  <i class="fa-solid fa-arrow-up text-[10px]"></i>
+                  {% else %}
+                  <i class="fa-solid fa-arrow-down text-[10px]"></i>
+                  {% endif %}
+                  <button type="button" class="hover:text-red-500 dark:hover:text-red-400" data-remove-sort="{{ column_key }}" title="Remove sort"><i class="fa-solid fa-xmark text-[10px]"></i></button>
+                </span>
+                {% elif is_sortable %}
+                <i class="fa-solid fa-sort text-[10px] text-slate-300 dark:text-slate-600"></i>
+                {% endif %}
+              </span>
+            </th>
             {% endfor %}
           </tr>
         </thead>
@@ -247,4 +289,98 @@
     </form>
   </div>
 </div>
+{% endif %}
+
+{% if table_filters %}
+<script>
+(function() {
+  var filterSelects = document.querySelectorAll('[data-table-filter]');
+  filterSelects.forEach(function(select) {
+    select.addEventListener('change', function() {
+      var url = new URL(window.location.href);
+      var key = this.getAttribute('data-table-filter');
+      var value = this.value;
+      if (value) {
+        url.searchParams.set(key, value);
+      } else {
+        url.searchParams.delete(key);
+      }
+      window.location.href = url.toString();
+    });
+  });
+})();
+</script>
+{% endif %}
+
+{% if table_sortable %}
+<script>
+(function() {
+  // Parse current sort params
+  function parseSortParam() {
+    var url = new URL(window.location.href);
+    var sortStr = url.searchParams.get('sort') || '';
+    var cols = [];
+    if (sortStr) {
+      sortStr.split(',').forEach(function(part) {
+        part = part.trim();
+        if (part.startsWith('-')) {
+          cols.push({ key: part.slice(1), dir: 'desc' });
+        } else if (part) {
+          cols.push({ key: part, dir: 'asc' });
+        }
+      });
+    }
+    return cols;
+  }
+
+  function buildSortParam(cols) {
+    return cols.map(function(c) {
+      return c.dir === 'desc' ? '-' + c.key : c.key;
+    }).join(',');
+  }
+
+  function navigateWithSort(cols) {
+    var url = new URL(window.location.href);
+    var sortStr = buildSortParam(cols);
+    if (sortStr) {
+      url.searchParams.set('sort', sortStr);
+    } else {
+      url.searchParams.delete('sort');
+    }
+    window.location.href = url.toString();
+  }
+
+  // Handle column header clicks
+  document.querySelectorAll('[data-sortable-column]').forEach(function(th) {
+    th.addEventListener('click', function(e) {
+      // Don't trigger if clicking the remove button
+      if (e.target.closest('[data-remove-sort]')) return;
+      var key = th.getAttribute('data-sortable-column');
+      var cols = parseSortParam();
+      var existing = cols.findIndex(function(c) { return c.key === key; });
+      if (existing >= 0) {
+        // Toggle direction
+        cols[existing].dir = cols[existing].dir === 'asc' ? 'desc' : 'asc';
+        // Move to front
+        var col = cols.splice(existing, 1)[0];
+        cols.unshift(col);
+      } else {
+        // Add as first sort column (asc)
+        cols.unshift({ key: key, dir: 'asc' });
+      }
+      navigateWithSort(cols);
+    });
+  });
+
+  // Handle remove sort buttons
+  document.querySelectorAll('[data-remove-sort]').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var key = btn.getAttribute('data-remove-sort');
+      var cols = parseSortParam().filter(function(c) { return c.key !== key; });
+      navigateWithSort(cols);
+    });
+  });
+})();
+</script>
 {% endif %}
