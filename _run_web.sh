@@ -4,14 +4,17 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
 
+# Default venv location: ~/pyenv/wintermute
+DEFAULT_VENV="$HOME/pyenv/wintermute"
 VENV_DIR="${WINTERMUTE_VENV:-}"
 if [ -z "$VENV_DIR" ] && [ -n "${WINTERMUTE_AGENT_NAME:-}" ]; then
-  if [ -d ".${WINTERMUTE_AGENT_NAME}/.venv" ]; then
-    VENV_DIR=".${WINTERMUTE_AGENT_NAME}/.venv"
+  AGENT_VENV="$HOME/pyenv/wintermute-${WINTERMUTE_AGENT_NAME}"
+  if [ -d "$AGENT_VENV" ]; then
+    VENV_DIR="$AGENT_VENV"
   fi
 fi
 if [ -z "$VENV_DIR" ]; then
-  VENV_DIR=".venv"
+  VENV_DIR="$DEFAULT_VENV"
 fi
 
 if [ ! -d "$VENV_DIR" ]; then

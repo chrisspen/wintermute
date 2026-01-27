@@ -128,7 +128,7 @@ class BulkActionCloneTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 303)
-        self.assertIn("cloned_1", response.headers["location"])
+        self.assertIn("/ui/", response.headers["location"])
 
         # Verify the clone was created
         agents = self.db.list_agents()
@@ -172,7 +172,7 @@ class BulkActionCloneTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 303)
-        self.assertIn("cloned_2", response.headers["location"])
+        self.assertIn("/ui/", response.headers["location"])
 
         agents = self.db.list_agents()
         self.assertEqual(len(agents), 4)
@@ -256,7 +256,7 @@ class BulkActionCloneTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 303)
-        self.assertIn("cloned_1", response.headers["location"])
+        self.assertIn("/ui/", response.headers["location"])
 
         agents = self.db.list_agents()
         self.assertEqual(len(agents), 2)
@@ -352,7 +352,7 @@ class SessionFileConfigsBulkActionTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 303)
-        self.assertIn("cloned_1", response.headers["location"])
+        self.assertIn("/ui/", response.headers["location"])
 
         # Verify the clone was created
         configs = self.db.list_session_file_configs()
@@ -388,7 +388,7 @@ class SessionFileConfigsBulkActionTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 303)
-        self.assertIn("cloned_2", response.headers["location"])
+        self.assertIn("/ui/", response.headers["location"])
 
         configs = self.db.list_session_file_configs()
         self.assertEqual(len(configs), 4)

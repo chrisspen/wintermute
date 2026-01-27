@@ -1,6 +1,35 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+/* Expanded conversation modal */
+#conversation-tile.expanded {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  border-radius: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#conversation-tile.expanded #comment-list {
+  flex: 1;
+  max-height: none !important;
+  min-height: 0;
+  overflow-y: auto;
+}
+#conversation-tile.expanded .comment-form {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+#conversation-tile.expanded .comment-form textarea {
+  max-height: 150px;
+}
+</style>
   <div class="panel sticky-panel">
     <div class="agent-panel">
       <div class="agent-status">
@@ -30,15 +59,18 @@
 <div class="panel">
   <div class="grid section-gap">
     <div class="tile">
-      <h3>Edit Ticket</h3>
+      <h3>Edit Ticket{% if ticket.name %} {{ ticket.name }}{% endif %} <span style="font-weight: normal; color: var(--muted);">({{ ticket.status }})</span></h3>
       <form method="post" action="/tickets/{{ ticket.id }}/edit">
         <div class="field-group">
           <label>Project</label>
-          <select name="project_id" required>
-            {% for project in projects %}
-            <option value="{{ project.id }}" {% if project.id == ticket.project_id %}selected{% endif %}>{{ project.name }}</option>
-            {% endfor %}
-          </select>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <select name="project_id" id="project-select" required style="flex: 1;">
+              {% for project in projects %}
+              <option value="{{ project.id }}" {% if project.id == ticket.project_id %}selected{% endif %}>{{ project.name }}</option>
+              {% endfor %}
+            </select>
+            <a id="project-view-link" href="#" target="_blank" rel="noopener" style="white-space: nowrap; font-size: 13px;{% if not ticket.project_id %} display: none;{% endif %}">view</a>
+          </div>
         </div>
         <div class="field-group">
           <label>VM Mapping</label>
@@ -56,12 +88,28 @@
         </div>
         <div class="field-group">
           <label>Agent</label>
-          <select name="agent_id">
-            <option value="">(none)</option>
-            {% for agent in agents %}
-            <option value="{{ agent.id }}" {% if ticket.agent_id == agent.id %}selected{% endif %}>{{ agent.name }}</option>
-            {% endfor %}
-          </select>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <select name="agent_id" id="agent-select" style="flex: 1;">
+              <option value="">(none)</option>
+              {% for agent in agents %}
+              <option value="{{ agent.id }}" {% if ticket.agent_id == agent.id %}selected{% endif %}>{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
+              {% endfor %}
+            </select>
+            <a id="agent-view-link" href="#" target="_blank" rel="noopener" style="white-space: nowrap; font-size: 13px;{% if not ticket.agent_id %} display: none;{% endif %}">view</a>
+          </div>
+        </div>
+        <div class="field-group">
+          <label>VM Target</label>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <select name="vm_target_id" id="vm-target-select" style="flex: 1;">
+              <option value="">(none)</option>
+              {% for vm in vm_targets %}
+              <option value="{{ vm.id }}" {% if ticket.vm_target_id == vm.id %}selected{% endif %}>{{ vm.name }}</option>
+              {% endfor %}
+            </select>
+            <a id="vm-target-view-link" href="#" target="_blank" rel="noopener" style="white-space: nowrap; font-size: 13px;{% if not ticket.vm_target_id %} display: none;{% endif %}">view</a>
+          </div>
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Optional VM for DevOps actions related to this ticket.</p>
         </div>
         <div class="field-group">
           <label>Title</label>
@@ -120,7 +168,7 @@
             {% if agents %}
             <optgroup label="Agents">
               {% for agent in agents %}
-              <option value="agent:{{ agent.id }}" {% if ticket.assigned_to == ('agent:' ~ agent.id) %}selected{% endif %}>{{ agent.name }}</option>
+              <option value="agent:{{ agent.id }}" {% if ticket.assigned_to == ('agent:' ~ agent.id) %}selected{% endif %}>{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
               {% endfor %}
             </optgroup>
             {% endif %}
@@ -172,6 +220,7 @@
             <option value="in-progress" {% if ticket.status == 'in-progress' %}selected{% endif %}>in-progress</option>
             <option value="needs-feedback" {% if ticket.status == 'needs-feedback' %}selected{% endif %}>needs-feedback</option>
             <option value="done" {% if ticket.status == 'done' %}selected{% endif %}>done</option>
+            <option value="cancelled" {% if ticket.status == 'cancelled' %}selected{% endif %}>cancelled</option>
           </select>
         </div>
         {% if not is_external_ticket %}
@@ -212,12 +261,35 @@
   </div>
   <div class="grid section-gap">
     <div class="tile wide">
-      <div class="tile-header">
-        <h3>Linked Comments</h3>
+      <h3 style="cursor: pointer; user-select: none;" onclick="document.getElementById('history-list').classList.toggle('hidden'); this.querySelector('i').classList.toggle('fa-chevron-right'); this.querySelector('i').classList.toggle('fa-chevron-down');">
+        <i class="fa-solid fa-chevron-right" style="font-size: 12px; margin-right: 8px;"></i>History
+      </h3>
+      <ul id="history-list" class="hidden" style="list-style: none; padding: 0; margin: 0;">
+        {% for h in ticket_history %}
+        <li style="padding: 4px 0; border-bottom: 1px solid var(--edge); font-size: 13px;">
+          <span class="muted">{{ h.created_at }}</span>:
+          user <strong>{{ h.username or 'unknown' }}</strong>
+          changed <strong>{{ h.field_name }}</strong>
+          from <code style="background: var(--input-bg); padding: 2px 4px; border-radius: 3px;">{{ h.old_value or '(empty)' }}</code>
+          to <code style="background: var(--input-bg); padding: 2px 4px; border-radius: 3px;">{{ h.new_value or '(empty)' }}</code>
+        </li>
+        {% else %}
+        <li class="muted" style="padding: 4px 0;">No history recorded</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="grid section-gap">
+    <div class="tile wide" id="conversation-tile">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <h3 style="margin: 0;">Conversation</h3>
+        <button type="button" id="expand-conversation-btn" style="width: auto; background: transparent; border: none; padding: 4px 8px; cursor: pointer; color: var(--text);" title="Expand conversation (Esc to close)">
+          <i class="fa-solid fa-expand"></i>
+        </button>
       </div>
       <ul id="comment-list" data-since="{{ last_comment_ts or '' }}">
         {% for comment in comments %}
-        <li class="comment-entry">
+        <li class="comment-entry" data-id="{{ comment.id }}">
           <div class="comment-meta">
             <strong>{{ comment.author }}</strong>
             <span class="muted">{{ comment.created_at }}</span>
@@ -279,6 +351,28 @@
   </div>
 </div>
 <script src="/static/comment-stream.js"></script>
+<script>
+  // Reusable FK view link setup - call for any foreign key dropdown with a view link
+  function setupFkViewLink(selectId, linkId, urlPattern) {
+    const select = document.getElementById(selectId);
+    const link = document.getElementById(linkId);
+    if (!select || !link) return;
+    const updateLink = () => {
+      if (select.value) {
+        link.href = urlPattern.replace('{id}', select.value);
+        link.style.display = '';
+      } else {
+        link.style.display = 'none';
+      }
+    };
+    updateLink();
+    select.addEventListener('change', updateLink);
+  }
+  // Initialize FK view links
+  setupFkViewLink('project-select', 'project-view-link', '/ui/projects/{id}/edit');
+  setupFkViewLink('agent-select', 'agent-view-link', '/ui/agents/{id}/edit');
+  setupFkViewLink('vm-target-select', 'vm-target-view-link', '/ui/vms/{id}/edit');
+</script>
 <script>
   (() => {
     const listEl = document.getElementById("comment-list");
@@ -433,7 +527,8 @@
           }
           bodyEl.value = "";
         } else {
-          alert("Failed to send comment");
+          const data = await response.json().catch(() => ({}));
+          showErrorModal("Failed to send comment", data.detail || "An unexpected error occurred.");
         }
       });
     }
@@ -477,7 +572,8 @@
           method: "POST",
         });
         if (!response.ok) {
-          alert("Failed to stop session");
+          const data = await response.json().catch(() => ({}));
+          showErrorModal("Failed to stop session", data.detail || "An unexpected error occurred.");
           stopBtn.disabled = false;
           return;
         }
@@ -495,7 +591,8 @@
           method: "POST",
         });
         if (!response.ok) {
-          alert("Failed to start session");
+          const data = await response.json().catch(() => ({}));
+          showErrorModal("Failed to start session", data.detail || "An unexpected error occurred.");
           startBtn.disabled = false;
           return;
         }
@@ -533,8 +630,8 @@
             body: JSON.stringify({ description: descText.value || "" }),
           });
           if (!response.ok) {
-            const data = await response.json();
-            alert(data.detail || "Failed to save description");
+            const data = await response.json().catch(() => ({}));
+            showErrorModal("Failed to save description", data.detail || "An unexpected error occurred.");
             descSave.disabled = false;
             descEditButton.disabled = false;
             return;
@@ -546,7 +643,7 @@
           descEditButton.disabled = false;
           descSave.disabled = false;
         } catch (error) {
-          alert("Failed to save description");
+          showErrorModal("Failed to save description", error.message || "An unexpected error occurred.");
           descSave.disabled = false;
           descEditButton.disabled = false;
         }
@@ -580,7 +677,47 @@
           }, 1000);
         }
       } else {
-        alert("Failed to delete comment");
+        const data = await response.json().catch(() => ({}));
+        showErrorModal("Failed to delete comment", data.detail || "An unexpected error occurred.");
+      }
+    });
+
+    // Expand/collapse conversation panel
+    const conversationTile = document.getElementById("conversation-tile");
+    const expandBtn = document.getElementById("expand-conversation-btn");
+    const expandIcon = expandBtn ? expandBtn.querySelector("i") : null;
+
+    function toggleExpand() {
+      if (!conversationTile) return;
+      const isExpanded = conversationTile.classList.toggle("expanded");
+      if (expandIcon) {
+        expandIcon.className = isExpanded ? "fa-solid fa-xmark" : "fa-solid fa-expand";
+      }
+      expandBtn.title = isExpanded ? "Close (Esc)" : "Expand conversation (Esc to close)";
+      // Scroll to bottom when expanding
+      if (isExpanded && listEl) {
+        listEl.scrollTop = listEl.scrollHeight;
+      }
+    }
+
+    function collapseConversation() {
+      if (conversationTile && conversationTile.classList.contains("expanded")) {
+        conversationTile.classList.remove("expanded");
+        if (expandIcon) {
+          expandIcon.className = "fa-solid fa-expand";
+        }
+        expandBtn.title = "Expand conversation (Esc to close)";
+      }
+    }
+
+    if (expandBtn) {
+      expandBtn.addEventListener("click", toggleExpand);
+    }
+
+    // ESC key to collapse
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") {
+        collapseConversation();
       }
     });
   })();

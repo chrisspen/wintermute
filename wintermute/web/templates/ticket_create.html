@@ -20,9 +20,19 @@
           <select name="agent_id">
             <option value="">(none)</option>
             {% for agent in agents %}
-            <option value="{{ agent.id }}">{{ agent.name }}</option>
+            <option value="{{ agent.id }}">{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
             {% endfor %}
           </select>
+        </div>
+        <div class="field-group">
+          <label>VM Target</label>
+          <select name="vm_target_id">
+            <option value="">(none)</option>
+            {% for vm in vm_targets %}
+            <option value="{{ vm.id }}">{{ vm.name }}</option>
+            {% endfor %}
+          </select>
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Optional VM for DevOps actions related to this ticket.</p>
         </div>
         <div class="field-group">
           <label>Title</label>
@@ -54,7 +64,7 @@
             {% if agents %}
             <optgroup label="Agents">
               {% for agent in agents %}
-              <option value="agent:{{ agent.id }}">{{ agent.name }}</option>
+              <option value="agent:{{ agent.id }}">{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
               {% endfor %}
             </optgroup>
             {% endif %}

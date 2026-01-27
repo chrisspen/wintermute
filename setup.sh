@@ -4,9 +4,11 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 cd "$SCRIPT_DIR"
 
-VENV_DIR="${WINTERMUTE_VENV:-.venv}"
+# Default venv location: ~/pyenv/wintermute
+DEFAULT_VENV="$HOME/pyenv/wintermute"
+VENV_DIR="${WINTERMUTE_VENV:-$DEFAULT_VENV}"
 if [ "${1:-}" = "--agent-name" ] && [ -n "${2:-}" ]; then
-  VENV_DIR=".${2}/.venv"
+  VENV_DIR="$HOME/pyenv/wintermute-${2}"
   shift 2
 elif [ "${1:-}" = "--venv-dir" ] && [ -n "${2:-}" ]; then
   VENV_DIR="$2"
@@ -42,8 +44,14 @@ set +a
   #exit 1
 #fi
 
+# Ensure database directory exists
+DEFAULT_DB="$HOME/dbs/wintermute/wintermute.db"
+DB_PATH="${WINTERMUTE_DB:-$DEFAULT_DB}"
+DB_PATH="${DB_PATH/#\~/$HOME}"
+mkdir -p "$(dirname "$DB_PATH")"
+
 alembic upgrade head
 
-echo "Setup complete."
+echo "Setup complete. Venv: $VENV_DIR"
 echo "Run web: ./run_web.sh"
 echo "Run supervisor: ./run_supervisor.sh"

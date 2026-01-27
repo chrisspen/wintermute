@@ -11,10 +11,19 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Generator, Optional
 
-from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine, func, inspect, select, or_
+from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine, event, func, inspect, select, or_
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enable WAL mode for crash resilience."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
+
 
 DEFAULT_DB_PATH_ENV = "WINTERMUTE_DB"
 
@@ -123,6 +132,7 @@ class ProjectRecord:
     id: str
     name: str
     slug: str
+    symbol: Optional[str]
     slack_channel_id: Optional[str]
     prompt_template: Optional[str]
     max_repo_resources: int
@@ -248,6 +258,7 @@ class TicketRecord:
     id: str
     project_id: str
     agent_id: Optional[str]
+    vm_target_id: Optional[str]
     sprint_id: Optional[str]
     title: str
     description: Optional[str]
@@ -262,9 +273,32 @@ class TicketRecord:
     github_comments_json: Optional[str]
     github_comments_fetched_at: Optional[str]
     auto_start: bool
+    count: Optional[int]
     created_by_id: Optional[str]
     created_at: str
     updated_at: str
+    # Populated when joined with project
+    project_symbol: Optional[str] = None
+
+    @property
+    def name(self) -> Optional[str]:
+        """Return ticket name like 'WM-3' (project symbol + count)."""
+        if self.project_symbol and self.count is not None:
+            return f"{self.project_symbol}-{self.count}"
+        return None
+
+
+@dataclass(frozen=True)
+class TicketHistoryRecord:
+    id: str
+    ticket_id: str
+    user_id: Optional[str]
+    field_name: str
+    old_value: Optional[str]
+    new_value: Optional[str]
+    created_at: str
+    # Populated from join
+    username: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -336,6 +370,7 @@ class AgentRecord:
     initial_prompt: Optional[str]
     working_directory: Optional[str]
     session_directory: Optional[str]
+    autostart: bool
     created_at: str
     updated_at: str
 
@@ -443,6 +478,21 @@ class ChannelRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class AgentWakeRecord:
+    id: str
+    agent_session_id: str
+    created_at: str
+    wake_at: str
+    duration_seconds: int
+    context: Optional[str]
+    status: str # pending, fired, cancelled
+    fired_at: Optional[str]
+    cancelled_at: Optional[str]
+    cancelled_by: Optional[str] # user, agent, system
+    updated_at: str
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -547,6 +597,7 @@ class ProjectModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     slug: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    symbol: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
     slack_channel_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     prompt_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     max_repo_resources: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
@@ -596,6 +647,7 @@ class TicketModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    vm_target_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     sprint_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -610,9 +662,22 @@ class TicketModel(Base):
     github_comments_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     github_comments_fetched_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     auto_start: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_by_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class TicketHistoryModel(Base):
+    __tablename__ = "ticket_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    ticket_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    field_name: Mapped[str] = mapped_column(String, nullable=False)
+    old_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    new_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
 class CommentModel(Base):
@@ -744,6 +809,7 @@ class AgentModel(Base):
     initial_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     working_directory: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     session_directory: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    autostart: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -865,10 +931,30 @@ class ChannelModel(Base):
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class AgentWakeModel(Base):
+    __tablename__ = "agent_wakes"
+    __table_args__ = (
+        Index("ix_agent_wakes_agent_session_id", "agent_session_id"),
+        Index("ix_agent_wakes_status_wake_at", "status", "wake_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    agent_session_id: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    wake_at: Mapped[str] = mapped_column(String, nullable=False)
+    duration_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False) # pending, fired, cancelled
+    fired_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    cancelled_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    cancelled_by: Mapped[Optional[str]] = mapped_column(String, nullable=True) # user, agent, system
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class Database:
 
     def __init__(self, path: Optional[str] = None) -> None:
-        raw_path = path or os.environ.get(DEFAULT_DB_PATH_ENV, "./wintermute.db")
+        raw_path = path or os.environ.get(DEFAULT_DB_PATH_ENV, "~/dbs/wintermute/wintermute.db")
         self.path = os.path.expanduser(raw_path)
         self.engine: Engine = create_engine(f"sqlite:///{self.path}", future=True)
         self._session_factory = sessionmaker(bind=self.engine, future=True, expire_on_commit=False)
@@ -1439,6 +1525,7 @@ class Database:
             id=row.id,
             name=row.name,
             slug=row.slug,
+            symbol=row.symbol,
             slack_channel_id=row.slack_channel_id,
             prompt_template=row.prompt_template,
             max_repo_resources=row.max_repo_resources,
@@ -1485,6 +1572,7 @@ class Database:
         name: str,
         slug: str,
         slack_channel_id: Optional[str],
+        symbol: Optional[str] = None,
         prompt_template: Optional[str] = None,
         max_repo_resources: int = 3,
         repo_mode: Optional[str] = None,
@@ -1503,12 +1591,15 @@ class Database:
         poll_interval_seconds: int = 300,
     ) -> None:
         now = utc_now()
+        # Default symbol to uppercase slug if not provided
+        effective_symbol = symbol if symbol else slug.upper()
         with self.session() as session:
             session.add(
                 ProjectModel(
                     id=project_id,
                     name=name,
                     slug=slug,
+                    symbol=effective_symbol,
                     slack_channel_id=slack_channel_id,
                     prompt_template=prompt_template,
                     max_repo_resources=max_repo_resources,
@@ -1537,6 +1628,7 @@ class Database:
         *,
         name: Optional[str] = None,
         slug: Optional[str] = None,
+        symbol: Optional[str] = None,
         slack_channel_id: Optional[str] = None,
         prompt_template: Optional[str] = None,
         max_repo_resources: Optional[int] = None,
@@ -1563,6 +1655,8 @@ class Database:
                 row.name = name
             if slug is not None:
                 row.slug = slug
+            if symbol is not None:
+                row.symbol = symbol
             if slack_channel_id is not None:
                 row.slack_channel_id = slack_channel_id
             if prompt_template is not None:
@@ -2400,33 +2494,13 @@ class Database:
 
     def list_auto_start_tickets(self) -> list[TicketRecord]:
         with self.session() as session:
-            rows = session.execute(
-                select(TicketModel).where(TicketModel.auto_start == 1).where(TicketModel.status == "open").order_by(TicketModel.updated_at.desc())
-            ).scalars().all()
-        return [
-            TicketRecord(
-                id=row.id,
-                project_id=row.project_id,
-                agent_id=row.agent_id,
-                sprint_id=row.sprint_id,
-                title=row.title,
-                description=row.description,
-                internal_notes=row.internal_notes,
-                assigned_to=row.assigned_to,
-                estimate=row.estimate,
-                hours=float(row.hours) if row.hours else None,
-                story_points=float(row.story_points) if row.story_points else None,
-                priority=row.priority,
-                status=row.status,
-                source_url=row.source_url,
-                github_comments_json=row.github_comments_json,
-                github_comments_fetched_at=row.github_comments_fetched_at,
-                auto_start=bool(row.auto_start),
-                created_by_id=row.created_by_id,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            ) for row in rows
-        ]
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel,
+                          ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id,
+                                                    isouter=True).where(TicketModel.auto_start == 1).where(TicketModel.status == "open"
+                                                                                                           ).order_by(TicketModel.updated_at.desc())
+            results = session.execute(stmt).all()
+        return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def list_gitlab_sources(self, project_id: Optional[str] = None) -> list[GitLabSourceRecord]:
         """List GitLab sources from projects with provider='gitlab'."""
@@ -2549,66 +2623,74 @@ class Database:
     def delete_gitlab_source(self, source_id: str) -> None:
         self.delete_issue_source(source_id)
 
-    def list_tickets(self, project_id: Optional[str] = None, sprint_id: Optional[str] = None) -> list[TicketRecord]:
+    def _ticket_record_from_row(self, row: TicketModel, project_symbol: Optional[str] = None) -> TicketRecord:
+        """Helper to build TicketRecord from a model row."""
+        return TicketRecord(
+            id=row.id,
+            project_id=row.project_id,
+            agent_id=row.agent_id,
+            vm_target_id=row.vm_target_id,
+            sprint_id=row.sprint_id,
+            title=row.title,
+            description=row.description,
+            internal_notes=row.internal_notes,
+            assigned_to=row.assigned_to,
+            estimate=row.estimate,
+            hours=float(row.hours) if row.hours else None,
+            story_points=float(row.story_points) if row.story_points else None,
+            priority=row.priority,
+            status=row.status,
+            source_url=row.source_url,
+            github_comments_json=row.github_comments_json,
+            github_comments_fetched_at=row.github_comments_fetched_at,
+            auto_start=bool(row.auto_start),
+            count=row.count,
+            created_by_id=row.created_by_id,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+            project_symbol=project_symbol,
+        )
+
+    def list_tickets(
+        self,
+        project_id: Optional[str] = None,
+        sprint_id: Optional[str] = None,
+        status: Optional[str] = None,
+        order_by: Optional[list[tuple[str, str]]] = None,
+    ) -> list[TicketRecord]:
         with self.session() as session:
-            stmt = select(TicketModel)
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id, isouter=True)
             if project_id:
                 stmt = stmt.where(TicketModel.project_id == project_id)
             if sprint_id:
                 stmt = stmt.where(TicketModel.sprint_id == sprint_id)
-            rows = session.execute(stmt.order_by(TicketModel.created_at.desc())).scalars().all()
-            return [
-                TicketRecord(
-                    id=row.id,
-                    project_id=row.project_id,
-                    agent_id=row.agent_id,
-                    sprint_id=row.sprint_id,
-                    title=row.title,
-                    description=row.description,
-                    internal_notes=row.internal_notes,
-                    assigned_to=row.assigned_to,
-                    estimate=row.estimate,
-                    hours=float(row.hours) if row.hours else None,
-                    story_points=float(row.story_points) if row.story_points else None,
-                    priority=row.priority,
-                    status=row.status,
-                    source_url=row.source_url,
-                    github_comments_json=row.github_comments_json,
-                    github_comments_fetched_at=row.github_comments_fetched_at,
-                    auto_start=bool(row.auto_start),
-                    created_by_id=row.created_by_id,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                ) for row in rows
-            ]
+            if status:
+                stmt = stmt.where(TicketModel.status == status)
+            # Apply custom ordering if provided
+            if order_by:
+                for col_name, direction in order_by:
+                    col = getattr(TicketModel, col_name, None)
+                    if col is not None:
+                        if direction == "desc":
+                            stmt = stmt.order_by(col.desc())
+                        else:
+                            stmt = stmt.order_by(col.asc())
+            else:
+                stmt = stmt.order_by(TicketModel.created_at.desc())
+            results = session.execute(stmt).all()
+            return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def get_ticket(self, ticket_id: str) -> Optional[TicketRecord]:
         with self.session() as session:
-            row = session.get(TicketModel, ticket_id)
-            if not row:
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id,
+                                                                 isouter=True).where(TicketModel.id == ticket_id)
+            result = session.execute(stmt).first()
+            if not result:
                 return None
-            return TicketRecord(
-                id=row.id,
-                project_id=row.project_id,
-                agent_id=row.agent_id,
-                sprint_id=row.sprint_id,
-                title=row.title,
-                description=row.description,
-                internal_notes=row.internal_notes,
-                assigned_to=row.assigned_to,
-                estimate=row.estimate,
-                hours=float(row.hours) if row.hours else None,
-                story_points=float(row.story_points) if row.story_points else None,
-                priority=row.priority,
-                status=row.status,
-                source_url=row.source_url,
-                github_comments_json=row.github_comments_json,
-                github_comments_fetched_at=row.github_comments_fetched_at,
-                auto_start=bool(row.auto_start),
-                created_by_id=row.created_by_id,
-                created_at=row.created_at,
-                updated_at=row.updated_at,
-            )
+            row, symbol = result
+            return self._ticket_record_from_row(row, symbol)
 
     def insert_ticket(
         self,
@@ -2622,6 +2704,7 @@ class Database:
         internal_notes: Optional[str] = None,
         source_url: Optional[str] = None,
         agent_id: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
         sprint_id: Optional[str] = None,
         hours: Optional[float] = None,
         story_points: Optional[float] = None,
@@ -2631,11 +2714,15 @@ class Database:
     ) -> None:
         now = utc_now()
         with self.session() as session:
+            # Get next count for this project
+            max_count = session.execute(select(func.max(TicketModel.count)).where(TicketModel.project_id == project_id)).scalar() or 0
+            next_count = max_count + 1
             session.add(
                 TicketModel(
                     id=ticket_id,
                     project_id=project_id,
                     agent_id=agent_id,
+                    vm_target_id=vm_target_id,
                     sprint_id=sprint_id,
                     title=title,
                     description=description,
@@ -2650,6 +2737,7 @@ class Database:
                     github_comments_json=None,
                     github_comments_fetched_at=None,
                     auto_start=1 if auto_start else 0,
+                    count=next_count,
                     created_by_id=created_by_id,
                     created_at=now,
                     updated_at=now,
@@ -2662,6 +2750,7 @@ class Database:
         *,
         project_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
         sprint_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
@@ -2680,50 +2769,94 @@ class Database:
         clear_hours: bool = False,
         clear_story_points: bool = False,
         clear_priority: bool = False,
+        clear_vm_target: bool = False,
+        record_history_user_id: Optional[str] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(TicketModel, ticket_id)
             if not row:
                 return
+
+            # Helper to record history when user_id is provided
+            def record_change(field: str, old_val: Optional[str], new_val: Optional[str]) -> None:
+                if record_history_user_id is not None and old_val != new_val:
+                    session.add(
+                        TicketHistoryModel(
+                            id=str(uuid.uuid4()),
+                            ticket_id=ticket_id,
+                            user_id=record_history_user_id,
+                            field_name=field,
+                            old_value=old_val,
+                            new_value=new_val,
+                            created_at=utc_now(),
+                        )
+                    )
+
             if project_id is not None:
+                record_change("project_id", row.project_id, project_id)
                 row.project_id = project_id
             if agent_id is not None:
+                record_change("agent_id", row.agent_id, agent_id or None)
                 row.agent_id = agent_id or None
+            if vm_target_id is not None:
+                record_change("vm_target_id", row.vm_target_id, vm_target_id or None)
+                row.vm_target_id = vm_target_id or None
+            if clear_vm_target:
+                record_change("vm_target_id", row.vm_target_id, None)
+                row.vm_target_id = None
             if sprint_id is not None:
+                record_change("sprint_id", row.sprint_id, sprint_id or None)
                 row.sprint_id = sprint_id or None
             if clear_sprint:
+                record_change("sprint_id", row.sprint_id, None)
                 row.sprint_id = None
             if title is not None:
+                record_change("title", row.title, title)
                 row.title = title
             if description is not None:
+                record_change("description", row.description, description)
                 row.description = description
             if internal_notes is not None:
+                record_change("internal_notes", row.internal_notes, internal_notes)
                 row.internal_notes = internal_notes
             if assigned_to is not None:
+                record_change("assigned_to", row.assigned_to, assigned_to)
                 row.assigned_to = assigned_to
             if estimate is not None:
+                record_change("estimate", row.estimate, estimate)
                 row.estimate = estimate
             if hours is not None:
+                record_change("hours", row.hours, str(hours))
                 row.hours = str(hours)
             if clear_hours:
+                record_change("hours", row.hours, None)
                 row.hours = None
             if story_points is not None:
+                record_change("story_points", row.story_points, str(story_points))
                 row.story_points = str(story_points)
             if clear_story_points:
+                record_change("story_points", row.story_points, None)
                 row.story_points = None
             if priority is not None:
+                record_change("priority", row.priority, priority or None)
                 row.priority = priority or None
             if clear_priority:
+                record_change("priority", row.priority, None)
                 row.priority = None
             if status is not None:
+                record_change("status", row.status, status)
                 row.status = status
             if source_url is not None:
+                record_change("source_url", row.source_url, source_url)
                 row.source_url = source_url
             if github_comments_json is not None:
                 row.github_comments_json = github_comments_json
             if github_comments_fetched_at is not None:
                 row.github_comments_fetched_at = github_comments_fetched_at
             if auto_start is not None:
+                old_auto_start = "true" if row.auto_start else "false"
+                new_auto_start = "true" if auto_start else "false"
+                record_change("auto_start", old_auto_start, new_auto_start)
                 row.auto_start = 1 if auto_start else 0
             row.updated_at = utc_now()
 
@@ -2934,66 +3067,70 @@ class Database:
             ticket_ids = session.execute(select(TicketSprintModel.ticket_id).where(TicketSprintModel.sprint_id == sprint_id)).scalars().all()
             if not ticket_ids:
                 return []
-            rows = session.execute(select(TicketModel).where(TicketModel.id.in_(ticket_ids)).order_by(TicketModel.created_at.desc())).scalars().all()
-            return [
-                TicketRecord(
-                    id=row.id,
-                    project_id=row.project_id,
-                    agent_id=row.agent_id,
-                    sprint_id=row.sprint_id,
-                    title=row.title,
-                    description=row.description,
-                    internal_notes=row.internal_notes,
-                    assigned_to=row.assigned_to,
-                    estimate=row.estimate,
-                    hours=float(row.hours) if row.hours else None,
-                    story_points=float(row.story_points) if row.story_points else None,
-                    priority=row.priority,
-                    status=row.status,
-                    source_url=row.source_url,
-                    github_comments_json=row.github_comments_json,
-                    github_comments_fetched_at=row.github_comments_fetched_at,
-                    auto_start=bool(row.auto_start),
-                    created_by_id=row.created_by_id,
-                    created_at=row.created_at,
-                    updated_at=row.updated_at,
-                ) for row in rows
-            ]
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id,
+                                                                 isouter=True).where(TicketModel.id.in_(ticket_ids)).order_by(TicketModel.created_at.desc())
+            results = session.execute(stmt).all()
+            return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
 
     def list_tickets_not_in_sprint(self, sprint_id: str, status_filter: Optional[list[str]] = None) -> list[TicketRecord]:
         """List all tickets not in the given sprint, optionally filtered by status."""
         with self.session() as session:
             # Get ticket IDs already in this sprint
             in_sprint_ids = session.execute(select(TicketSprintModel.ticket_id).where(TicketSprintModel.sprint_id == sprint_id)).scalars().all()
-            stmt = select(TicketModel)
+            # Join with projects to get symbol for ticket name
+            stmt = select(TicketModel, ProjectModel.symbol).join(ProjectModel, TicketModel.project_id == ProjectModel.id, isouter=True)
             if in_sprint_ids:
                 stmt = stmt.where(TicketModel.id.notin_(in_sprint_ids))
             if status_filter:
                 stmt = stmt.where(TicketModel.status.in_(status_filter))
-            rows = session.execute(stmt.order_by(TicketModel.created_at.desc())).scalars().all()
+            results = session.execute(stmt.order_by(TicketModel.created_at.desc())).all()
+            return [self._ticket_record_from_row(row, symbol) for row, symbol in results]
+
+    # ── Ticket History ─────────────────────────────────────────────────────────
+
+    def insert_ticket_history(
+        self,
+        history_id: str,
+        ticket_id: str,
+        user_id: Optional[str],
+        field_name: str,
+        old_value: Optional[str],
+        new_value: Optional[str],
+    ) -> None:
+        with self.session() as session:
+            session.add(
+                TicketHistoryModel(
+                    id=history_id,
+                    ticket_id=ticket_id,
+                    user_id=user_id,
+                    field_name=field_name,
+                    old_value=old_value,
+                    new_value=new_value,
+                    created_at=utc_now(),
+                )
+            )
+
+    def list_ticket_history(self, ticket_id: str) -> list[TicketHistoryRecord]:
+        with self.session() as session:
+            stmt = (
+                select(TicketHistoryModel,
+                       UserModel.username).outerjoin(UserModel,
+                                                     TicketHistoryModel.user_id == UserModel.id).where(TicketHistoryModel.ticket_id == ticket_id
+                                                                                                       ).order_by(TicketHistoryModel.created_at.asc())
+            )
+            results = session.execute(stmt).all()
             return [
-                TicketRecord(
+                TicketHistoryRecord(
                     id=row.id,
-                    project_id=row.project_id,
-                    agent_id=row.agent_id,
-                    sprint_id=row.sprint_id,
-                    title=row.title,
-                    description=row.description,
-                    internal_notes=row.internal_notes,
-                    assigned_to=row.assigned_to,
-                    estimate=row.estimate,
-                    hours=float(row.hours) if row.hours else None,
-                    story_points=float(row.story_points) if row.story_points else None,
-                    priority=row.priority,
-                    status=row.status,
-                    source_url=row.source_url,
-                    github_comments_json=row.github_comments_json,
-                    github_comments_fetched_at=row.github_comments_fetched_at,
-                    auto_start=bool(row.auto_start),
-                    created_by_id=row.created_by_id,
+                    ticket_id=row.ticket_id,
+                    user_id=row.user_id,
+                    field_name=row.field_name,
+                    old_value=row.old_value,
+                    new_value=row.new_value,
                     created_at=row.created_at,
-                    updated_at=row.updated_at,
-                ) for row in rows
+                    username=username,
+                ) for row, username in results
             ]
 
     def list_comments(
@@ -3049,7 +3186,9 @@ class Database:
             elif agent_session_id:
                 stmt = stmt.where(CommentModel.agent_session_id == agent_session_id)
             if since:
-                stmt = stmt.where(CommentModel.created_at > since)
+                # Use >= to catch comments with same timestamp (chunked responses)
+                # Client deduplicates by comment ID via seenIds Set
+                stmt = stmt.where(CommentModel.created_at >= since)
             rows = session.execute(stmt.order_by(CommentModel.created_at.asc())).scalars().all()
         return [
             CommentRecord(
@@ -3318,6 +3457,7 @@ class Database:
                 initial_prompt=row.initial_prompt,
                 working_directory=row.working_directory,
                 session_directory=row.session_directory,
+                autostart=bool(row.autostart),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
@@ -3417,6 +3557,7 @@ class Database:
         initial_prompt: Optional[str] = None,
         working_directory: Optional[str] = None,
         session_directory: Optional[str] = None,
+        autostart: bool = False,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -3441,6 +3582,7 @@ class Database:
                     initial_prompt=initial_prompt,
                     working_directory=working_directory,
                     session_directory=session_directory,
+                    autostart=1 if autostart else 0,
                     created_at=now,
                     updated_at=now,
                 )
@@ -3466,9 +3608,11 @@ class Database:
         llm_model: Optional[str] = None,
         session_file_config_id: Optional[str] = None,
         average_memory_usage_mb: Optional[int] = None,
-        initial_prompt: Optional[str] = None,
-        working_directory: Optional[str] = None,
-        session_directory: Optional[str] = None,
+        # Clearable fields use ... as sentinel (None clears, ... skips)
+        initial_prompt: Optional[str] = ..., # type: ignore[assignment]
+        working_directory: Optional[str] = ..., # type: ignore[assignment]
+        session_directory: Optional[str] = ..., # type: ignore[assignment]
+        autostart: Optional[bool] = None,
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -3506,12 +3650,15 @@ class Database:
                 row.session_file_config_id = session_file_config_id
             if average_memory_usage_mb is not None:
                 row.average_memory_usage_mb = average_memory_usage_mb
-            if initial_prompt is not None:
+            # Clearable fields: ... means skip, None or value means update
+            if initial_prompt is not ...:
                 row.initial_prompt = initial_prompt
-            if working_directory is not None:
+            if working_directory is not ...:
                 row.working_directory = working_directory
-            if session_directory is not None:
+            if session_directory is not ...:
                 row.session_directory = session_directory
+            if autostart is not None:
+                row.autostart = 1 if autostart else 0
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -3544,6 +3691,7 @@ class Database:
             initial_prompt=row.initial_prompt,
             working_directory=row.working_directory,
             session_directory=row.session_directory,
+            autostart=bool(row.autostart),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3574,6 +3722,7 @@ class Database:
             initial_prompt=row.initial_prompt,
             working_directory=row.working_directory,
             session_directory=row.session_directory,
+            autostart=bool(row.autostart),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3949,6 +4098,157 @@ class Database:
     def delete_channel(self, channel_id: str) -> None:
         with self.session() as session:
             session.query(ChannelModel).filter(ChannelModel.id == channel_id).delete()
+
+    # -------------------------------------------------------------------------
+    # AgentWake CRUD
+    # -------------------------------------------------------------------------
+
+    def list_agent_wakes(
+        self,
+        agent_session_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> list[AgentWakeRecord]:
+        with self.session() as session:
+            stmt = select(AgentWakeModel).order_by(AgentWakeModel.wake_at.desc())
+            if agent_session_id:
+                stmt = stmt.where(AgentWakeModel.agent_session_id == agent_session_id)
+            if status:
+                stmt = stmt.where(AgentWakeModel.status == status)
+            rows = session.execute(stmt).scalars().all()
+        return [
+            AgentWakeRecord(
+                id=row.id,
+                agent_session_id=row.agent_session_id,
+                created_at=row.created_at,
+                wake_at=row.wake_at,
+                duration_seconds=row.duration_seconds,
+                context=row.context,
+                status=row.status,
+                fired_at=row.fired_at,
+                cancelled_at=row.cancelled_at,
+                cancelled_by=row.cancelled_by,
+                updated_at=row.updated_at,
+            ) for row in rows
+        ]
+
+    def get_agent_wake(self, wake_id: str) -> Optional[AgentWakeRecord]:
+        with self.session() as session:
+            row = session.get(AgentWakeModel, wake_id)
+        if not row:
+            return None
+        return AgentWakeRecord(
+            id=row.id,
+            agent_session_id=row.agent_session_id,
+            created_at=row.created_at,
+            wake_at=row.wake_at,
+            duration_seconds=row.duration_seconds,
+            context=row.context,
+            status=row.status,
+            fired_at=row.fired_at,
+            cancelled_at=row.cancelled_at,
+            cancelled_by=row.cancelled_by,
+            updated_at=row.updated_at,
+        )
+
+    def get_pending_agent_wakes(self, before: Optional[str] = None) -> list[AgentWakeRecord]:
+        """Get all pending wakes that should fire by the given time."""
+        with self.session() as session:
+            stmt = select(AgentWakeModel).where(AgentWakeModel.status == "pending")
+            if before:
+                stmt = stmt.where(AgentWakeModel.wake_at <= before)
+            stmt = stmt.order_by(AgentWakeModel.wake_at.asc())
+            rows = session.execute(stmt).scalars().all()
+        return [
+            AgentWakeRecord(
+                id=row.id,
+                agent_session_id=row.agent_session_id,
+                created_at=row.created_at,
+                wake_at=row.wake_at,
+                duration_seconds=row.duration_seconds,
+                context=row.context,
+                status=row.status,
+                fired_at=row.fired_at,
+                cancelled_at=row.cancelled_at,
+                cancelled_by=row.cancelled_by,
+                updated_at=row.updated_at,
+            ) for row in rows
+        ]
+
+    def insert_agent_wake(
+        self,
+        wake_id: str,
+        agent_session_id: str,
+        wake_at: str,
+        duration_seconds: int,
+        context: Optional[str] = None,
+    ) -> None:
+        now = utc_now()
+        with self.session() as session:
+            session.add(
+                AgentWakeModel(
+                    id=wake_id,
+                    agent_session_id=agent_session_id,
+                    created_at=now,
+                    wake_at=wake_at,
+                    duration_seconds=duration_seconds,
+                    context=context,
+                    status="pending",
+                    fired_at=None,
+                    cancelled_at=None,
+                    cancelled_by=None,
+                    updated_at=now,
+                )
+            )
+
+    def fire_agent_wake(self, wake_id: str) -> bool:
+        """Mark an agent wake as fired. Returns True if successful."""
+        now = utc_now()
+        with self.session() as session:
+            row = session.get(AgentWakeModel, wake_id)
+            if not row or row.status != "pending":
+                return False
+            row.status = "fired"
+            row.fired_at = now
+            row.updated_at = now
+        return True
+
+    def cancel_agent_wake(self, wake_id: str, cancelled_by: str) -> bool:
+        """Cancel an agent wake. Returns True if successful."""
+        now = utc_now()
+        with self.session() as session:
+            row = session.get(AgentWakeModel, wake_id)
+            if not row or row.status != "pending":
+                return False
+            row.status = "cancelled"
+            row.cancelled_at = now
+            row.cancelled_by = cancelled_by
+            row.updated_at = now
+        return True
+
+    def cancel_agent_wakes_for_session(
+        self,
+        agent_session_id: str,
+        cancelled_by: str,
+    ) -> int:
+        """Cancel all pending wakes for a session. Returns count of cancelled wakes."""
+        now = utc_now()
+        with self.session() as session:
+            rows = session.execute(select(AgentWakeModel).where(
+                AgentWakeModel.agent_session_id == agent_session_id,
+                AgentWakeModel.status == "pending",
+            )).scalars().all()
+            count = 0
+            for row in rows:
+                row.status = "cancelled"
+                row.cancelled_at = now
+                row.cancelled_by = cancelled_by
+                row.updated_at = now
+                count += 1
+        return count
+
+    def delete_agent_wake(self, wake_id: str) -> None:
+        with self.session() as session:
+            session.query(AgentWakeModel).filter(AgentWakeModel.id == wake_id).delete()
 
     # -------------------------------------------------------------------------
     # SessionFileConfig CRUD

@@ -6,7 +6,7 @@ from logging.config import fileConfig
 
 sys.path.insert(0, os.path.abspath(os.getcwd()))
 
-from alembic import context
+from alembic import context # pylint: disable=no-name-in-module
 from sqlalchemy import engine_from_config, pool
 
 from wintermute.db import Base
@@ -15,8 +15,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+
 def get_url() -> str:
-    return os.environ.get("WINTERMUTE_DB", "./wintermute.db")
+    return os.path.expanduser(os.environ.get("WINTERMUTE_DB", "~/dbs/wintermute/wintermute.db"))
 
 
 def run_migrations_offline() -> None:

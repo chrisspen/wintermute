@@ -58,6 +58,7 @@ It must return one of:
 
 ## State & storage
 - **SQLite** is the source of truth for: TaskSources config, WorkItems, checkpoints, run history, and credentials references.
+- Database location: `~/dbs/wintermute/wintermute.db` (override with `WINTERMUTE_DB` env var).
 - **SQLAlchemy ORM** is used for persistence with **Alembic** migrations (see `alembic/` and `alembic.ini`).
 - Checkpoints must be small (<256KB) and JSON-only.
 - Secrets are stored via a pluggable secret backend (env vars by default; optional OS keychain later).
@@ -113,6 +114,7 @@ Agents can include special markers in their output to trigger Wintermute actions
 - `WM:STATUS:in-progress` — Set ticket status to in-progress
 - `WM:STATUS:needs-feedback` — Set ticket status to needs-feedback
 - `WM:STATUS:done` — Set ticket status to done
+- `WM:STATUS:cancelled` — Set ticket status to cancelled
 
 Example: When an agent completes a task, it should include:
 ```
@@ -151,7 +153,8 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 - `setup.sh`, `run_web.sh`, `run_supervisor.sh`, `_run_web.sh`, `_run_supervisor.sh` — local setup and runners
 
 ## Development norms
-- **CRITICAL: NEVER ACCESS THE DATABASE DIRECTLY.** No Python commands that touch the database AT ALL - no `from wintermute.db import Database`, no sqlite3, no touching wintermute.db in any way. The database is on a network filesystem and ANY direct access CORRUPTS IT. **USE THE API ONLY** - all data access via `curl http://192.168.123.1:8000/api/...`
+- **CRITICAL: CHECK `.claude/commands/` FIRST.** Before doing common tasks (restart server, run tests, etc.), check what slash commands are available. Use `/restart-web`, `/restart-supervisor`, `/run-tests` instead of manual approaches. The commands exist to prevent mistakes.
+- **CRITICAL: NEVER ACCESS THE DATABASE DIRECTLY.** No Python commands that touch the database AT ALL - no `from wintermute.db import Database`, no sqlite3, no touching `~/dbs/wintermute/wintermute.db` in any way. The database is on a network filesystem and ANY direct access CORRUPTS IT. **USE THE API ONLY** - all data access via `curl http://192.168.123.1:8000/api/...`
 - **CRITICAL: NEVER run `./run_supervisor.sh` or `./run_web.sh` locally.** These are blocking relauncher scripts. Killing them mid-execution CORRUPTS THE SQLITE DATABASE. To restart services, use the API endpoint instead.
 - Keep the scheduler deterministic and testable: no hidden global state.
 - Prefer typed, structured outputs from the model; reject non-conforming responses.
@@ -159,8 +162,8 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 - Add metrics hooks (queue depth, task latency, error rates) early.
 - UI rule: no HTML or CSS embedded in Python files; use template files and static assets.
 - UI rule: never add margin-bottom directly to input/select/textarea; use container spacing.
-- Never run commands inside the user's `.venv` or upgrade it directly; use the restart/setup flow instead.
-- Run tests with `.venv/bin/python -m pytest tests/ -x --tb=short` (do not activate the venv).
+- Never run commands inside the user's venv or upgrade it directly; use the restart/setup flow instead.
+- Run tests with `~/pyenv/wintermute/bin/python -m pytest tests/ -x --tb=short` (do not activate the venv).
 
 ## VM networking
 When running as an agent inside a VM, the web server runs on the host machine. Use the gateway IP (typically `192.168.123.1`) to reach host services:
@@ -171,14 +174,14 @@ When running as an agent inside a VM, the web server runs on the host machine. U
 
 ## Minimal local run (dev)
 Run setup:
-- `./setup.sh` (first run creates `.venv` and `.env`, second run tests API and runs migrations)
+- `./setup.sh` (first run creates `~/pyenv/wintermute` venv and `.env`, second run tests API and runs migrations)
 Then run:
 - `./run_web.sh` (admin console)
 - `./run_supervisor.sh` (supervisor loop)
 
 ## Agent testing
-When running local tests as an agent, prefer a per-agent venv at `.<agent>/.venv` (use `./setup.sh --agent-name <agent>` or `./setup.sh --venv-dir .<agent>/.venv`). At runtime, set `WINTERMUTE_AGENT_NAME=<agent>` or `WINTERMUTE_VENV=.<agent>/.venv`.
-Use the agent-specific venv for this environment: `.codex/.venv` (run `./setup.sh --venv-dir .codex/.venv`).
+When running local tests as an agent, prefer a per-agent venv at `~/pyenv/wintermute-<agent>` (use `./setup.sh --agent-name <agent>`). At runtime, set `WINTERMUTE_AGENT_NAME=<agent>` or `WINTERMUTE_VENV=~/pyenv/wintermute-<agent>`.
+Use the agent-specific venv for this environment: `~/pyenv/wintermute-codex` (run `./setup.sh --agent-name codex`).
 
 When testing `./_run_web.sh` or `./_run_supervisor.sh`, they block; run with `PYTHONUNBUFFERED=1` and stop once the “ready” log line appears to avoid waiting on timeouts.
 

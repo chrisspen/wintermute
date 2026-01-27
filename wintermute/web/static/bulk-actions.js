@@ -105,6 +105,13 @@
             actionInput.value = action;
             form.appendChild(actionInput);
 
+            // Include current URL for redirect back
+            const returnInput = document.createElement('input');
+            returnInput.type = 'hidden';
+            returnInput.name = 'return_to';
+            returnInput.value = window.location.pathname + window.location.search;
+            form.appendChild(returnInput);
+
             selectedIds.forEach(function(id) {
                 const idInput = document.createElement('input');
                 idInput.type = 'hidden';

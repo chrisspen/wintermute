@@ -243,11 +243,9 @@ def _read_stream_response(
         events = selector.select(timeout=remaining)
 
         if not events:
-            # If we got a result message and idle, we're done
+            # Only consider response complete if we got the result message
+            # and have been idle for a while (in case of late output)
             if result_received and (time.time() - last_activity) >= idle_seconds:
-                break
-            # If we have texts and idle, we're done
-            if texts and (time.time() - last_activity) >= idle_seconds:
                 break
             continue
 

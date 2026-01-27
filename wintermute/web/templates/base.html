@@ -130,6 +130,12 @@
               Sessions
             </a>
             <a
+              href="/ui/agent-wakes"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'agent_wakes' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Agent Wakes
+            </a>
+            <a
               href="/ui/status"
               class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'status' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
             >
@@ -234,6 +240,42 @@
         </div>
       </div>
     </div>
+    <div class="modal" id="error-modal">
+      <div class="modal-card">
+        <h3 id="error-modal-title">Error</h3>
+        <p id="error-modal-message" class="error-modal-message"></p>
+        <div class="modal-actions">
+          <button type="button" id="error-modal-close">OK</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Global error modal function - available on all pages
+      window.showErrorModal = function(title, message) {
+        var modal = document.getElementById('error-modal');
+        var titleEl = document.getElementById('error-modal-title');
+        var messageEl = document.getElementById('error-modal-message');
+        var closeBtn = document.getElementById('error-modal-close');
+        if (!modal) return;
+        titleEl.textContent = title || 'Error';
+        messageEl.textContent = message || 'An error occurred.';
+        modal.classList.add('open');
+        function closeModal() {
+          modal.classList.remove('open');
+        }
+        closeBtn.onclick = closeModal;
+        modal.onclick = function(e) {
+          if (e.target === modal) closeModal();
+        };
+        var escHandler = function(e) {
+          if (e.key === 'Escape' && modal.classList.contains('open')) {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+          }
+        };
+        document.addEventListener('keydown', escHandler);
+      };
+    </script>
     <script>
       (function () {
         var modal = document.getElementById('confirm-modal');
@@ -395,6 +437,8 @@
         var selectedSelect = modal.querySelector('[data-column-picker-selected]');
         var addButton = modal.querySelector('[data-column-picker-add]');
         var removeButton = modal.querySelector('[data-column-picker-remove]');
+        var upButton = modal.querySelector('[data-column-picker-up]');
+        var downButton = modal.querySelector('[data-column-picker-down]');
         var cancelButtons = modal.querySelectorAll('[data-column-picker-cancel]');
         var hiddenField = modal.querySelector('[data-column-picker-field]');
 
@@ -463,6 +507,34 @@
         removeButton.addEventListener('click', function () {
           moveSelected(selectedSelect, availableSelect);
         });
+
+        function moveSelectedUp() {
+          var options = selectedSelect.options;
+          for (var i = 1; i < options.length; i += 1) {
+            if (options[i].selected && !options[i - 1].selected) {
+              var prev = options[i - 1];
+              selectedSelect.insertBefore(options[i], prev);
+            }
+          }
+        }
+
+        function moveSelectedDown() {
+          var options = selectedSelect.options;
+          for (var i = options.length - 2; i >= 0; i -= 1) {
+            if (options[i].selected && !options[i + 1].selected) {
+              var next = options[i + 1];
+              selectedSelect.insertBefore(next, options[i]);
+            }
+          }
+        }
+
+        if (upButton) {
+          upButton.addEventListener('click', moveSelectedUp);
+        }
+
+        if (downButton) {
+          downButton.addEventListener('click', moveSelectedDown);
+        }
 
         cancelButtons.forEach(function (button) {
           button.addEventListener('click', function () {

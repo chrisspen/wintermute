@@ -24,7 +24,7 @@ from typing import Any, Optional
 
 import aiohttp
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi import Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -175,12 +175,41 @@ API_PERMISSION_ACTIONS = ["create", "read", "update", "delete"]
 
 LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
     "tickets": {
-        "default": ["title", "project_id", "status"],
+        "default": ["name", "title", "project_id", "status"],
+        "filters": [
+            {
+                "key": "project_id",
+                "label": "Project",
+                "type": "select",
+                "options_source": "projects",
+            },
+            {
+                "key": "status",
+                "label": "Status",
+                "type": "select",
+            },
+        ],
+        "bulk_actions": [
+            {
+                "key": "close",
+                "label": "Close (set status to done)"
+            },
+            {
+                "key": "cancel",
+                "label": "Cancel (set status to cancelled)"
+            },
+        ],
+        "sortable": ["updated_at"],
         "columns": [
             {
                 "key": "id",
                 "label": "ID",
                 "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "name",
+                "label": "Name",
+                "cell_class": "font-mono text-sm"
             },
             {
                 "key": "title",
@@ -244,6 +273,10 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
                 "label": "Updated",
                 "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
             },
+            {
+                "key": "priority",
+                "label": "Priority"
+            },
         ],
     },
     "projects": {
@@ -257,6 +290,11 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {
                 "key": "name",
                 "label": "Project"
+            },
+            {
+                "key": "symbol",
+                "label": "Symbol",
+                "cell_class": "font-mono text-sm"
             },
             {
                 "key": "build_status",
@@ -950,6 +988,74 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    "agent_wakes": {
+        "default": ["agent_session_id", "context", "wake_at", "status"],
+        "filters": [
+            {
+                "key": "status",
+                "label": "Status",
+                "type": "select",
+                "options": [
+                    ("", "All"),
+                    ("pending", "Pending"),
+                    ("fired", "Fired"),
+                    ("cancelled", "Cancelled"),
+                ],
+            },
+        ],
+        "columns": [
+            {
+                "key": "id",
+                "label": "ID",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "agent_session_id",
+                "label": "Session"
+            },
+            {
+                "key": "context",
+                "label": "Context"
+            },
+            {
+                "key": "duration_seconds",
+                "label": "Duration"
+            },
+            {
+                "key": "wake_at",
+                "label": "Wake At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "status",
+                "label": "Status"
+            },
+            {
+                "key": "fired_at",
+                "label": "Fired At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "cancelled_at",
+                "label": "Cancelled At",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "cancelled_by",
+                "label": "Cancelled By"
+            },
+            {
+                "key": "created_at",
+                "label": "Created",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+            {
+                "key": "updated_at",
+                "label": "Updated",
+                "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
+            },
+        ],
+    },
 }
 
 
@@ -1220,6 +1326,10 @@ def _build_ticket_rows(
             "id": {
                 "text": _display_value(ticket.id)
             },
+            "name": {
+                "text": ticket.name if ticket.name else "-",
+                "href": f"/ui/tickets/{ticket.id}/edit"
+            },
             "title": {
                 "text": _display_value(ticket.title),
                 "href": f"/ui/tickets/{ticket.id}/edit"
@@ -1243,6 +1353,9 @@ def _build_ticket_rows(
             },
             "status": {
                 "text": _display_value(ticket.status)
+            },
+            "priority": {
+                "text": _display_value(ticket.priority)
             },
             "auto_start": {
                 "text": "yes" if ticket.auto_start else "no"
@@ -1311,6 +1424,9 @@ def _build_project_rows(projects: list[Any], database: Any) -> list[dict[str, An
                 "href": f"/ui/projects/{project.id}/edit",
                 "provider": provider,
                 "repo_url": repo_url,
+            },
+            "symbol": {
+                "text": _display_value(project.symbol)
             },
             "build_status": {
                 "text": "",
@@ -1792,6 +1908,65 @@ def _build_session_rows(sessions: list[Any], project_lookup: dict[str, str], age
     return rows
 
 
+def _format_duration(seconds: int) -> str:
+    """Format duration in human-readable form."""
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes}m"
+    if seconds < 86400:
+        hours = seconds // 3600
+        return f"{hours}h"
+    days = seconds // 86400
+    return f"{days}d"
+
+
+def _build_agent_wake_rows(wakes: list[Any], session_lookup: dict[str, str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for wake in wakes:
+        session_label = session_lookup.get(wake.agent_session_id, wake.agent_session_id[:8] + "...")
+        cells = {
+            "id": {
+                "text": _display_value(wake.id),
+                "href": f"/ui/agent-wakes/{wake.id}"
+            },
+            "agent_session_id": {
+                "text": _display_value(session_label),
+                "href": f"/ui/sessions/{wake.agent_session_id}"
+            },
+            "context": {
+                "text": _display_value(wake.context[:50] + "..." if wake.context and len(wake.context) > 50 else wake.context)
+            },
+            "duration_seconds": {
+                "text": _format_duration(wake.duration_seconds)
+            },
+            "wake_at": {
+                "text": _format_timestamp(wake.wake_at)
+            },
+            "status": {
+                "text": _display_value(wake.status)
+            },
+            "fired_at": {
+                "text": _format_timestamp(wake.fired_at) if wake.fired_at else ""
+            },
+            "cancelled_at": {
+                "text": _format_timestamp(wake.cancelled_at) if wake.cancelled_at else ""
+            },
+            "cancelled_by": {
+                "text": _display_value(wake.cancelled_by)
+            },
+            "created_at": {
+                "text": _format_timestamp(wake.created_at)
+            },
+            "updated_at": {
+                "text": _format_timestamp(wake.updated_at)
+            },
+        }
+        rows.append({"id": wake.id, "cells": cells})
+    return rows
+
+
 def _build_metric_definition_rows(definitions: list[Any]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for defn in definitions:
@@ -1862,6 +2037,7 @@ def _build_table_context(
     create_url: Optional[str],
     rows: list[dict[str, Any]],
     empty_message: str,
+    filter_options: Optional[dict[str, list[tuple[str, str]]]] = None,
 ) -> dict[str, Any]:
     config = LIST_TABLE_CONFIGS.get(model)
     if not config:
@@ -1870,6 +2046,38 @@ def _build_table_context(
     available_keys = [column["key"] for column in columns]
     selected = _resolve_table_columns(database, user, model, available_keys, config["default"])
     bulk_actions = config.get("bulk_actions", [])
+    filters_config = config.get("filters", [])
+    sortable_columns = config.get("sortable", [])
+
+    # Build filters with current values and options
+    table_filters: list[dict[str, Any]] = []
+    for filter_cfg in filters_config:
+        key = filter_cfg["key"]
+        current_value = request.query_params.get(key, "")
+        # Try filter_options first, then fall back to static options in config
+        if filter_options and key in filter_options:
+            options = filter_options[key]
+        else:
+            options = filter_cfg.get("options", [])
+        table_filters.append({
+            "key": key,
+            "label": filter_cfg["label"],
+            "type": filter_cfg.get("type", "select"),
+            "options": options,
+            "value": current_value,
+        })
+
+    # Parse sort params from URL (format: sort=col1,-col2 for asc/desc)
+    sort_param = request.query_params.get("sort", "")
+    sort_columns: list[dict[str, str]] = []
+    if sort_param:
+        for part in sort_param.split(","):
+            part = part.strip()
+            if part.startswith("-"):
+                sort_columns.append({"key": part[1:], "dir": "desc"})
+            elif part:
+                sort_columns.append({"key": part, "dir": "asc"})
+
     return {
         "table_model": model,
         "table_title": title,
@@ -1893,6 +2101,9 @@ def _build_table_context(
         "table_search_query": request.query_params.get("q", "").strip(),
         "table_search_placeholder": "Search",
         "table_bulk_actions": bulk_actions,
+        "table_filters": table_filters,
+        "table_sortable": sortable_columns,
+        "table_sort_columns": sort_columns,
     }
 
 
@@ -2417,6 +2628,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             data = asdict(record)
             if isinstance(data.get("checkpoint"), (dict, list)):
                 data["checkpoint"] = data["checkpoint"]
+            # Include computed property TicketRecord.name if present
+            if hasattr(record, "name") and isinstance(getattr(type(record), "name", None), property):
+                data["name"] = record.name
             return data
         return dict(record)
 
@@ -2475,12 +2689,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return (now - ts).total_seconds() <= seconds
 
         last_seen = websocket.query_params.get("since")
+        seen_ids: set[str] = set()
         try:
             while True:
                 rows = get_comments(last_seen)
                 if rows:
                     last_seen = rows[-1].created_at
                     for row in rows:
+                        if row.id in seen_ids:
+                            continue
+                        seen_ids.add(row.id)
                         await websocket.send_json({"type": "comment", "data": comment_to_dict(row)})
                 session = get_session()
                 if session and session.status == "running":
@@ -2724,10 +2942,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         elif source_id == TicketAutoStartSource.id:
             saved = "ticket_auto_start_source"
         elif source_id == StandupSource.id:
-            return RedirectResponse("/ui/standup?saved=standup_source", status_code=303)
+            return RedirectResponse("/ui/standup", status_code=303)
         else:
             saved = "slack_source"
-        return RedirectResponse(f"/ui?saved={saved}", status_code=303)
+        return RedirectResponse(f"/ui", status_code=303)
 
     @app.get("/work-items")
     def list_work_items(status: Optional[str] = None, user: str = Depends(_require_login)) -> list[dict[str, Any]]:
@@ -2829,7 +3047,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 provider=SLACK_PROVIDER,
                 reference=admin_user_id,
             )
-        return RedirectResponse("/ui?saved=slack", status_code=303)
+        return RedirectResponse("/ui", status_code=303)
 
     @app.post("/github-tokens")
     async def create_github_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2849,7 +3067,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/github-tokens")).strip() or "/ui/github-tokens"
         if not return_to.startswith("/ui"):
             return_to = "/ui/github-tokens"
-        return RedirectResponse(f"{return_to}?saved=github_token_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/github-tokens/{token_id}/edit")
     async def update_github_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2870,12 +3088,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             user_id=user_id,
             user_login=user_login,
         )
-        return RedirectResponse("/ui/github-tokens?saved=github_token_updated", status_code=303)
+        return RedirectResponse("/ui/github-tokens", status_code=303)
 
     @app.post("/github-tokens/{token_id}/delete")
     async def delete_github_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_github_token(token_id)
-        return RedirectResponse("/ui/github-tokens?saved=github_token_deleted", status_code=303)
+        return RedirectResponse("/ui/github-tokens", status_code=303)
 
     @app.post("/gitlab-tokens")
     async def create_gitlab_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2895,7 +3113,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/gitlab-tokens")).strip() or "/ui/gitlab-tokens"
         if not return_to.startswith("/ui"):
             return_to = "/ui/gitlab-tokens"
-        return RedirectResponse(f"{return_to}?saved=gitlab_token_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/gitlab-tokens/{token_id}/edit")
     async def update_gitlab_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2916,12 +3134,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             user_id=user_id,
             user_login=user_login,
         )
-        return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_updated", status_code=303)
+        return RedirectResponse("/ui/gitlab-tokens", status_code=303)
 
     @app.post("/gitlab-tokens/{token_id}/delete")
     async def delete_gitlab_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_gitlab_token(token_id)
-        return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_deleted", status_code=303)
+        return RedirectResponse("/ui/gitlab-tokens", status_code=303)
 
     # --- Unified Remote Token POST routes ---
 
@@ -2952,7 +3170,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/remote-tokens")).strip() or "/ui/remote-tokens"
         if not return_to.startswith("/ui"):
             return_to = "/ui/remote-tokens"
-        return RedirectResponse(f"{return_to}?saved=remote_token_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/remote-tokens/{token_id}/edit")
     async def update_remote_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2982,12 +3200,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             user_id=user_id,
             user_login=user_login,
         )
-        return RedirectResponse("/ui/remote-tokens?saved=remote_token_updated", status_code=303)
+        return RedirectResponse("/ui/remote-tokens", status_code=303)
 
     @app.post("/remote-tokens/{token_id}/delete")
     async def delete_remote_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_remote_token(token_id)
-        return RedirectResponse("/ui/remote-tokens?saved=remote_token_deleted", status_code=303)
+        return RedirectResponse("/ui/remote-tokens", status_code=303)
 
     @app.get("/ui/api-tokens")
     def api_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -3082,8 +3300,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/api-tokens"
         if not env_path:
             return_to = f"/ui/api-tokens/{token_id}/edit?show_token=1"
-        separator = "&" if "?" in return_to else "?"
-        return RedirectResponse(f"{return_to}{separator}saved=api_token_created", status_code=303)
+        return RedirectResponse(return_to, status_code=303)
 
     @app.post("/api-tokens/{token_id}/edit")
     async def update_api_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -3099,12 +3316,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             token=token_value or None,
             permissions=permissions,
         )
-        return RedirectResponse("/ui/api-tokens?saved=api_token_updated", status_code=303)
+        return RedirectResponse("/ui/api-tokens", status_code=303)
 
     @app.post("/api-tokens/{token_id}/delete")
     async def delete_api_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_api_token(token_id)
-        return RedirectResponse("/ui/api-tokens?saved=api_token_deleted", status_code=303)
+        return RedirectResponse("/ui/api-tokens", status_code=303)
 
     def _hash_plain_password(password: str) -> tuple[str, str]:
         salt = secrets.token_bytes(16)
@@ -3601,6 +3818,77 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             salt=salt,
         )
 
+    # -------------------------------------------------------------------------
+    # Agent Wakes API (must be before catch-all /api/{model} route)
+    # -------------------------------------------------------------------------
+
+    @app.get("/api/agent-wakes")
+    async def api_list_agent_wakes(
+        status: Optional[str] = None,
+        agent_session_id: Optional[str] = None,
+        user: str = Depends(_require_login),
+    ) -> dict:
+        """List agent wakes with optional filters."""
+        wakes = database.list_agent_wakes(
+            agent_session_id=agent_session_id,
+            status=status,
+        )
+        return {
+            "wakes": [{
+                "id": w.id,
+                "agent_session_id": w.agent_session_id,
+                "created_at": w.created_at,
+                "wake_at": w.wake_at,
+                "duration_seconds": w.duration_seconds,
+                "context": w.context,
+                "status": w.status,
+                "fired_at": w.fired_at,
+                "cancelled_at": w.cancelled_at,
+                "cancelled_by": w.cancelled_by,
+                "updated_at": w.updated_at,
+            } for w in wakes]
+        }
+
+    @app.get("/api/agent-wakes/{wake_id}")
+    async def api_get_agent_wake(wake_id: str, user: str = Depends(_require_login)) -> dict:
+        """Get a single agent wake by ID."""
+        wake = database.get_agent_wake(wake_id)
+        if not wake:
+            raise HTTPException(status_code=404, detail="Agent wake not found")
+        return {
+            "id": wake.id,
+            "agent_session_id": wake.agent_session_id,
+            "created_at": wake.created_at,
+            "wake_at": wake.wake_at,
+            "duration_seconds": wake.duration_seconds,
+            "context": wake.context,
+            "status": wake.status,
+            "fired_at": wake.fired_at,
+            "cancelled_at": wake.cancelled_at,
+            "cancelled_by": wake.cancelled_by,
+            "updated_at": wake.updated_at,
+        }
+
+    @app.post("/api/agent-wakes/{wake_id}/cancel")
+    async def api_cancel_agent_wake(wake_id: str, user: str = Depends(_require_login)) -> dict:
+        """Cancel a pending agent wake."""
+        wake = database.get_agent_wake(wake_id)
+        if not wake:
+            raise HTTPException(status_code=404, detail="Agent wake not found")
+        if wake.status != "pending":
+            raise HTTPException(status_code=400, detail="Can only cancel pending wakes")
+        database.cancel_agent_wake(wake_id, "user")
+        return {"ok": True, "wake_id": wake_id}
+
+    @app.post("/api/sessions/{session_id}/clear-wakes")
+    async def api_clear_session_wakes(session_id: str, user: str = Depends(_require_login)) -> dict:
+        """Cancel all pending wakes for a session."""
+        session = database.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        count = database.cancel_agent_wakes_for_session(session_id, "user")
+        return {"ok": True, "cancelled": count, "session_id": session_id}
+
     @app.get("/api/{model}")
     async def api_list(model: str, request: Request) -> dict[str, Any]:
         handlers = _api_model_handlers().get(model)
@@ -3830,6 +4118,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.post("/api/tickets/{ticket_id}/start-session")
     async def api_ticket_start_session(ticket_id: str, request: Request) -> dict[str, Any]:
+        import shlex
+        import tempfile
         user, _token_record = _require_login_or_api(request, "sessions", "create")
         ticket = database.get_ticket(ticket_id)
         if not ticket:
@@ -3849,30 +4139,193 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not agent_id:
             raise HTTPException(status_code=400, detail="Ticket agent not configured")
         agent = database.get_agent(agent_id)
-        if agent:
-            approval_pattern = "\n".join([
-                r"^You are running Codex in",
-                r"^Yes, allow Codex to work in this folder without asking for",
-            ])
-            _ensure_agent_response(agent_id, approval_pattern, "1")
-            command_pattern = "\n".join([
-                r"run this command",
-                r"yes",
-                r"forever",
-            ])
-            _ensure_agent_response(agent_id, command_pattern, "1")
-        if source and ticket.project_id != source.project_id:
-            database.update_ticket(ticket_id, project_id=source.project_id)
-            ticket = database.get_ticket(ticket_id) or ticket
-        project_id = source.project_id if source else ticket.project_id
-        project = database.get_project(project_id)
-        if not (agent and project):
-            raise HTTPException(status_code=400, detail="Project configuration missing")
+        if not agent:
+            raise HTTPException(status_code=400, detail="Agent not found")
         if not agent.vm_target_id:
             raise HTTPException(status_code=400, detail="Agent has no VM target configured")
         vm = database.get_vm_target(agent.vm_target_id)
         if not vm:
             raise HTTPException(status_code=400, detail="VM target missing")
+
+        # Setup codex approval responses
+        approval_pattern = "\n".join([
+            r"^You are running Codex in",
+            r"^Yes, allow Codex to work in this folder without asking for",
+        ])
+        _ensure_agent_response(agent_id, approval_pattern, "1")
+        command_pattern = "\n".join([
+            r"run this command",
+            r"yes",
+            r"forever",
+        ])
+        _ensure_agent_response(agent_id, command_pattern, "1")
+
+        if source and ticket.project_id != source.project_id:
+            database.update_ticket(ticket_id, project_id=source.project_id)
+            ticket = database.get_ticket(ticket_id) or ticket
+        project_id = source.project_id if source else ticket.project_id
+        project = database.get_project(project_id) if project_id else None
+
+        # Determine if we need repo mode or standalone mode
+        # Standalone mode: no project OR project has no repo_url configured
+        use_standalone_mode = not project or not project.repo_url
+
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+
+        # Check that required tools are available
+        tools_ok, tools_error = ensure_vm_tools(spec, agent.command, agent.session_mode)
+        if not tools_ok:
+            raise HTTPException(status_code=400, detail=tools_error)
+
+        # Memory check before starting agent
+        database.refresh_agent_average_memory_usage(agent.id)
+        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
+        if agent and vm.required_reserve_memory_gb > 0:
+            mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
+            if not mem_ok:
+                raise HTTPException(status_code=503, detail=mem_error)
+
+        if use_standalone_mode:
+            # STANDALONE MODE: No repo, just start agent in temp directory with ticket as prompt
+            short_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")[:10]
+            session_id = f"{agent.slug}-ticket-{short_id}-{int(time.time())}"
+
+            # Create temp workspace on VM target
+            if agent.working_directory:
+                # Verify the working directory exists on the VM
+                check_cmd = [
+                    "ssh", "-p",
+                    str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"
+                ]
+                result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=30)
+                if result.stdout.strip() != "exists":
+                    raise HTTPException(status_code=400, detail=f"Working directory does not exist on VM: {agent.working_directory}")
+                workspace = agent.working_directory
+            else:
+                mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
+                result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode != 0:
+                    raise HTTPException(status_code=500, detail=f"Failed to create workspace: {result.stderr}")
+                workspace = result.stdout.strip()
+
+            # Determine session files directory
+            if agent.session_directory:
+                if agent.session_directory.startswith("/"):
+                    session_files_dir = agent.session_directory
+                else:
+                    session_files_dir = f"{workspace}/{agent.session_directory}"
+                mkdir_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mkdir -p {shlex.quote(session_files_dir)}"]
+                subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=30)
+            else:
+                session_files_dir = workspace
+
+            # Build initial prompt from ticket title + description
+            prompt_parts = [f"# {ticket.title}"]
+            if ticket.description:
+                prompt_parts.append(f"\n{ticket.description}")
+            if ticket.internal_notes:
+                prompt_parts.append(f"\n\n## Internal Notes\n{ticket.internal_notes}")
+            initial_prompt = "\n".join(prompt_parts)
+
+            # Post to Slack if agent has a Slack channel configured
+            thread_ts = None
+            slack_channel_id = None
+            agent_channels = database.list_channels(agent.id)
+            for ch in agent_channels:
+                if ch.type == "slack" and ch.enabled and ch.external_channel_id:
+                    slack_channel_id = ch.external_channel_id
+                    break
+            if slack_channel_id:
+                try:
+                    client = _slack_client(database)
+                    text = f"Ticket: {ticket.title}\n{ticket.source_url or ''}\nStarting agent session..."
+                    response = client.chat_postMessage(channel=slack_channel_id, text=text)
+                    thread_ts = response.get("ts")
+                except Exception:
+                    thread_ts = None
+
+            # Create session record with queued initial prompt for non-tmux modes
+            if agent.session_mode != "tmux" and initial_prompt:
+                database.insert_session(
+                    session_id=session_id,
+                    project_id=project.id if project else None,
+                    agent_id=agent.id,
+                    ticket_id=ticket_id,
+                    status="running",
+                    repo_path=workspace,
+                    thread_ts=thread_ts,
+                    workspace_path=workspace,
+                    queued_user_messages=json.dumps([initial_prompt]),
+                    awaiting_response=1,
+                    last_user_message=initial_prompt,
+                    prompt_sent_at=utc_now(),
+                )
+            else:
+                database.insert_session(
+                    session_id=session_id,
+                    project_id=project.id if project else None,
+                    agent_id=agent.id,
+                    ticket_id=ticket_id,
+                    status="running",
+                    repo_path=workspace,
+                    thread_ts=thread_ts,
+                    workspace_path=workspace,
+                )
+
+            # Record initial prompt as comment so it shows in conversation
+            database.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=ticket_id,
+                session_id=session_id,
+                project_id=project.id if project else None,
+                agent_id=agent.id,
+                author=user or "api",
+                source_id=source_id,
+                issue_number=issue_number,
+                body=initial_prompt,
+                public=False,
+                approved=True,
+                agent_session_id=session_id,
+                origin="initial_prompt",
+            )
+
+            # Copy session files to session_files_dir on VM
+            if agent.session_file_config_id:
+                definitions = database.list_session_file_definitions(agent.session_file_config_id)
+                session_files = database.list_session_files(agent.id)
+                file_map = {sf.definition_id: sf for sf in session_files}
+                with tempfile.TemporaryDirectory() as local_tmp:
+                    for defn in definitions:
+                        content = file_map.get(defn.id, None)
+                        file_content = content.content if content else defn.default_content
+                        local_path = os.path.join(local_tmp, defn.filename)
+                        with open(local_path, "w") as f:
+                            f.write(file_content)
+                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{session_files_dir}/"]
+                    scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
+                    if scp_result.returncode != 0:
+                        logging.getLogger(__name__).warning("Failed to copy session files: %s", scp_result.stderr)
+
+            # Start the tmux session (for tmux mode only)
+            if agent.session_mode == "tmux":
+                start_session(spec, session_id, agent, workspace)
+                # Send initial prompt to tmux
+                session_record = database.get_session(session_id)
+                if session_record and initial_prompt:
+                    try:
+                        send_input(spec, session_record, initial_prompt)
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning("Failed to send initial prompt: %s", exc)
+
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "location": vm.name,
+                "workspace": workspace,
+                "mode": "standalone",
+            }
+
+        # REPO MODE: Full project/repo workflow
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         if issue_number is not None:
             session_id = f"{project.slug}-{agent.slug}-issue-{issue_number}-{int(time.time())}"
@@ -3881,13 +4334,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             session_id = f"{project.slug}-{agent.slug}-ticket-{short_id}-{int(time.time())}"
         base_spec = build_ssh_spec_with_options(vm, base_options)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
-        # Memory check before starting agent
-        database.refresh_agent_average_memory_usage(agent.id)
-        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
-        if agent and vm.required_reserve_memory_gb > 0:
-            mem_ok, mem_error = check_vm_memory_available(session_spec, vm, agent)
-            if not mem_ok:
-                raise HTTPException(status_code=503, detail=mem_error)
         repo_resource, resource_error = database.acquire_repo_resource(
             project=project,
             session_id=session_id,
@@ -4174,6 +4620,185 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     # Standalone session API (JSON endpoints for AJAX)
     # -------------------------------------------------------------------------
 
+    @app.get("/api/sessions")
+    async def api_list_sessions(
+        status: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        project_id: Optional[str] = None,
+        user: str = Depends(_require_login),
+    ) -> dict:
+        """List sessions with optional filters."""
+        sessions = database.list_sessions(
+            status=status,
+            agent_id=agent_id,
+            project_id=project_id,
+        )
+        result = []
+        for sess in sessions:
+            agent = database.get_agent(sess.agent_id) if sess.agent_id else None
+            project = database.get_project(sess.project_id) if sess.project_id else None
+            vm = None
+            if agent and agent.vm_target_id:
+                vm = database.get_vm_target(agent.vm_target_id)
+            result.append({
+                "id": sess.id,
+                "status": sess.status,
+                "agent_id": sess.agent_id,
+                "agent_name": agent.name if agent else None,
+                "agent_slug": agent.slug if agent else None,
+                "agent_command": agent.command if agent else None,
+                "project_id": sess.project_id,
+                "project_name": project.name if project else None,
+                "project_slug": project.slug if project else None,
+                "vm_target_id": agent.vm_target_id if agent else None,
+                "vm_target_name": vm.name if vm else None,
+                "ticket_id": sess.ticket_id,
+                "workspace_path": sess.workspace_path,
+                "created_at": sess.created_at,
+            })
+        return {"sessions": result}
+
+    @app.get("/api/agents")
+    async def api_list_agents(
+        command: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
+        vm_target_name: Optional[str] = None,
+        slug: Optional[str] = None,
+        name: Optional[str] = None,
+        user: str = Depends(_require_login),
+    ) -> dict:
+        """List agents with optional filters."""
+        agents = database.list_agents()
+        result = []
+        for agent in agents:
+            # Apply filters
+            if command and command.lower() not in agent.command.lower():
+                continue
+            if vm_target_id and agent.vm_target_id != vm_target_id:
+                continue
+            if slug and slug.lower() not in agent.slug.lower():
+                continue
+            if name and name.lower() not in agent.name.lower():
+                continue
+
+            vm = database.get_vm_target(agent.vm_target_id) if agent.vm_target_id else None
+            if vm_target_name and (not vm or vm_target_name.lower() not in vm.name.lower()):
+                continue
+
+            # Check if running
+            running = False
+            session_id = None
+            all_sessions = database.list_sessions(agent_id=agent.id)
+            for sess in all_sessions:
+                if not sess.ticket_id and sess.status in ("running", "blocked"):
+                    running = True
+                    session_id = sess.id
+                    break
+
+            result.append({
+                "id": agent.id,
+                "name": agent.name,
+                "slug": agent.slug,
+                "command": agent.command,
+                "session_mode": agent.session_mode,
+                "vm_target_id": agent.vm_target_id,
+                "vm_target_name": vm.name if vm else None,
+                "session_file_config_id": agent.session_file_config_id,
+                "working_directory": agent.working_directory,
+                "session_directory": agent.session_directory,
+                "initial_prompt": agent.initial_prompt,
+                "running": running,
+                "session_id": session_id,
+            })
+        return {"agents": result}
+
+    @app.get("/api/agents/{agent_id}")
+    async def api_get_agent(agent_id: str, user: str = Depends(_require_login)) -> dict:
+        """Get a single agent by ID."""
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        vm = database.get_vm_target(agent.vm_target_id) if agent.vm_target_id else None
+
+        # Check if running
+        running = False
+        session_id = None
+        all_sessions = database.list_sessions(agent_id=agent.id)
+        for sess in all_sessions:
+            if not sess.ticket_id and sess.status in ("running", "blocked"):
+                running = True
+                session_id = sess.id
+                break
+
+        return {
+            "id": agent.id,
+            "name": agent.name,
+            "slug": agent.slug,
+            "command": agent.command,
+            "session_mode": agent.session_mode,
+            "vm_target_id": agent.vm_target_id,
+            "vm_target_name": vm.name if vm else None,
+            "required_ssh_options": agent.required_ssh_options,
+            "env_vars": agent.env_vars,
+            "mcp_config": agent.mcp_config,
+            "trust_level": agent.trust_level,
+            "input_echo_prefix": agent.input_echo_prefix,
+            "response_prefix": agent.response_prefix,
+            "llm_base_url": agent.llm_base_url,
+            "llm_api_key": agent.llm_api_key,
+            "llm_model": agent.llm_model,
+            "session_file_config_id": agent.session_file_config_id,
+            "average_memory_usage_mb": agent.average_memory_usage_mb,
+            "initial_prompt": agent.initial_prompt,
+            "working_directory": agent.working_directory,
+            "session_directory": agent.session_directory,
+            "running": running,
+            "session_id": session_id,
+            "created_at": agent.created_at,
+            "updated_at": agent.updated_at,
+        }
+
+    @app.patch("/api/agents/{agent_id}")
+    async def api_update_agent(agent_id: str, request: Request, user: str = Depends(_require_login)) -> dict:
+        """Update agent fields via JSON PATCH."""
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        data = await request.json()
+        # Build kwargs for update_agent - only include fields that are present
+        update_kwargs = {}
+        allowed_fields = [
+            "name",
+            "slug",
+            "command",
+            "session_mode",
+            "vm_target_id",
+            "required_ssh_options",
+            "env_vars",
+            "mcp_config",
+            "trust_level",
+            "input_echo_prefix",
+            "response_prefix",
+            "llm_base_url",
+            "llm_api_key",
+            "llm_model",
+            "session_file_config_id",
+            "average_memory_usage_mb",
+            "initial_prompt",
+            "working_directory",
+            "session_directory",
+        ]
+        for field in allowed_fields:
+            if field in data:
+                update_kwargs[field] = data[field]
+
+        if update_kwargs:
+            database.update_agent(agent_id, **update_kwargs)
+
+        # Return updated agent
+        return await api_get_agent(agent_id, user)
+
     @app.get("/api/agents/{agent_id}/session-status")
     async def api_agent_session_status(agent_id: str, user: str = Depends(_require_login)) -> dict:
         import subprocess
@@ -4217,10 +4842,23 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return {"running": False, "session_id": None, "location": None, "pid": None, "log_path": None}
 
     @app.post("/api/agents/{agent_id}/start-session")
-    async def api_start_agent_session(agent_id: str, user: str = Depends(_require_login)) -> dict:
+    async def api_start_agent_session(
+        agent_id: str,
+        request: Request,
+        user: str = Depends(_require_login),
+    ) -> dict:
         import subprocess
         import tempfile
         import shlex
+        from datetime import datetime
+
+        # Parse optional JSON body for file_mode
+        file_mode = "check" # default: check timestamps
+        try:
+            body = await request.json()
+            file_mode = body.get("file_mode", "check")
+        except Exception:
+            pass # No body or invalid JSON is fine
 
         agent = database.get_agent(agent_id)
         if not agent:
@@ -4256,7 +4894,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Determine workspace: use working_directory if set, otherwise create temp
         if agent.working_directory:
             # Verify the working directory exists on the VM
-            check_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"]
+            check_cmd = [
+                "ssh", "-p",
+                str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"
+            ]
             result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=30)
             if result.stdout.strip() != "exists":
                 raise HTTPException(status_code=400, detail=f"Working directory does not exist on VM: {agent.working_directory}")
@@ -4282,6 +4923,61 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=30)
         else:
             session_files_dir = workspace
+
+        # Check timestamps if file_mode is "check" and session files exist
+        if file_mode == "check" and agent.session_file_config_id:
+            definitions = database.list_session_file_definitions(agent.session_file_config_id)
+            session_files = database.list_session_files(agent_id)
+            file_map = {sf.definition_id: sf for sf in session_files}
+
+            # Get timestamps of remote files
+            filenames = [defn.filename for defn in definitions]
+            if filenames:
+                # Build command to get timestamps of all files at once
+                stat_parts = " ".join([f"{shlex.quote(session_files_dir)}/{shlex.quote(fn)}" for fn in filenames])
+                stat_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"stat -c '%Y %n' {stat_parts} 2>/dev/null || true"]
+                stat_result = subprocess.run(stat_cmd, capture_output=True, text=True, timeout=30)
+
+                newer_files = []
+                if stat_result.returncode == 0 and stat_result.stdout.strip():
+                    for line in stat_result.stdout.strip().split("\n"):
+                        if not line.strip():
+                            continue
+                        parts = line.split(" ", 1)
+                        if len(parts) == 2:
+                            try:
+                                remote_ts = int(parts[0])
+                                remote_path = parts[1]
+                                remote_filename = os.path.basename(remote_path)
+                                # Find corresponding definition and session file
+                                for defn in definitions:
+                                    if defn.filename == remote_filename:
+                                        sf = file_map.get(defn.id)
+                                        if sf and sf.updated_at:
+                                            # Parse updated_at (ISO format)
+                                            local_dt = datetime.fromisoformat(sf.updated_at.replace("Z", "+00:00"))
+                                            local_ts = int(local_dt.timestamp())
+                                            if remote_ts > local_ts:
+                                                newer_files.append({
+                                                    "filename": remote_filename,
+                                                    "remote_timestamp": remote_ts,
+                                                    "local_timestamp": local_ts,
+                                                })
+                                        break
+                            except (ValueError, IndexError):
+                                pass
+
+                if newer_files:
+                    # Return conflict response - files on target are newer
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "conflict": "session_files_newer_on_target",
+                            "message": "Session files on target are newer than in Wintermute",
+                            "files": newer_files,
+                            "workspace": workspace,
+                        }
+                    )
 
         # Create the session record
         session_id = str(uuid.uuid4())
@@ -4337,8 +5033,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 workspace_path=workspace,
             )
 
-        # Copy session files to session_files_dir on VM
-        if agent.session_file_config_id:
+        # Copy session files to session_files_dir on VM (unless using target files)
+        if agent.session_file_config_id and file_mode != "use_target":
             definitions = database.list_session_file_definitions(agent.session_file_config_id)
             session_files = database.list_session_files(agent_id)
             file_map = {sf.definition_id: sf for sf in session_files}
@@ -4415,10 +5111,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 # Create a local temp dir to receive files
                 with tempfile.TemporaryDirectory() as local_tmp:
                     # SCP files from VM (from session_files_dir)
-                    scp_cmd = [
-                        "scp", "-P",
-                        str(spec.port), *spec.options, "-r", f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"
-                    ]
+                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"]
                     scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                     if scp_result.returncode == 0:
                         for defn in definitions:
@@ -4592,14 +5285,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
         # Create a local temp dir to receive files
         with tempfile.TemporaryDirectory() as local_tmp:
-            # SCP files from VM
-            scp_cmd = [
-                "scp", "-P", str(spec.port), *spec.options, "-r",
-                f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"
-            ]
-            scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
-            if scp_result.returncode != 0:
-                raise HTTPException(status_code=500, detail=f"Failed to pull files from VM: {scp_result.stderr}")
+            # SCP only the specific files we need (not entire directory which may have .venv etc)
+            remote_files = [f"{spec.user}@{spec.host}:{session_files_dir}/{defn.filename}" for defn in definitions]
+            if remote_files:
+                scp_cmd = ["scp", "-P", str(spec.port), *spec.options, *remote_files, f"{local_tmp}/"]
+                scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=30)
+                # Don't fail if some files don't exist - just log it
+                if scp_result.returncode != 0 and "No such file" not in scp_result.stderr:
+                    raise HTTPException(status_code=500, detail=f"Failed to pull files from VM: {scp_result.stderr}")
 
             for defn in definitions:
                 local_path = os.path.join(local_tmp, defn.filename)
@@ -4777,6 +5470,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not name:
             raise HTTPException(status_code=400, detail="Missing project name")
         slug = slug_raw or _slugify(name)
+        symbol = str(form.get("symbol", "")).strip() or None
         channel_name = slug
         channel_id = None
         prompt_template = str(form.get("prompt_template", "")).strip() or None
@@ -4852,8 +5546,9 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             name,
             slug,
             channel_id,
-            prompt_template,
-            max_repo_resources,
+            symbol=symbol,
+            prompt_template=prompt_template,
+            max_repo_resources=max_repo_resources,
             repo_mode=repo_mode,
             repo_path=repo_path,
             repo_url=repo_url,
@@ -4869,7 +5564,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             auto_start=auto_start,
         )
         _update_slack_channel_filter(database)
-        return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.get("/ui/projects/{project_id}/edit")
     def edit_project_ui(project_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -4878,6 +5573,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Project not found")
         remote_tokens = database.list_remote_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         mirror_repo_path_base = os.environ.get("WINTERMUTE_MIRROR_REPO_PATH_BASE", "/home/user/git")
         # Compute external repo URL and build badge from project's source settings
         external_repo_url = None
@@ -4922,6 +5618,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
                 "remote_tokens": remote_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "external_repo_url": external_repo_url,
                 "external_repo_provider": external_repo_provider,
                 "build_badge_url": build_badge_url,
@@ -4969,7 +5666,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             enabled=enabled,
             auto_start=auto_start,
         )
-        return RedirectResponse(f"{return_to}?saved=project_source_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/projects/{project_id}")
     async def update_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -4979,6 +5676,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         name = str(form.get("name", "")).strip()
         slug = str(form.get("slug", "")).strip()
+        symbol = str(form.get("symbol", "")).strip() or None
         channel_id = str(form.get("slack_channel_id", "")).strip() or None
         prompt_template = str(form.get("prompt_template", "")).strip() or None
         max_repo_raw = str(form.get("max_repo_resources", "")).strip()
@@ -5008,6 +5706,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             project_id,
             name=name,
             slug=slug,
+            symbol=symbol,
             slack_channel_id=channel_id,
             prompt_template=prompt_template,
             max_repo_resources=max_repo_resources,
@@ -5026,7 +5725,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             auto_start=auto_start,
         )
         _update_slack_channel_filter(database)
-        return RedirectResponse("/ui/projects?saved=project_updated", status_code=303)
+        return RedirectResponse("/ui/projects", status_code=303)
 
     @app.post("/projects/{project_id}/delete")
     async def delete_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5048,7 +5747,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     ) from exc
         database.delete_project(project_id)
         _update_slack_channel_filter(database)
-        return RedirectResponse("/ui/projects?saved=project_deleted", status_code=303)
+        return RedirectResponse("/ui/projects", status_code=303)
 
     @app.get("/badges/projects/{project_id}")
     async def get_project_badge(project_id: str) -> Response:
@@ -5132,6 +5831,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
         agent_id = str(form.get("agent_id", "")).strip() or None
+        vm_target_id = str(form.get("vm_target_id", "")).strip() or None
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
         internal_notes = str(form.get("internal_notes", "")).strip() or None
@@ -5157,6 +5857,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             ticket_id=str(uuid.uuid4()),
             project_id=project_id,
             agent_id=agent_id,
+            vm_target_id=vm_target_id,
             title=title,
             description=description,
             assigned_to=assigned_to,
@@ -5171,12 +5872,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             story_points=story_points,
             created_by_id=created_by_id,
         )
-        return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/tickets/{ticket_id}/delete")
     async def delete_ticket(ticket_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_ticket(ticket_id)
-        return RedirectResponse("/ui/tickets?saved=ticket_deleted", status_code=303)
+        return RedirectResponse("/ui/tickets", status_code=303)
 
     @app.get("/ui/tickets/{ticket_id}/edit")
     async def tickets_edit_ui(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -5252,13 +5953,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         source.repo,
                         issue_number,
                     )
-        comment_rows = list(reversed(database.list_comments(ticket_id=ticket_id)))
+        comment_rows = database.list_comments(ticket_id=ticket_id)
         comments = [{
             **_comment_to_dict(row),
             "created_at": row.created_at,
         } for row in comment_rows]
         last_comment_ts = comment_rows[-1].created_at if comment_rows else None
         created_by_user = database.get_user_by_id(ticket.created_by_id) if ticket.created_by_id else None
+        ticket_history = database.list_ticket_history(ticket_id)
         return _render_template(
             request,
             "ticket_edit.html",
@@ -5269,6 +5971,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "ticket": ticket,
                 "projects": database.list_projects(),
                 "agents": database.list_agents(),
+                "vm_targets": database.list_vm_targets(),
+                "vm_names": {
+                    vm.id: vm.name
+                    for vm in database.list_vm_targets()
+                },
                 "users": database.list_users(),
                 "sprints": database.list_sprints(),
                 "description_html": description_html,
@@ -5291,6 +5998,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "source_label": source_label,
                 "source_href": source_href,
                 "created_by_user": created_by_user,
+                "ticket_history": ticket_history,
             },
         )
 
@@ -5299,6 +6007,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
         agent_id = str(form.get("agent_id", "")).strip()
+        vm_target_id = str(form.get("vm_target_id", "")).strip()
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
         internal_notes = str(form.get("internal_notes", "")).strip() or None
@@ -5315,10 +6024,15 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         story_points = float(story_points_str) if story_points_str else None
         if not project_id or not title:
             raise HTTPException(status_code=400, detail="Missing ticket fields")
+        # Get user_id for history recording
+        current_user = database.get_user(user)
+        user_id = current_user.id if current_user else None
         database.update_ticket(
             ticket_id,
             project_id=project_id,
             agent_id=agent_id,
+            vm_target_id=vm_target_id,
+            clear_vm_target=not vm_target_id,
             title=title,
             description=description,
             internal_notes=internal_notes,
@@ -5331,8 +6045,42 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             priority=priority,
             hours=hours,
             story_points=story_points,
+            record_history_user_id=user_id,
         )
-        return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
+        return RedirectResponse(f"/ui/tickets/{ticket_id}/edit", status_code=303)
+
+    @app.post("/ui/tickets/bulk-action")
+    async def tickets_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
+        """Handle bulk actions on tickets (e.g., close)."""
+        form = await request.form()
+        action = str(form.get("action", "")).strip()
+        ids = form.getlist("ids")
+        return_to = str(form.get("return_to", "")).strip()
+        if not action or not ids:
+            raise HTTPException(status_code=400, detail="Missing action or ids")
+
+        updated_count = 0
+        if action == "close":
+            for ticket_id in ids:
+                ticket = database.get_ticket(ticket_id)
+                if not ticket:
+                    continue
+                database.update_ticket(ticket_id, status="done")
+                updated_count += 1
+        elif action == "cancel":
+            for ticket_id in ids:
+                ticket = database.get_ticket(ticket_id)
+                if not ticket:
+                    continue
+                database.update_ticket(ticket_id, status="cancelled")
+                updated_count += 1
+
+        # Redirect back to original page with filters preserved
+        if return_to and return_to.startswith("/ui/"):
+            # Add saved param to existing URL
+            separator = "&" if "?" in return_to else "?"
+            return RedirectResponse(f"{return_to}{separator}saved={updated_count}", status_code=303)
+        return RedirectResponse(f"/ui/tickets?saved={updated_count}", status_code=303)
 
     @app.post("/api/tickets/{ticket_id}/description")
     async def api_ticket_update_description(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -5357,7 +6105,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         updates: dict[str, Any] = {}
         if "status" in payload:
             status = str(payload["status"]).strip()
-            if status not in ("open", "in-progress", "needs-feedback", "done"):
+            if status not in ("open", "in-progress", "needs-feedback", "done", "cancelled"):
                 raise HTTPException(status_code=400, detail="Invalid status")
             updates["status"] = status
         if "priority" in payload:
@@ -5464,12 +6212,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             public=public,
             approved=approved,
         )
-        return RedirectResponse(f"/ui/comments/{comment_id}/edit?saved=comment_updated", status_code=303)
+        return RedirectResponse(f"/ui/comments/{comment_id}/edit", status_code=303)
 
     @app.post("/comments/{comment_id}/delete")
     async def delete_comment(comment_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_comment(comment_id)
-        return RedirectResponse("/ui/comments?saved=comment_deleted", status_code=303)
+        return RedirectResponse("/ui/comments", status_code=303)
 
     @app.get("/ui/repo-resources")
     def repo_resources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -5531,12 +6279,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             agent_id=agent_id,
             last_used_at=utc_now(),
         )
-        return RedirectResponse(f"/ui/repo-resources/{resource_id}/edit?saved=repo_resource_updated", status_code=303)
+        return RedirectResponse(f"/ui/repo-resources/{resource_id}/edit", status_code=303)
 
     @app.post("/repo-resources/{resource_id}/delete")
     async def repo_resource_delete(resource_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_repo_resource(resource_id)
-        return RedirectResponse("/ui/repo-resources?saved=repo_resource_deleted", status_code=303)
+        return RedirectResponse("/ui/repo-resources", status_code=303)
 
     @app.post("/vms")
     async def create_vm(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5551,7 +6299,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not name or not host or not user_name:
             raise HTTPException(status_code=400, detail="Missing VM fields")
         database.insert_vm_target(str(uuid.uuid4()), name, host, user_name, port)
-        return RedirectResponse(f"{return_to}?saved=vm_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.get("/ui/vms/{vm_id}/edit")
     def edit_vm_ui(vm_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -5591,12 +6339,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             port=port,
             required_reserve_memory_gb=required_reserve_memory_gb,
         )
-        return RedirectResponse("/ui/vms?saved=vm_updated", status_code=303)
+        return RedirectResponse("/ui/vms", status_code=303)
 
     @app.post("/vms/{vm_id}/delete")
     async def delete_vm(vm_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_vm_target(vm_id)
-        return RedirectResponse("/ui/vms?saved=vm_deleted", status_code=303)
+        return RedirectResponse("/ui/vms", status_code=303)
 
     @app.post("/agents")
     async def create_agent(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5617,6 +6365,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         llm_model = str(form.get("llm_model", "")).strip() or None
         working_directory = str(form.get("working_directory", "")).strip() or None
         session_directory = str(form.get("session_directory", "")).strip() or None
+        autostart = str(form.get("autostart", "")).strip() in ("1", "true", "on")
         return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
         if not return_to.startswith("/ui"):
             return_to = "/ui/agents"
@@ -5641,12 +6390,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 llm_model=llm_model,
                 working_directory=working_directory,
                 session_directory=session_directory,
+                autostart=autostart,
             )
         except IntegrityError as exc:
             field, message = _parse_integrity_error(exc)
             error_param = urllib.parse.quote(f"{field}:{message}" if field else message)
             return RedirectResponse(f"/ui/agents/create?error={error_param}&return_to={urllib.parse.quote(return_to)}", status_code=303)
-        return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/ui/agents/bulk-action")
     async def agents_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5654,6 +6404,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         action = str(form.get("action", "")).strip()
         ids = form.getlist("ids")
+        return_to = str(form.get("return_to", "")).strip()
         if not action or not ids:
             raise HTTPException(status_code=400, detail="Missing action or ids")
 
@@ -5697,10 +6448,15 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     average_memory_usage_mb=agent.average_memory_usage_mb,
                     working_directory=agent.working_directory,
                     session_directory=agent.session_directory,
+                    autostart=agent.autostart,
                 )
                 cloned_count += 1
 
-            return RedirectResponse(f"/ui/agents?saved=cloned_{cloned_count}", status_code=303)
+            # Redirect back to original page with filters preserved
+            if return_to and return_to.startswith("/ui/"):
+                separator = "&" if "?" in return_to else "?"
+                return RedirectResponse(f"{return_to}{separator}saved={cloned_count}", status_code=303)
+            return RedirectResponse(f"/ui/agents?saved={cloned_count}", status_code=303)
 
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
 
@@ -5787,6 +6543,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         initial_prompt = str(form.get("initial_prompt", "")).strip() or None
         working_directory = str(form.get("working_directory", "")).strip() or None
         session_directory = str(form.get("session_directory", "")).strip() or None
+        autostart = str(form.get("autostart", "")).strip() in ("1", "true", "on")
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
         try:
@@ -5810,6 +6567,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 initial_prompt=initial_prompt,
                 working_directory=working_directory,
                 session_directory=session_directory,
+                autostart=autostart,
             )
         except IntegrityError as exc:
             field, message = _parse_integrity_error(exc)
@@ -5823,12 +6581,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             for defn in definitions:
                 if defn.id not in existing_def_ids:
                     database.upsert_session_file(agent_id, defn.id, defn.default_content)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=agent_updated", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/delete")
     async def delete_agent(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_agent(agent_id)
-        return RedirectResponse("/ui/agents?saved=agent_deleted", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Channels CRUD
@@ -5858,7 +6616,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             external_channel_id=external_channel_id,
             enabled=True,
         )
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_created", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/channels/{channel_id}/edit")
     async def update_agent_channel(agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5873,12 +6631,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             external_channel_id=external_channel_id,
             enabled=enabled,
         )
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_updated", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/channels/{channel_id}/delete")
     async def delete_agent_channel(agent_id: str, channel_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_channel(channel_id)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_deleted", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Session Files
@@ -5894,7 +6652,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         for defn in definitions:
             content = str(form.get(f"file_{defn.id}", ""))
             database.upsert_session_file(agent_id, defn.id, content)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_files_saved", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Standalone Session Control
@@ -5944,7 +6702,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 file_path = os.path.join(workspace, defn.filename)
                 with open(file_path, "w") as f:
                     f.write(file_content)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_started", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/session/stop")
     async def stop_agent_standalone_session(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5973,7 +6731,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         database.upsert_session_file(agent_id, defn.id, content)
         # Mark session as stopped
         database.update_session(standalone_session.id, status="stopped")
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_stopped", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/session/message")
     async def send_agent_standalone_message(agent_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6032,7 +6790,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not agent_id or not pattern or not response:
             raise HTTPException(status_code=400, detail="Missing response fields")
         database.insert_agent_response(str(uuid.uuid4()), agent_id, pattern, response)
-        return RedirectResponse(f"{return_to}?saved=agent_response_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/agent-responses/{response_id}/edit")
     async def update_agent_response(response_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6051,21 +6809,21 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             pattern=pattern,
             response=response,
         )
-        return RedirectResponse(f"{return_to}?saved=agent_response_updated", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/agent-responses/{response_id}/delete")
     async def delete_agent_response(response_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_agent_response(response_id)
-        return RedirectResponse("/ui/agent-responses?saved=agent_response_deleted", status_code=303)
+        return RedirectResponse("/ui/agent-responses", status_code=303)
 
     # Legacy project_vms POST handlers - no longer functional
     @app.post("/project_vms")
     async def create_project_vm_legacy(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
-        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     @app.post("/project_vms/{mapping_id}/delete")
     async def delete_project_vm_legacy(mapping_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
-        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     @app.get("/ui/sessions")
     def sessions_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -6128,12 +6886,78 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not status:
             raise HTTPException(status_code=400, detail="Status is required")
         database.update_session(session_id, status=status)
-        return RedirectResponse(f"/ui/sessions/{session_id}?saved=session_updated", status_code=303)
+        return RedirectResponse(f"/ui/sessions/{session_id}", status_code=303)
 
     @app.post("/sessions/{session_id}/delete")
     async def delete_session(session_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_session(session_id)
-        return RedirectResponse("/ui/sessions?saved=session_deleted", status_code=303)
+        return RedirectResponse("/ui/sessions", status_code=303)
+
+    @app.get("/ui/agent-wakes")
+    def agent_wakes_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        status_filter = request.query_params.get("status")
+        wakes = database.list_agent_wakes(status=status_filter) if status_filter else database.list_agent_wakes()
+        growl_message = _growl_message(request.query_params.get("saved"))
+        sessions = database.list_sessions()
+        session_lookup = {s.id: s.id[:8] + "..." for s in sessions}
+
+        # Build filter options
+        filter_options = {
+            "status": [
+                ("", "All"),
+                ("pending", "Pending"),
+                ("fired", "Fired"),
+                ("cancelled", "Cancelled"),
+            ],
+        }
+
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="agent_wakes",
+            title="Agent Wakes",
+            description="Scheduled agent wake-up timers.",
+            create_label=None,
+            create_url=None,
+            rows=_build_agent_wake_rows(wakes, session_lookup),
+            empty_message="No agent wakes yet.",
+            filter_options=filter_options,
+        )
+        return _render_template(
+            request,
+            "agent_wakes.html",
+            {
+                "title": "Agent Wakes",
+                "active_nav": "agent_wakes",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/agent-wakes/{wake_id}")
+    def agent_wake_detail_ui(wake_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
+        wake = database.get_agent_wake(wake_id)
+        if not wake:
+            raise HTTPException(status_code=404, detail="Agent wake not found")
+        session = database.get_session(wake.agent_session_id)
+        return _render_template(
+            request,
+            "agent_wake_detail.html",
+            {
+                "title": "Agent Wake Detail",
+                "active_nav": "agent_wakes",
+                "growl_message": None,
+                "wake": wake,
+                "session": session,
+                "duration_label": _format_duration(wake.duration_seconds),
+            },
+        )
+
+    @app.post("/agent-wakes/{wake_id}/cancel")
+    async def cancel_agent_wake_ui(wake_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
+        database.cancel_agent_wake(wake_id, "user")
+        return RedirectResponse(f"/ui/agent-wakes/{wake_id}", status_code=303)
 
     @app.get("/logs/tail")
     def tail_logs(limit: int = Query(default=100, ge=1, le=1000), user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -6389,6 +7213,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/projects"
         remote_tokens = database.list_remote_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         mirror_repo_path_base = os.environ.get("WINTERMUTE_MIRROR_REPO_PATH_BASE", "/home/user/git")
         return _render_template(
             request,
@@ -6401,6 +7226,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "default_prompt_template": DEFAULT_PROJECT_PROMPT_TEMPLATE,
                 "remote_tokens": remote_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "mirror_repo_path_base": mirror_repo_path_base,
             },
         )
@@ -6544,6 +7370,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/agent-responses"
         agent_id = request.query_params.get("agent_id")
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         return _render_template(
             request,
             "agent_response_create.html",
@@ -6552,6 +7379,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "active_nav": "agent_responses",
                 "growl_message": None,
                 "agents": agents,
+                "vm_names": vm_names,
                 "agent_id": agent_id,
                 "return_to": return_to,
             },
@@ -6566,6 +7394,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not return_to.startswith("/ui"):
             return_to = "/ui/agent-responses"
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         growl_message = _growl_message(request.query_params.get("saved"))
         return _render_template(
             request,
@@ -6576,6 +7405,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": growl_message,
                 "response": response,
                 "agents": agents,
+                "vm_names": vm_names,
                 "return_to": return_to,
             },
         )
@@ -6677,7 +7507,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             enabled=enabled,
             status="active",
         )
-        return RedirectResponse(f"{return_to}?saved=sprint", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/sprints/{sprint_id}/edit")
     async def update_sprint(sprint_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6695,12 +7525,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             enabled=enabled,
             status=status if status else None,
         )
-        return RedirectResponse(f"/ui/sprints/{sprint_id}/edit?saved=sprint", status_code=303)
+        return RedirectResponse(f"/ui/sprints/{sprint_id}/edit", status_code=303)
 
     @app.post("/sprints/{sprint_id}/delete")
     async def delete_sprint(sprint_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_sprint(sprint_id)
-        return RedirectResponse("/ui/sprints?saved=sprint_deleted", status_code=303)
+        return RedirectResponse("/ui/sprints", status_code=303)
 
     # Legacy project-vms routes - VMs are now linked directly to agents
     @app.get("/ui/project-vms")
@@ -6862,6 +7692,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         github_tokens = database.list_github_tokens()
         gitlab_tokens = database.list_gitlab_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         return_to = request.query_params.get("return_to", "/ui/issue-sources")
         if not return_to.startswith("/ui"):
             return_to = "/ui/issue-sources"
@@ -6879,6 +7710,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "github_tokens": github_tokens,
                 "gitlab_tokens": gitlab_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "return_to": return_to,
                 "token_notice": token_notice,
             },
@@ -6893,6 +7725,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         github_tokens = database.list_github_tokens()
         gitlab_tokens = database.list_gitlab_tokens()
         agents = database.list_agents()
+        vm_names = {vm.id: vm.name for vm in database.list_vm_targets()}
         labels = ", ".join(source.labels)
         return _render_template(
             request,
@@ -6906,6 +7739,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "github_tokens": github_tokens,
                 "gitlab_tokens": gitlab_tokens,
                 "agents": agents,
+                "vm_names": vm_names,
                 "labels": labels,
             },
         )
@@ -6956,7 +7790,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/issue-sources")).strip() or "/ui/issue-sources"
         if not return_to.startswith("/ui"):
             return_to = "/ui/issue-sources"
-        return RedirectResponse(f"{return_to}?saved=issue_source_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/issue-sources/{source_id}/edit")
     async def update_issue_source(source_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6995,12 +7829,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             auto_start=auto_start,
             poll_interval_seconds=poll_interval_seconds,
         )
-        return RedirectResponse("/ui/issue-sources?saved=issue_source_updated", status_code=303)
+        return RedirectResponse("/ui/issue-sources", status_code=303)
 
     @app.post("/issue-sources/{source_id}/delete")
     async def delete_issue_source(source_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_issue_source(source_id)
-        return RedirectResponse("/ui/issue-sources?saved=issue_source_deleted", status_code=303)
+        return RedirectResponse("/ui/issue-sources", status_code=303)
 
     @app.get("/ui/project-vms/{mapping_id}/edit")
     def project_vms_edit_ui_redirect(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7008,11 +7842,29 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.post("/project_vms/{mapping_id}/edit")
     async def project_vms_update_legacy(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
-        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     @app.get("/ui/tickets")
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
-        tickets = database.list_tickets()
+        # Extract filter params
+        filter_project_id = request.query_params.get("project_id", "").strip() or None
+        filter_status = request.query_params.get("status", "").strip() or None
+
+        # Extract sort params
+        sort_param = request.query_params.get("sort", "")
+        order_by: list[tuple[str, str]] = []
+        sortable_cols = LIST_TABLE_CONFIGS["tickets"].get("sortable", [])
+        if sort_param:
+            for part in sort_param.split(","):
+                part = part.strip()
+                if part.startswith("-"):
+                    col = part[1:]
+                    if col in sortable_cols:
+                        order_by.append((col, "desc"))
+                elif part and part in sortable_cols:
+                    order_by.append((part, "asc"))
+
+        tickets = database.list_tickets(project_id=filter_project_id, status=filter_status, order_by=order_by if order_by else None)
         projects = database.list_projects()
         agents = database.list_agents()
         users = database.list_users()
@@ -7020,6 +7872,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         agent_lookup = {agent.id: agent.name for agent in agents}
         user_lookup = {u.id: u.username for u in users}
         growl_message = _growl_message(request.query_params.get("saved"))
+
+        # Build filter options for dropdowns
+        filter_options = {
+            "project_id": [("", "All Projects")] + [(p.id, p.name) for p in projects],
+            "status": [("", "All Statuses"), ("open", "Open"), ("in-progress", "In Progress"), ("needs-feedback", "Needs Feedback"), ("done", "Done"), ("cancelled", "Cancelled")],
+        }
+
         table_context = _build_table_context(
             database=database,
             request=request,
@@ -7031,6 +7890,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             create_url="/ui/tickets/create?return_to=/ui/tickets",
             rows=_build_ticket_rows(tickets, project_lookup, agent_lookup, user_lookup),
             empty_message="No tickets yet.",
+            filter_options=filter_options,
         )
         return _render_template(
             request,
@@ -7047,6 +7907,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
     def tickets_create_ui(request: Request, user: str = Depends(_require_login)) -> Response:
         projects = database.list_projects()
         agents = database.list_agents()
+        vm_targets = database.list_vm_targets()
+        vm_names = {vm.id: vm.name for vm in vm_targets}
         sprints = database.list_sprints(status="active")
         users = database.list_users()
         return_to = request.query_params.get("return_to", "/ui/tickets")
@@ -7062,6 +7924,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "projects": projects,
                 "agents": agents,
+                "vm_targets": vm_targets,
+                "vm_names": vm_names,
                 "sprints": sprints,
                 "users": users,
                 "return_to": return_to,
@@ -7098,8 +7962,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not user_record:
             raise HTTPException(status_code=400, detail="User not found")
         database.upsert_column_preferences(user_record.id, model, columns)
-        separator = "&" if "?" in return_to else "?"
-        return RedirectResponse(f"{return_to}{separator}saved=columns_updated", status_code=303)
+        return RedirectResponse(return_to, status_code=303)
 
     # -------------------------------------------------------------------------
     # Session File Configs
@@ -7205,7 +8068,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Name is required")
         config_id = str(uuid.uuid4())
         database.insert_session_file_config(config_id, name, description)
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_created", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-configs/{config_id}/edit")
     async def update_session_file_config(config_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7213,12 +8076,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         name = str(form.get("name", "")).strip() or None
         description = str(form.get("description", "")).strip() or None
         database.update_session_file_config(config_id, name=name, description=description)
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_updated", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-configs/{config_id}/delete")
     async def delete_session_file_config(config_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_session_file_config(config_id)
-        return RedirectResponse("/ui/session-file-configs?saved=config_deleted", status_code=303)
+        return RedirectResponse("/ui/session-file-configs", status_code=303)
 
     @app.post("/ui/session_file_configs/bulk-action")
     async def session_file_configs_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7268,7 +8131,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
                 cloned_count += 1
 
-        return RedirectResponse(f"/ui/session-file-configs?saved=cloned_{cloned_count}", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs", status_code=303)
 
     # -------------------------------------------------------------------------
     # Session File Definitions
@@ -7306,7 +8169,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.insert_session_file_definition(
             definition_id, config_id, filename, default_content, description=description, required=required, sync_on_exit=sync_on_exit, sort_order=sort_order
         )
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_created", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-definitions/{definition_id}/edit")
     async def update_session_file_definition(definition_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7327,7 +8190,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             sync_on_exit=sync_on_exit,
             sort_order=sort_order,
         )
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_updated", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-definitions/{definition_id}/delete")
     async def delete_session_file_definition(definition_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7335,8 +8198,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         config_id = str(form.get("config_id", "")).strip()
         database.delete_session_file_definition(definition_id)
         if config_id:
-            return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_deleted", status_code=303)
-        return RedirectResponse("/ui/session-file-configs?saved=definition_deleted", status_code=303)
+            return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
+        return RedirectResponse("/ui/session-file-configs", status_code=303)
 
     # -------------------------------------------------------------------------
     # Session Files (per-agent file content)
@@ -7376,8 +8239,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Session file not found")
         database.update_session_file(file_id, content=content)
         if agent_id:
-            return RedirectResponse(f"/ui/session-files/{file_id}/edit?saved=file_updated", status_code=303)
-        return RedirectResponse(f"/ui/session-files/{file_id}/edit?saved=file_updated", status_code=303)
+            return RedirectResponse(f"/ui/session-files/{file_id}/edit", status_code=303)
+        return RedirectResponse(f"/ui/session-files/{file_id}/edit", status_code=303)
 
     @app.post("/session-files/{file_id}/delete")
     async def delete_session_file(file_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7385,8 +8248,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         agent_id = str(form.get("agent_id", "")).strip()
         database.delete_session_file(file_id)
         if agent_id:
-            return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=file_deleted", status_code=303)
-        return RedirectResponse("/ui/agents?saved=file_deleted", status_code=303)
+            return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     # -------------------------------------------------------------------------
     # Metric Definitions UI
@@ -7449,7 +8312,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             recording_frequency_minutes=frequency,
             enabled=enabled,
         )
-        return RedirectResponse("/ui/metric-definitions?saved=definition_created", status_code=303)
+        return RedirectResponse("/ui/metric-definitions", status_code=303)
 
     @app.get("/ui/metric-definitions/{definition_id}/edit")
     def metric_definition_edit_ui(definition_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -7484,12 +8347,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             recording_frequency_minutes=frequency,
             enabled=enabled,
         )
-        return RedirectResponse(f"/ui/metric-definitions/{definition_id}/edit?saved=definition_updated", status_code=303)
+        return RedirectResponse(f"/ui/metric-definitions/{definition_id}/edit", status_code=303)
 
     @app.post("/metric-definitions/{definition_id}/delete")
     def delete_metric_definition(definition_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_metric_definition(definition_id)
-        return RedirectResponse("/ui/metric-definitions?saved=definition_deleted", status_code=303)
+        return RedirectResponse("/ui/metric-definitions", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Metrics Logs UI

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 import logging
 import re
@@ -617,6 +617,34 @@ async def _run_gemini_session(
 
 async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRecord, output: str) -> None:
     logger = logging.getLogger(__name__)
+
+    # Process wake commands first
+    wake_commands = _parse_wake_commands(output)
+    clear_wakes = _has_clear_wakes_command(output)
+
+    if clear_wakes:
+        cancelled_count = ctx.db.cancel_agent_wakes_for_session(session.id, "agent")
+        logger.info("Cancelled %d pending wake(s) for session %s", cancelled_count, session.id)
+
+    for duration_seconds, context in wake_commands:
+        wake_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        wake_at = (now + timedelta(seconds=duration_seconds)).isoformat()
+        ctx.db.insert_agent_wake(
+            wake_id=wake_id,
+            agent_session_id=session.id,
+            wake_at=wake_at,
+            duration_seconds=duration_seconds,
+            context=context,
+        )
+        logger.info(
+            "Scheduled wake %s for session %s in %ds (context: %s)",
+            wake_id,
+            session.id,
+            duration_seconds,
+            context or "none",
+        )
+
     public_lines, note_lines, blocker_lines, standup_lines, wm_lines = _extract_marked_lines(output)
     if not (public_lines or note_lines or blocker_lines or standup_lines or wm_lines):
         return
@@ -785,7 +813,7 @@ def _process_wm_action(
             logger.warning("WM:STATUS missing value for ticket %s", ticket.id)
             return
         status = arg.lower()
-        valid_statuses = {"open", "in-progress", "needs-feedback", "done"}
+        valid_statuses = {"open", "in-progress", "needs-feedback", "done", "cancelled"}
         if status not in valid_statuses:
             logger.warning("WM:STATUS invalid status '%s' for ticket %s", status, ticket.id)
             return
@@ -823,6 +851,67 @@ def _extract_marked_lines(output: str) -> tuple[list[str], list[str], list[str],
             bucket.append(line[idx + len(marker):].strip())
             break
     return public_lines, note_lines, blocker_lines, standup_lines, wm_lines
+
+
+# Pattern: /wakeme <duration> ["context"]
+# Duration formats: 30s, 5m, 2h, 1d
+WAKEME_PATTERN = re.compile(
+    r'^/wakeme\s+(\d+)([smhd])(?:\s+"([^"]*)")?$',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Pattern: /clear-wakes
+CLEAR_WAKES_PATTERN = re.compile(
+    r'^/clear-wakes\s*$',
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Max wake duration: 24 hours
+MAX_WAKE_DURATION_SECONDS = 24 * 60 * 60
+
+
+def _parse_wake_commands(output: str) -> list[tuple[int, Optional[str]]]:
+    """Parse /wakeme commands from output.
+
+    Returns list of (duration_seconds, context) tuples.
+    """
+    wakes: list[tuple[int, Optional[str]]] = []
+    for match in WAKEME_PATTERN.finditer(output):
+        amount = int(match.group(1))
+        unit = match.group(2).lower()
+        context = match.group(3)
+
+        # Convert to seconds
+        if unit == "s":
+            seconds = amount
+        elif unit == "m":
+            seconds = amount * 60
+        elif unit == "h":
+            seconds = amount * 60 * 60
+        elif unit == "d":
+            seconds = amount * 24 * 60 * 60
+        else:
+            continue
+
+        # Cap at max duration
+        if seconds > MAX_WAKE_DURATION_SECONDS:
+            seconds = MAX_WAKE_DURATION_SECONDS
+
+        wakes.append((seconds, context))
+
+    return wakes
+
+
+def _has_clear_wakes_command(output: str) -> bool:
+    """Check if output contains /clear-wakes command."""
+    return bool(CLEAR_WAKES_PATTERN.search(output))
+
+
+def _strip_wake_commands(output: str) -> str:
+    """Remove /wakeme and /clear-wakes commands from output."""
+    output = WAKEME_PATTERN.sub("", output)
+    output = CLEAR_WAKES_PATTERN.sub("", output)
+    return output
 
 
 def _store_output_comments(ctx: WorkItemContext, session: AgentSessionRecord, agent: Any, chunks: list[str]) -> None:

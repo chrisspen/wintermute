@@ -16,6 +16,11 @@
           <input type="text" name="slug" id="project-slug" placeholder="e.g. proj-name" />
         </div>
         <div class="field-group">
+          <label>Symbol (optional)</label>
+          <input type="text" name="symbol" placeholder="e.g. WM" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Short abbreviation for ticket names (e.g., WM-1). Defaults to uppercase slug.</p>
+        </div>
+        <div class="field-group">
           <label>Slack Channel ID (optional)</label>
           <input type="text" name="slack_channel_id" placeholder="e.g. C0123456789" />
         </div>
@@ -57,7 +62,7 @@
           <select name="source_agent_id">
             <option value="">None</option>
             {% for agent in agents %}
-            <option value="{{ agent.id }}">{{ agent.name }}</option>
+            <option value="{{ agent.id }}">{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
             {% endfor %}
           </select>
         </div>
