@@ -249,6 +249,10 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
                 "label": "Updated",
                 "cell_class": "font-mono text-xs text-slate-500 dark:text-slate-400"
             },
+            {
+                "key": "priority",
+                "label": "Priority"
+            },
         ],
     },
     "projects": {
@@ -262,6 +266,11 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             {
                 "key": "name",
                 "label": "Project"
+            },
+            {
+                "key": "symbol",
+                "label": "Symbol",
+                "cell_class": "font-mono text-sm"
             },
             {
                 "key": "build_status",
@@ -1253,6 +1262,9 @@ def _build_ticket_rows(
             "status": {
                 "text": _display_value(ticket.status)
             },
+            "priority": {
+                "text": _display_value(ticket.priority)
+            },
             "auto_start": {
                 "text": "yes" if ticket.auto_start else "no"
             },
@@ -1320,6 +1332,9 @@ def _build_project_rows(projects: list[Any], database: Any) -> list[dict[str, An
                 "href": f"/ui/projects/{project.id}/edit",
                 "provider": provider,
                 "repo_url": repo_url,
+            },
+            "symbol": {
+                "text": _display_value(project.symbol)
             },
             "build_status": {
                 "text": "",
