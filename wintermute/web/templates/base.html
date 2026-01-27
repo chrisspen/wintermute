@@ -234,6 +234,42 @@
         </div>
       </div>
     </div>
+    <div class="modal" id="error-modal">
+      <div class="modal-card">
+        <h3 id="error-modal-title">Error</h3>
+        <p id="error-modal-message" class="error-modal-message"></p>
+        <div class="modal-actions">
+          <button type="button" id="error-modal-close">OK</button>
+        </div>
+      </div>
+    </div>
+    <script>
+      // Global error modal function - available on all pages
+      window.showErrorModal = function(title, message) {
+        var modal = document.getElementById('error-modal');
+        var titleEl = document.getElementById('error-modal-title');
+        var messageEl = document.getElementById('error-modal-message');
+        var closeBtn = document.getElementById('error-modal-close');
+        if (!modal) return;
+        titleEl.textContent = title || 'Error';
+        messageEl.textContent = message || 'An error occurred.';
+        modal.classList.add('open');
+        function closeModal() {
+          modal.classList.remove('open');
+        }
+        closeBtn.onclick = closeModal;
+        modal.onclick = function(e) {
+          if (e.target === modal) closeModal();
+        };
+        var escHandler = function(e) {
+          if (e.key === 'Escape' && modal.classList.contains('open')) {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+          }
+        };
+        document.addEventListener('keydown', escHandler);
+      };
+    </script>
     <script>
       (function () {
         var modal = document.getElementById('confirm-modal');

@@ -72,28 +72,26 @@
               <option value="{{ vm.id }}" {% if agent.vm_target_id == vm.id %}selected{% endif %}>{{ vm.name }}</option>
               {% endfor %}
             </select>
-            <a
-              id="vm-target-view-link"
-              href="/ui/vms/{{ agent.vm_target_id }}/edit"
-              target="_blank"
-              rel="noopener"
-              style="white-space: nowrap; font-size: 13px;{% if not agent.vm_target_id %} display: none;{% endif %}"
-            >view</a>
+            <a id="vm-target-view-link" href="#" target="_blank" rel="noopener" style="white-space: nowrap; font-size: 13px;{% if not agent.vm_target_id %} display: none;{% endif %}">view</a>
           </div>
         </div>
         <script>
-          (function() {
-            var select = document.getElementById('vm-target-select');
-            var link = document.getElementById('vm-target-view-link');
-            select.addEventListener('change', function() {
+          function setupFkViewLink(selectId, linkId, urlPattern) {
+            const select = document.getElementById(selectId);
+            const link = document.getElementById(linkId);
+            if (!select || !link) return;
+            const updateLink = () => {
               if (select.value) {
-                link.href = '/ui/vms/' + select.value + '/edit';
+                link.href = urlPattern.replace('{id}', select.value);
                 link.style.display = '';
               } else {
                 link.style.display = 'none';
               }
-            });
-          })();
+            };
+            updateLink();
+            select.addEventListener('change', updateLink);
+          }
+          setupFkViewLink('vm-target-select', 'vm-target-view-link', '/ui/vms/{id}/edit');
         </script>
         <div class="field-group">
           <label>Session File Config</label>
@@ -518,18 +516,18 @@
       }
 
       if (!response.ok) {
-        alert(payload.detail || "Failed to start session");
+        showErrorModal("Failed to start session", payload.detail || "An unexpected error occurred.");
         startBtn.disabled = false;
         return;
       }
 
       if (payload.warning) {
-        alert(payload.warning);
+        showErrorModal("Warning", payload.warning);
       }
       updateStatus(true, payload.session_id, payload.location, null, null);
       window.location.reload();
     } catch (err) {
-      alert("Failed to start session");
+      showErrorModal("Failed to start session", err.message || "An unexpected error occurred.");
       startBtn.disabled = false;
     }
   }
@@ -607,14 +605,15 @@
           method: "POST"
         });
         if (!response.ok) {
-          alert("Failed to stop session");
+          var data = await response.json().catch(function() { return {}; });
+          showErrorModal("Failed to stop session", data.detail || "An unexpected error occurred.");
           stopBtn.disabled = false;
           return;
         }
         updateStatus(false, null, null, null);
         window.location.reload();
       } catch (err) {
-        alert("Failed to stop session");
+        showErrorModal("Failed to stop session", err.message || "An unexpected error occurred.");
         stopBtn.disabled = false;
       }
     });
@@ -632,7 +631,7 @@
       var body = bodyEl.value.trim();
       if (!body) return;
       if (!sessionId) {
-        alert("No active session");
+        showErrorModal("Cannot send message", "No active session. Start a session first.");
         return;
       }
       try {
@@ -648,10 +647,11 @@
           }
           bodyEl.value = "";
         } else {
-          alert("Failed to send message");
+          var data = await response.json().catch(function() { return {}; });
+          showErrorModal("Failed to send message", data.detail || "An unexpected error occurred.");
         }
       } catch (err) {
-        alert("Failed to send message");
+        showErrorModal("Failed to send message", err.message || "An unexpected error occurred.");
       }
     });
   }
@@ -669,7 +669,7 @@
       var channelName = nameInput.value.trim();
       var externalId = extIdInput.value.trim() || null;
       if (!channelType || !channelName) {
-        alert("Type and name are required");
+        showErrorModal("Validation Error", "Type and name are required.");
         return;
       }
       try {
@@ -679,8 +679,8 @@
           body: JSON.stringify({ type: channelType, name: channelName, external_channel_id: externalId })
         });
         if (!response.ok) {
-          var err = await response.json();
-          alert(err.detail || "Failed to add channel");
+          var err = await response.json().catch(function() { return {}; });
+          showErrorModal("Failed to add channel", err.detail || "An unexpected error occurred.");
           return;
         }
         var payload = await response.json();
@@ -706,7 +706,7 @@
         nameInput.value = nameInput.defaultValue;
         extIdInput.value = "";
       } catch (err) {
-        alert("Failed to add channel");
+        showErrorModal("Failed to add channel", err.message || "An unexpected error occurred.");
       }
     });
   }
@@ -777,7 +777,7 @@
         });
         var payload = await response.json();
         if (!response.ok) {
-          alert(payload.detail || "Failed to fix channel");
+          showErrorModal("Failed to fix channel", payload.detail || "An unexpected error occurred.");
           btn.disabled = false;
           btn.textContent = "Fix";
           return;
@@ -794,12 +794,12 @@
           // Remove the Fix button
           btn.remove();
         } else {
-          alert("Could not create Slack channel");
+          showErrorModal("Could not create Slack channel", "The channel may already exist or Slack returned an unexpected response.");
           btn.disabled = false;
           btn.textContent = "Fix";
         }
       } catch (err) {
-        alert("Failed to fix channel: " + err);
+        showErrorModal("Failed to fix channel", err.message || "An unexpected error occurred.");
         btn.disabled = false;
         btn.textContent = "Fix";
       }

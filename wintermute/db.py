@@ -11,10 +11,19 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Generator, Optional
 
-from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine, func, inspect, select, or_
+from sqlalchemy import Float, Index, Integer, String, Text, UniqueConstraint, create_engine, event, func, inspect, select, or_
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragma(dbapi_connection, connection_record):
+    """Enable WAL mode for crash resilience."""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
+
 
 DEFAULT_DB_PATH_ENV = "WINTERMUTE_DB"
 
@@ -248,6 +257,7 @@ class TicketRecord:
     id: str
     project_id: str
     agent_id: Optional[str]
+    vm_target_id: Optional[str]
     sprint_id: Optional[str]
     title: str
     description: Optional[str]
@@ -597,6 +607,7 @@ class TicketModel(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
     agent_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    vm_target_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     sprint_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -870,7 +881,7 @@ class ChannelModel(Base):
 class Database:
 
     def __init__(self, path: Optional[str] = None) -> None:
-        raw_path = path or os.environ.get(DEFAULT_DB_PATH_ENV, "./wintermute.db")
+        raw_path = path or os.environ.get(DEFAULT_DB_PATH_ENV, "~/dbs/wintermute/wintermute.db")
         self.path = os.path.expanduser(raw_path)
         self.engine: Engine = create_engine(f"sqlite:///{self.path}", future=True)
         self._session_factory = sessionmaker(bind=self.engine, future=True, expire_on_commit=False)
@@ -2410,6 +2421,7 @@ class Database:
                 id=row.id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                vm_target_id=row.vm_target_id,
                 sprint_id=row.sprint_id,
                 title=row.title,
                 description=row.description,
@@ -2564,6 +2576,7 @@ class Database:
                     id=row.id,
                     project_id=row.project_id,
                     agent_id=row.agent_id,
+                    vm_target_id=row.vm_target_id,
                     sprint_id=row.sprint_id,
                     title=row.title,
                     description=row.description,
@@ -2593,6 +2606,7 @@ class Database:
                 id=row.id,
                 project_id=row.project_id,
                 agent_id=row.agent_id,
+                vm_target_id=row.vm_target_id,
                 sprint_id=row.sprint_id,
                 title=row.title,
                 description=row.description,
@@ -2624,6 +2638,7 @@ class Database:
         internal_notes: Optional[str] = None,
         source_url: Optional[str] = None,
         agent_id: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
         sprint_id: Optional[str] = None,
         hours: Optional[float] = None,
         story_points: Optional[float] = None,
@@ -2638,6 +2653,7 @@ class Database:
                     id=ticket_id,
                     project_id=project_id,
                     agent_id=agent_id,
+                    vm_target_id=vm_target_id,
                     sprint_id=sprint_id,
                     title=title,
                     description=description,
@@ -2664,6 +2680,7 @@ class Database:
         *,
         project_id: Optional[str] = None,
         agent_id: Optional[str] = None,
+        vm_target_id: Optional[str] = None,
         sprint_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
@@ -2682,6 +2699,7 @@ class Database:
         clear_hours: bool = False,
         clear_story_points: bool = False,
         clear_priority: bool = False,
+        clear_vm_target: bool = False,
     ) -> None:
         with self.session() as session:
             row = session.get(TicketModel, ticket_id)
@@ -2691,6 +2709,10 @@ class Database:
                 row.project_id = project_id
             if agent_id is not None:
                 row.agent_id = agent_id or None
+            if vm_target_id is not None:
+                row.vm_target_id = vm_target_id or None
+            if clear_vm_target:
+                row.vm_target_id = None
             if sprint_id is not None:
                 row.sprint_id = sprint_id or None
             if clear_sprint:
@@ -2942,6 +2964,7 @@ class Database:
                     id=row.id,
                     project_id=row.project_id,
                     agent_id=row.agent_id,
+                    vm_target_id=row.vm_target_id,
                     sprint_id=row.sprint_id,
                     title=row.title,
                     description=row.description,
@@ -2978,6 +3001,7 @@ class Database:
                     id=row.id,
                     project_id=row.project_id,
                     agent_id=row.agent_id,
+                    vm_target_id=row.vm_target_id,
                     sprint_id=row.sprint_id,
                     title=row.title,
                     description=row.description,
@@ -3471,9 +3495,10 @@ class Database:
         llm_model: Optional[str] = None,
         session_file_config_id: Optional[str] = None,
         average_memory_usage_mb: Optional[int] = None,
-        initial_prompt: Optional[str] = None,
-        working_directory: Optional[str] = None,
-        session_directory: Optional[str] = None,
+        # Clearable fields use ... as sentinel (None clears, ... skips)
+        initial_prompt: Optional[str] = ..., # type: ignore[assignment]
+        working_directory: Optional[str] = ..., # type: ignore[assignment]
+        session_directory: Optional[str] = ..., # type: ignore[assignment]
         autostart: Optional[bool] = None,
     ) -> None:
         with self.session() as session:
@@ -3512,11 +3537,12 @@ class Database:
                 row.session_file_config_id = session_file_config_id
             if average_memory_usage_mb is not None:
                 row.average_memory_usage_mb = average_memory_usage_mb
-            if initial_prompt is not None:
+            # Clearable fields: ... means skip, None or value means update
+            if initial_prompt is not ...:
                 row.initial_prompt = initial_prompt
-            if working_directory is not None:
+            if working_directory is not ...:
                 row.working_directory = working_directory
-            if session_directory is not None:
+            if session_directory is not ...:
                 row.session_directory = session_directory
             if autostart is not None:
                 row.autostart = 1 if autostart else 0

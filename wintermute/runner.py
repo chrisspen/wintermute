@@ -149,7 +149,11 @@ def ensure_vm_tools(spec: SSHSpec, agent_command: str, session_mode: str) -> tup
 
 
 def build_ssh_spec_with_options(vm: VMTargetRecord, options: list[str]) -> SSHSpec:
-    return SSHSpec(host=vm.host, user=vm.user, port=vm.port, options=options)
+    # Always include BatchMode=yes to prevent password prompts (fail fast if no key auth)
+    final_options = list(options)
+    if "-o" not in final_options or "BatchMode=yes" not in " ".join(final_options):
+        final_options.extend(["-o", "BatchMode=yes"])
+    return SSHSpec(host=vm.host, user=vm.user, port=vm.port, options=final_options)
 
 
 def _is_local_host(spec: SSHSpec) -> bool:

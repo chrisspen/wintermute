@@ -6,9 +6,13 @@ set -e
 
 cd "$(dirname "$0")"
 
-# Use .venv if it exists (local), otherwise use system python (CI)
-if [ -f .venv/bin/python ]; then
-    PYTHON=.venv/bin/python
+# Default venv location: ~/pyenv/wintermute
+DEFAULT_VENV="$HOME/pyenv/wintermute"
+VENV_DIR="${WINTERMUTE_VENV:-$DEFAULT_VENV}"
+
+# Use venv if it exists, otherwise use system python (CI)
+if [ -f "$VENV_DIR/bin/python" ]; then
+    PYTHON="$VENV_DIR/bin/python"
 else
     PYTHON=python
 fi

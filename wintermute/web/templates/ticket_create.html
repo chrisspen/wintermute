@@ -25,6 +25,16 @@
           </select>
         </div>
         <div class="field-group">
+          <label>VM Target</label>
+          <select name="vm_target_id">
+            <option value="">(none)</option>
+            {% for vm in vm_targets %}
+            <option value="{{ vm.id }}">{{ vm.name }}</option>
+            {% endfor %}
+          </select>
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Optional VM for DevOps actions related to this ticket.</p>
+        </div>
+        <div class="field-group">
           <label>Title</label>
           <input type="text" name="title" required />
         </div>

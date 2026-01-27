@@ -432,6 +432,19 @@
       .modal-card.wide {
         width: min(760px, 100%);
       }
+      .error-modal-message {
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: var(--bg);
+        border: 1px solid var(--edge);
+        border-radius: 8px;
+        padding: 12px;
+        margin: 16px 0;
+        font-family: monospace;
+        font-size: 13px;
+        max-height: 300px;
+        overflow-y: auto;
+      }
       .column-picker-grid {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);

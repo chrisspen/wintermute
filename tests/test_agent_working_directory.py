@@ -43,7 +43,10 @@ class AgentWorkingDirectoryTests(unittest.TestCase):
         # Login
         self.client.post(
             "/login",
-            data={"username": "testuser", "password": "testpass"},
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
             follow_redirects=False,
         )
 
@@ -109,6 +112,50 @@ class AgentWorkingDirectoryTests(unittest.TestCase):
         self.assertEqual(agent.working_directory, "/home/user/myproject")
         self.assertEqual(agent.session_directory, ".agent")
 
+    def test_clear_agent_working_directory(self) -> None:
+        """Can clear an agent's working_directory by submitting empty string."""
+        agent_id = str(uuid.uuid4())
+        self.db.insert_agent(
+            agent_id=agent_id,
+            name="Test Agent",
+            slug="test-agent",
+            command="claude",
+            session_mode="claude",
+            vm_target_id=None,
+            required_ssh_options=None,
+            env_vars=None,
+            mcp_config=None,
+            trust_level=None,
+            input_echo_prefix=None,
+            response_prefix=None,
+            working_directory="/home/user/project",
+            session_directory=".claude",
+        )
+
+        # Verify it's set
+        agent = self.db.get_agent(agent_id)
+        self.assertEqual(agent.working_directory, "/home/user/project")
+
+        # Submit with empty working_directory to clear it
+        response = self.client.post(
+            f"/agents/{agent_id}/edit",
+            data={
+                "name": "Test Agent",
+                "slug": "test-agent",
+                "command": "claude",
+                "session_mode": "claude",
+                "working_directory": "", # Empty string should clear
+                "session_directory": "", # Empty string should clear
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(response.status_code, 303)
+
+        # Verify it's cleared
+        agent = self.db.get_agent(agent_id)
+        self.assertIsNone(agent.working_directory)
+        self.assertIsNone(agent.session_directory)
+
     def test_clone_agent_preserves_working_directory(self) -> None:
         """Cloning an agent preserves working_directory and session_directory."""
         agent_id = str(uuid.uuid4())
@@ -131,7 +178,10 @@ class AgentWorkingDirectoryTests(unittest.TestCase):
 
         response = self.client.post(
             "/ui/agents/bulk-action",
-            data={"action": "clone", "ids": [agent_id]},
+            data={
+                "action": "clone",
+                "ids": [agent_id]
+            },
             follow_redirects=False,
         )
         self.assertEqual(response.status_code, 303)

@@ -2724,10 +2724,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         elif source_id == TicketAutoStartSource.id:
             saved = "ticket_auto_start_source"
         elif source_id == StandupSource.id:
-            return RedirectResponse("/ui/standup?saved=standup_source", status_code=303)
+            return RedirectResponse("/ui/standup", status_code=303)
         else:
             saved = "slack_source"
-        return RedirectResponse(f"/ui?saved={saved}", status_code=303)
+        return RedirectResponse(f"/ui", status_code=303)
 
     @app.get("/work-items")
     def list_work_items(status: Optional[str] = None, user: str = Depends(_require_login)) -> list[dict[str, Any]]:
@@ -2829,7 +2829,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 provider=SLACK_PROVIDER,
                 reference=admin_user_id,
             )
-        return RedirectResponse("/ui?saved=slack", status_code=303)
+        return RedirectResponse("/ui", status_code=303)
 
     @app.post("/github-tokens")
     async def create_github_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2849,7 +2849,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/github-tokens")).strip() or "/ui/github-tokens"
         if not return_to.startswith("/ui"):
             return_to = "/ui/github-tokens"
-        return RedirectResponse(f"{return_to}?saved=github_token_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/github-tokens/{token_id}/edit")
     async def update_github_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2870,12 +2870,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             user_id=user_id,
             user_login=user_login,
         )
-        return RedirectResponse("/ui/github-tokens?saved=github_token_updated", status_code=303)
+        return RedirectResponse("/ui/github-tokens", status_code=303)
 
     @app.post("/github-tokens/{token_id}/delete")
     async def delete_github_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_github_token(token_id)
-        return RedirectResponse("/ui/github-tokens?saved=github_token_deleted", status_code=303)
+        return RedirectResponse("/ui/github-tokens", status_code=303)
 
     @app.post("/gitlab-tokens")
     async def create_gitlab_token(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2895,7 +2895,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/gitlab-tokens")).strip() or "/ui/gitlab-tokens"
         if not return_to.startswith("/ui"):
             return_to = "/ui/gitlab-tokens"
-        return RedirectResponse(f"{return_to}?saved=gitlab_token_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/gitlab-tokens/{token_id}/edit")
     async def update_gitlab_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2916,12 +2916,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             user_id=user_id,
             user_login=user_login,
         )
-        return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_updated", status_code=303)
+        return RedirectResponse("/ui/gitlab-tokens", status_code=303)
 
     @app.post("/gitlab-tokens/{token_id}/delete")
     async def delete_gitlab_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_gitlab_token(token_id)
-        return RedirectResponse("/ui/gitlab-tokens?saved=gitlab_token_deleted", status_code=303)
+        return RedirectResponse("/ui/gitlab-tokens", status_code=303)
 
     # --- Unified Remote Token POST routes ---
 
@@ -2952,7 +2952,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/remote-tokens")).strip() or "/ui/remote-tokens"
         if not return_to.startswith("/ui"):
             return_to = "/ui/remote-tokens"
-        return RedirectResponse(f"{return_to}?saved=remote_token_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/remote-tokens/{token_id}/edit")
     async def update_remote_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -2982,12 +2982,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             user_id=user_id,
             user_login=user_login,
         )
-        return RedirectResponse("/ui/remote-tokens?saved=remote_token_updated", status_code=303)
+        return RedirectResponse("/ui/remote-tokens", status_code=303)
 
     @app.post("/remote-tokens/{token_id}/delete")
     async def delete_remote_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_remote_token(token_id)
-        return RedirectResponse("/ui/remote-tokens?saved=remote_token_deleted", status_code=303)
+        return RedirectResponse("/ui/remote-tokens", status_code=303)
 
     @app.get("/ui/api-tokens")
     def api_tokens_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -3082,8 +3082,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return_to = "/ui/api-tokens"
         if not env_path:
             return_to = f"/ui/api-tokens/{token_id}/edit?show_token=1"
-        separator = "&" if "?" in return_to else "?"
-        return RedirectResponse(f"{return_to}{separator}saved=api_token_created", status_code=303)
+        return RedirectResponse(return_to, status_code=303)
 
     @app.post("/api-tokens/{token_id}/edit")
     async def update_api_token(token_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -3099,12 +3098,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             token=token_value or None,
             permissions=permissions,
         )
-        return RedirectResponse("/ui/api-tokens?saved=api_token_updated", status_code=303)
+        return RedirectResponse("/ui/api-tokens", status_code=303)
 
     @app.post("/api-tokens/{token_id}/delete")
     async def delete_api_token(token_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_api_token(token_id)
-        return RedirectResponse("/ui/api-tokens?saved=api_token_deleted", status_code=303)
+        return RedirectResponse("/ui/api-tokens", status_code=303)
 
     def _hash_plain_password(password: str) -> tuple[str, str]:
         salt = secrets.token_bytes(16)
@@ -3830,6 +3829,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.post("/api/tickets/{ticket_id}/start-session")
     async def api_ticket_start_session(ticket_id: str, request: Request) -> dict[str, Any]:
+        import shlex
+        import tempfile
         user, _token_record = _require_login_or_api(request, "sessions", "create")
         ticket = database.get_ticket(ticket_id)
         if not ticket:
@@ -3849,30 +3850,193 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not agent_id:
             raise HTTPException(status_code=400, detail="Ticket agent not configured")
         agent = database.get_agent(agent_id)
-        if agent:
-            approval_pattern = "\n".join([
-                r"^You are running Codex in",
-                r"^Yes, allow Codex to work in this folder without asking for",
-            ])
-            _ensure_agent_response(agent_id, approval_pattern, "1")
-            command_pattern = "\n".join([
-                r"run this command",
-                r"yes",
-                r"forever",
-            ])
-            _ensure_agent_response(agent_id, command_pattern, "1")
-        if source and ticket.project_id != source.project_id:
-            database.update_ticket(ticket_id, project_id=source.project_id)
-            ticket = database.get_ticket(ticket_id) or ticket
-        project_id = source.project_id if source else ticket.project_id
-        project = database.get_project(project_id)
-        if not (agent and project):
-            raise HTTPException(status_code=400, detail="Project configuration missing")
+        if not agent:
+            raise HTTPException(status_code=400, detail="Agent not found")
         if not agent.vm_target_id:
             raise HTTPException(status_code=400, detail="Agent has no VM target configured")
         vm = database.get_vm_target(agent.vm_target_id)
         if not vm:
             raise HTTPException(status_code=400, detail="VM target missing")
+
+        # Setup codex approval responses
+        approval_pattern = "\n".join([
+            r"^You are running Codex in",
+            r"^Yes, allow Codex to work in this folder without asking for",
+        ])
+        _ensure_agent_response(agent_id, approval_pattern, "1")
+        command_pattern = "\n".join([
+            r"run this command",
+            r"yes",
+            r"forever",
+        ])
+        _ensure_agent_response(agent_id, command_pattern, "1")
+
+        if source and ticket.project_id != source.project_id:
+            database.update_ticket(ticket_id, project_id=source.project_id)
+            ticket = database.get_ticket(ticket_id) or ticket
+        project_id = source.project_id if source else ticket.project_id
+        project = database.get_project(project_id) if project_id else None
+
+        # Determine if we need repo mode or standalone mode
+        # Standalone mode: no project OR project has no repo_url configured
+        use_standalone_mode = not project or not project.repo_url
+
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+
+        # Check that required tools are available
+        tools_ok, tools_error = ensure_vm_tools(spec, agent.command, agent.session_mode)
+        if not tools_ok:
+            raise HTTPException(status_code=400, detail=tools_error)
+
+        # Memory check before starting agent
+        database.refresh_agent_average_memory_usage(agent.id)
+        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
+        if agent and vm.required_reserve_memory_gb > 0:
+            mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
+            if not mem_ok:
+                raise HTTPException(status_code=503, detail=mem_error)
+
+        if use_standalone_mode:
+            # STANDALONE MODE: No repo, just start agent in temp directory with ticket as prompt
+            short_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket_id.strip().lower()).strip("-")[:10]
+            session_id = f"{agent.slug}-ticket-{short_id}-{int(time.time())}"
+
+            # Create temp workspace on VM target
+            if agent.working_directory:
+                # Verify the working directory exists on the VM
+                check_cmd = [
+                    "ssh", "-p",
+                    str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"
+                ]
+                result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=30)
+                if result.stdout.strip() != "exists":
+                    raise HTTPException(status_code=400, detail=f"Working directory does not exist on VM: {agent.working_directory}")
+                workspace = agent.working_directory
+            else:
+                mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
+                result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
+                if result.returncode != 0:
+                    raise HTTPException(status_code=500, detail=f"Failed to create workspace: {result.stderr}")
+                workspace = result.stdout.strip()
+
+            # Determine session files directory
+            if agent.session_directory:
+                if agent.session_directory.startswith("/"):
+                    session_files_dir = agent.session_directory
+                else:
+                    session_files_dir = f"{workspace}/{agent.session_directory}"
+                mkdir_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mkdir -p {shlex.quote(session_files_dir)}"]
+                subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=30)
+            else:
+                session_files_dir = workspace
+
+            # Build initial prompt from ticket title + description
+            prompt_parts = [f"# {ticket.title}"]
+            if ticket.description:
+                prompt_parts.append(f"\n{ticket.description}")
+            if ticket.internal_notes:
+                prompt_parts.append(f"\n\n## Internal Notes\n{ticket.internal_notes}")
+            initial_prompt = "\n".join(prompt_parts)
+
+            # Post to Slack if agent has a Slack channel configured
+            thread_ts = None
+            slack_channel_id = None
+            agent_channels = database.list_channels(agent.id)
+            for ch in agent_channels:
+                if ch.type == "slack" and ch.enabled and ch.external_channel_id:
+                    slack_channel_id = ch.external_channel_id
+                    break
+            if slack_channel_id:
+                try:
+                    client = _slack_client(database)
+                    text = f"Ticket: {ticket.title}\n{ticket.source_url or ''}\nStarting agent session..."
+                    response = client.chat_postMessage(channel=slack_channel_id, text=text)
+                    thread_ts = response.get("ts")
+                except Exception:
+                    thread_ts = None
+
+            # Create session record with queued initial prompt for non-tmux modes
+            if agent.session_mode != "tmux" and initial_prompt:
+                database.insert_session(
+                    session_id=session_id,
+                    project_id=project.id if project else None,
+                    agent_id=agent.id,
+                    ticket_id=ticket_id,
+                    status="running",
+                    repo_path=workspace,
+                    thread_ts=thread_ts,
+                    workspace_path=workspace,
+                    queued_user_messages=json.dumps([initial_prompt]),
+                    awaiting_response=1,
+                    last_user_message=initial_prompt,
+                    prompt_sent_at=utc_now(),
+                )
+            else:
+                database.insert_session(
+                    session_id=session_id,
+                    project_id=project.id if project else None,
+                    agent_id=agent.id,
+                    ticket_id=ticket_id,
+                    status="running",
+                    repo_path=workspace,
+                    thread_ts=thread_ts,
+                    workspace_path=workspace,
+                )
+
+            # Record initial prompt as comment so it shows in conversation
+            database.insert_comment(
+                comment_id=str(uuid.uuid4()),
+                ticket_id=ticket_id,
+                session_id=session_id,
+                project_id=project.id if project else None,
+                agent_id=agent.id,
+                author=user or "api",
+                source_id=source_id,
+                issue_number=issue_number,
+                body=initial_prompt,
+                public=False,
+                approved=True,
+                agent_session_id=session_id,
+                origin="initial_prompt",
+            )
+
+            # Copy session files to session_files_dir on VM
+            if agent.session_file_config_id:
+                definitions = database.list_session_file_definitions(agent.session_file_config_id)
+                session_files = database.list_session_files(agent.id)
+                file_map = {sf.definition_id: sf for sf in session_files}
+                with tempfile.TemporaryDirectory() as local_tmp:
+                    for defn in definitions:
+                        content = file_map.get(defn.id, None)
+                        file_content = content.content if content else defn.default_content
+                        local_path = os.path.join(local_tmp, defn.filename)
+                        with open(local_path, "w") as f:
+                            f.write(file_content)
+                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{session_files_dir}/"]
+                    scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
+                    if scp_result.returncode != 0:
+                        logging.getLogger(__name__).warning("Failed to copy session files: %s", scp_result.stderr)
+
+            # Start the tmux session (for tmux mode only)
+            if agent.session_mode == "tmux":
+                start_session(spec, session_id, agent, workspace)
+                # Send initial prompt to tmux
+                session_record = database.get_session(session_id)
+                if session_record and initial_prompt:
+                    try:
+                        send_input(spec, session_record, initial_prompt)
+                    except Exception as exc:
+                        logging.getLogger(__name__).warning("Failed to send initial prompt: %s", exc)
+
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "location": vm.name,
+                "workspace": workspace,
+                "mode": "standalone",
+            }
+
+        # REPO MODE: Full project/repo workflow
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         if issue_number is not None:
             session_id = f"{project.slug}-{agent.slug}-issue-{issue_number}-{int(time.time())}"
@@ -3881,13 +4045,6 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             session_id = f"{project.slug}-{agent.slug}-ticket-{short_id}-{int(time.time())}"
         base_spec = build_ssh_spec_with_options(vm, base_options)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
-        # Memory check before starting agent
-        database.refresh_agent_average_memory_usage(agent.id)
-        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
-        if agent and vm.required_reserve_memory_gb > 0:
-            mem_ok, mem_error = check_vm_memory_available(session_spec, vm, agent)
-            if not mem_ok:
-                raise HTTPException(status_code=503, detail=mem_error)
         repo_resource, resource_error = database.acquire_repo_resource(
             project=project,
             session_id=session_id,
@@ -4323,11 +4480,25 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Build kwargs for update_agent - only include fields that are present
         update_kwargs = {}
         allowed_fields = [
-            "name", "slug", "command", "session_mode", "vm_target_id",
-            "required_ssh_options", "env_vars", "mcp_config", "trust_level",
-            "input_echo_prefix", "response_prefix", "llm_base_url", "llm_api_key",
-            "llm_model", "session_file_config_id", "average_memory_usage_mb",
-            "initial_prompt", "working_directory", "session_directory",
+            "name",
+            "slug",
+            "command",
+            "session_mode",
+            "vm_target_id",
+            "required_ssh_options",
+            "env_vars",
+            "mcp_config",
+            "trust_level",
+            "input_echo_prefix",
+            "response_prefix",
+            "llm_base_url",
+            "llm_api_key",
+            "llm_model",
+            "session_file_config_id",
+            "average_memory_usage_mb",
+            "initial_prompt",
+            "working_directory",
+            "session_directory",
         ]
         for field in allowed_fields:
             if field in data:
@@ -4393,12 +4564,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         from datetime import datetime
 
         # Parse optional JSON body for file_mode
-        file_mode = "check"  # default: check timestamps
+        file_mode = "check" # default: check timestamps
         try:
             body = await request.json()
             file_mode = body.get("file_mode", "check")
         except Exception:
-            pass  # No body or invalid JSON is fine
+            pass # No body or invalid JSON is fine
 
         agent = database.get_agent(agent_id)
         if not agent:
@@ -4425,7 +4596,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
         # Memory check before starting agent
         database.refresh_agent_average_memory_usage(agent.id)
-        agent = database.get_agent(agent.id)  # Refresh to get updated memory avg
+        agent = database.get_agent(agent.id) # Refresh to get updated memory avg
         if agent and vm.required_reserve_memory_gb > 0:
             mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
             if not mem_ok:
@@ -4434,7 +4605,10 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Determine workspace: use working_directory if set, otherwise create temp
         if agent.working_directory:
             # Verify the working directory exists on the VM
-            check_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"]
+            check_cmd = [
+                "ssh", "-p",
+                str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"
+            ]
             result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=30)
             if result.stdout.strip() != "exists":
                 raise HTTPException(status_code=400, detail=f"Working directory does not exist on VM: {agent.working_directory}")
@@ -4472,8 +4646,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             if filenames:
                 # Build command to get timestamps of all files at once
                 stat_parts = " ".join([f"{shlex.quote(session_files_dir)}/{shlex.quote(fn)}" for fn in filenames])
-                stat_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}",
-                            f"stat -c '%Y %n' {stat_parts} 2>/dev/null || true"]
+                stat_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"stat -c '%Y %n' {stat_parts} 2>/dev/null || true"]
                 stat_result = subprocess.run(stat_cmd, capture_output=True, text=True, timeout=30)
 
                 newer_files = []
@@ -4649,10 +4822,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 # Create a local temp dir to receive files
                 with tempfile.TemporaryDirectory() as local_tmp:
                     # SCP files from VM (from session_files_dir)
-                    scp_cmd = [
-                        "scp", "-P",
-                        str(spec.port), *spec.options, "-r", f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"
-                    ]
+                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"]
                     scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                     if scp_result.returncode == 0:
                         for defn in definitions:
@@ -4826,14 +4996,14 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
         # Create a local temp dir to receive files
         with tempfile.TemporaryDirectory() as local_tmp:
-            # SCP files from VM
-            scp_cmd = [
-                "scp", "-P", str(spec.port), *spec.options, "-r",
-                f"{spec.user}@{spec.host}:{session_files_dir}/.", f"{local_tmp}/"
-            ]
-            scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
-            if scp_result.returncode != 0:
-                raise HTTPException(status_code=500, detail=f"Failed to pull files from VM: {scp_result.stderr}")
+            # SCP only the specific files we need (not entire directory which may have .venv etc)
+            remote_files = [f"{spec.user}@{spec.host}:{session_files_dir}/{defn.filename}" for defn in definitions]
+            if remote_files:
+                scp_cmd = ["scp", "-P", str(spec.port), *spec.options, *remote_files, f"{local_tmp}/"]
+                scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=30)
+                # Don't fail if some files don't exist - just log it
+                if scp_result.returncode != 0 and "No such file" not in scp_result.stderr:
+                    raise HTTPException(status_code=500, detail=f"Failed to pull files from VM: {scp_result.stderr}")
 
             for defn in definitions:
                 local_path = os.path.join(local_tmp, defn.filename)
@@ -5103,7 +5273,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             auto_start=auto_start,
         )
         _update_slack_channel_filter(database)
-        return RedirectResponse(f"{return_to}?saved=project_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.get("/ui/projects/{project_id}/edit")
     def edit_project_ui(project_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -5205,7 +5375,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             enabled=enabled,
             auto_start=auto_start,
         )
-        return RedirectResponse(f"{return_to}?saved=project_source_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/projects/{project_id}")
     async def update_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5262,7 +5432,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             auto_start=auto_start,
         )
         _update_slack_channel_filter(database)
-        return RedirectResponse("/ui/projects?saved=project_updated", status_code=303)
+        return RedirectResponse("/ui/projects", status_code=303)
 
     @app.post("/projects/{project_id}/delete")
     async def delete_project(project_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5284,7 +5454,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     ) from exc
         database.delete_project(project_id)
         _update_slack_channel_filter(database)
-        return RedirectResponse("/ui/projects?saved=project_deleted", status_code=303)
+        return RedirectResponse("/ui/projects", status_code=303)
 
     @app.get("/badges/projects/{project_id}")
     async def get_project_badge(project_id: str) -> Response:
@@ -5368,6 +5538,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
         agent_id = str(form.get("agent_id", "")).strip() or None
+        vm_target_id = str(form.get("vm_target_id", "")).strip() or None
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
         internal_notes = str(form.get("internal_notes", "")).strip() or None
@@ -5393,6 +5564,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             ticket_id=str(uuid.uuid4()),
             project_id=project_id,
             agent_id=agent_id,
+            vm_target_id=vm_target_id,
             title=title,
             description=description,
             assigned_to=assigned_to,
@@ -5407,12 +5579,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             story_points=story_points,
             created_by_id=created_by_id,
         )
-        return RedirectResponse(f"{return_to}?saved=ticket_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/tickets/{ticket_id}/delete")
     async def delete_ticket(ticket_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_ticket(ticket_id)
-        return RedirectResponse("/ui/tickets?saved=ticket_deleted", status_code=303)
+        return RedirectResponse("/ui/tickets", status_code=303)
 
     @app.get("/ui/tickets/{ticket_id}/edit")
     async def tickets_edit_ui(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -5488,7 +5660,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         source.repo,
                         issue_number,
                     )
-        comment_rows = list(reversed(database.list_comments(ticket_id=ticket_id)))
+        comment_rows = database.list_comments(ticket_id=ticket_id)
         comments = [{
             **_comment_to_dict(row),
             "created_at": row.created_at,
@@ -5505,7 +5677,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "ticket": ticket,
                 "projects": database.list_projects(),
                 "agents": database.list_agents(),
-                "vm_names": {vm.id: vm.name for vm in database.list_vm_targets()},
+                "vm_targets": database.list_vm_targets(),
+                "vm_names": {
+                    vm.id: vm.name
+                    for vm in database.list_vm_targets()
+                },
                 "users": database.list_users(),
                 "sprints": database.list_sprints(),
                 "description_html": description_html,
@@ -5536,6 +5712,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         form = await request.form()
         project_id = str(form.get("project_id", "")).strip()
         agent_id = str(form.get("agent_id", "")).strip()
+        vm_target_id = str(form.get("vm_target_id", "")).strip()
         title = str(form.get("title", "")).strip()
         description = str(form.get("description", "")).strip() or None
         internal_notes = str(form.get("internal_notes", "")).strip() or None
@@ -5556,6 +5733,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             ticket_id,
             project_id=project_id,
             agent_id=agent_id,
+            vm_target_id=vm_target_id,
+            clear_vm_target=not vm_target_id,
             title=title,
             description=description,
             internal_notes=internal_notes,
@@ -5569,7 +5748,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             hours=hours,
             story_points=story_points,
         )
-        return RedirectResponse(f"/ui/tickets/{ticket_id}/edit?saved=ticket_updated", status_code=303)
+        return RedirectResponse(f"/ui/tickets/{ticket_id}/edit", status_code=303)
 
     @app.post("/api/tickets/{ticket_id}/description")
     async def api_ticket_update_description(ticket_id: str, request: Request, user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -5701,12 +5880,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             public=public,
             approved=approved,
         )
-        return RedirectResponse(f"/ui/comments/{comment_id}/edit?saved=comment_updated", status_code=303)
+        return RedirectResponse(f"/ui/comments/{comment_id}/edit", status_code=303)
 
     @app.post("/comments/{comment_id}/delete")
     async def delete_comment(comment_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_comment(comment_id)
-        return RedirectResponse("/ui/comments?saved=comment_deleted", status_code=303)
+        return RedirectResponse("/ui/comments", status_code=303)
 
     @app.get("/ui/repo-resources")
     def repo_resources_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -5768,12 +5947,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             agent_id=agent_id,
             last_used_at=utc_now(),
         )
-        return RedirectResponse(f"/ui/repo-resources/{resource_id}/edit?saved=repo_resource_updated", status_code=303)
+        return RedirectResponse(f"/ui/repo-resources/{resource_id}/edit", status_code=303)
 
     @app.post("/repo-resources/{resource_id}/delete")
     async def repo_resource_delete(resource_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_repo_resource(resource_id)
-        return RedirectResponse("/ui/repo-resources?saved=repo_resource_deleted", status_code=303)
+        return RedirectResponse("/ui/repo-resources", status_code=303)
 
     @app.post("/vms")
     async def create_vm(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5788,7 +5967,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not name or not host or not user_name:
             raise HTTPException(status_code=400, detail="Missing VM fields")
         database.insert_vm_target(str(uuid.uuid4()), name, host, user_name, port)
-        return RedirectResponse(f"{return_to}?saved=vm_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.get("/ui/vms/{vm_id}/edit")
     def edit_vm_ui(vm_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -5828,12 +6007,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             port=port,
             required_reserve_memory_gb=required_reserve_memory_gb,
         )
-        return RedirectResponse("/ui/vms?saved=vm_updated", status_code=303)
+        return RedirectResponse("/ui/vms", status_code=303)
 
     @app.post("/vms/{vm_id}/delete")
     async def delete_vm(vm_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_vm_target(vm_id)
-        return RedirectResponse("/ui/vms?saved=vm_deleted", status_code=303)
+        return RedirectResponse("/ui/vms", status_code=303)
 
     @app.post("/agents")
     async def create_agent(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5885,7 +6064,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             field, message = _parse_integrity_error(exc)
             error_param = urllib.parse.quote(f"{field}:{message}" if field else message)
             return RedirectResponse(f"/ui/agents/create?error={error_param}&return_to={urllib.parse.quote(return_to)}", status_code=303)
-        return RedirectResponse(f"{return_to}?saved=agent_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/ui/agents/bulk-action")
     async def agents_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -5940,7 +6119,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 )
                 cloned_count += 1
 
-            return RedirectResponse(f"/ui/agents?saved=cloned_{cloned_count}", status_code=303)
+            return RedirectResponse(f"/ui/agents", status_code=303)
 
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
 
@@ -6065,12 +6244,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             for defn in definitions:
                 if defn.id not in existing_def_ids:
                     database.upsert_session_file(agent_id, defn.id, defn.default_content)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=agent_updated", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/delete")
     async def delete_agent(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_agent(agent_id)
-        return RedirectResponse("/ui/agents?saved=agent_deleted", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Channels CRUD
@@ -6100,7 +6279,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             external_channel_id=external_channel_id,
             enabled=True,
         )
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_created", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/channels/{channel_id}/edit")
     async def update_agent_channel(agent_id: str, channel_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6115,12 +6294,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             external_channel_id=external_channel_id,
             enabled=enabled,
         )
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_updated", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/channels/{channel_id}/delete")
     async def delete_agent_channel(agent_id: str, channel_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_channel(channel_id)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=channel_deleted", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Session Files
@@ -6136,7 +6315,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         for defn in definitions:
             content = str(form.get(f"file_{defn.id}", ""))
             database.upsert_session_file(agent_id, defn.id, content)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_files_saved", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Standalone Session Control
@@ -6186,7 +6365,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 file_path = os.path.join(workspace, defn.filename)
                 with open(file_path, "w") as f:
                     f.write(file_content)
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_started", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/session/stop")
     async def stop_agent_standalone_session(agent_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6215,7 +6394,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         database.upsert_session_file(agent_id, defn.id, content)
         # Mark session as stopped
         database.update_session(standalone_session.id, status="stopped")
-        return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=session_stopped", status_code=303)
+        return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
 
     @app.post("/agents/{agent_id}/session/message")
     async def send_agent_standalone_message(agent_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6274,7 +6453,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not agent_id or not pattern or not response:
             raise HTTPException(status_code=400, detail="Missing response fields")
         database.insert_agent_response(str(uuid.uuid4()), agent_id, pattern, response)
-        return RedirectResponse(f"{return_to}?saved=agent_response_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/agent-responses/{response_id}/edit")
     async def update_agent_response(response_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6293,21 +6472,21 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             pattern=pattern,
             response=response,
         )
-        return RedirectResponse(f"{return_to}?saved=agent_response_updated", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/agent-responses/{response_id}/delete")
     async def delete_agent_response(response_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_agent_response(response_id)
-        return RedirectResponse("/ui/agent-responses?saved=agent_response_deleted", status_code=303)
+        return RedirectResponse("/ui/agent-responses", status_code=303)
 
     # Legacy project_vms POST handlers - no longer functional
     @app.post("/project_vms")
     async def create_project_vm_legacy(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
-        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     @app.post("/project_vms/{mapping_id}/delete")
     async def delete_project_vm_legacy(mapping_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
-        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     @app.get("/ui/sessions")
     def sessions_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -6370,12 +6549,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not status:
             raise HTTPException(status_code=400, detail="Status is required")
         database.update_session(session_id, status=status)
-        return RedirectResponse(f"/ui/sessions/{session_id}?saved=session_updated", status_code=303)
+        return RedirectResponse(f"/ui/sessions/{session_id}", status_code=303)
 
     @app.post("/sessions/{session_id}/delete")
     async def delete_session(session_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_session(session_id)
-        return RedirectResponse("/ui/sessions?saved=session_deleted", status_code=303)
+        return RedirectResponse("/ui/sessions", status_code=303)
 
     @app.get("/logs/tail")
     def tail_logs(limit: int = Query(default=100, ge=1, le=1000), user: str = Depends(_require_login)) -> dict[str, Any]:
@@ -6925,7 +7104,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             enabled=enabled,
             status="active",
         )
-        return RedirectResponse(f"{return_to}?saved=sprint", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/sprints/{sprint_id}/edit")
     async def update_sprint(sprint_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -6943,12 +7122,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             enabled=enabled,
             status=status if status else None,
         )
-        return RedirectResponse(f"/ui/sprints/{sprint_id}/edit?saved=sprint", status_code=303)
+        return RedirectResponse(f"/ui/sprints/{sprint_id}/edit", status_code=303)
 
     @app.post("/sprints/{sprint_id}/delete")
     async def delete_sprint(sprint_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_sprint(sprint_id)
-        return RedirectResponse("/ui/sprints?saved=sprint_deleted", status_code=303)
+        return RedirectResponse("/ui/sprints", status_code=303)
 
     # Legacy project-vms routes - VMs are now linked directly to agents
     @app.get("/ui/project-vms")
@@ -7208,7 +7387,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         return_to = str(form.get("return_to", "/ui/issue-sources")).strip() or "/ui/issue-sources"
         if not return_to.startswith("/ui"):
             return_to = "/ui/issue-sources"
-        return RedirectResponse(f"{return_to}?saved=issue_source_created", status_code=303)
+        return RedirectResponse(f"{return_to}", status_code=303)
 
     @app.post("/issue-sources/{source_id}/edit")
     async def update_issue_source(source_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7247,12 +7426,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             auto_start=auto_start,
             poll_interval_seconds=poll_interval_seconds,
         )
-        return RedirectResponse("/ui/issue-sources?saved=issue_source_updated", status_code=303)
+        return RedirectResponse("/ui/issue-sources", status_code=303)
 
     @app.post("/issue-sources/{source_id}/delete")
     async def delete_issue_source(source_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_issue_source(source_id)
-        return RedirectResponse("/ui/issue-sources?saved=issue_source_deleted", status_code=303)
+        return RedirectResponse("/ui/issue-sources", status_code=303)
 
     @app.get("/ui/project-vms/{mapping_id}/edit")
     def project_vms_edit_ui_redirect(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7260,7 +7439,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
     @app.post("/project_vms/{mapping_id}/edit")
     async def project_vms_update_legacy(mapping_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
-        return RedirectResponse("/ui/agents?saved=project_vms_deprecated", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     @app.get("/ui/tickets")
     def tickets_ui(request: Request, user: str = Depends(_require_login)) -> Response:
@@ -7316,6 +7495,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "growl_message": None,
                 "projects": projects,
                 "agents": agents,
+                "vm_targets": vm_targets,
                 "vm_names": vm_names,
                 "sprints": sprints,
                 "users": users,
@@ -7353,8 +7533,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not user_record:
             raise HTTPException(status_code=400, detail="User not found")
         database.upsert_column_preferences(user_record.id, model, columns)
-        separator = "&" if "?" in return_to else "?"
-        return RedirectResponse(f"{return_to}{separator}saved=columns_updated", status_code=303)
+        return RedirectResponse(return_to, status_code=303)
 
     # -------------------------------------------------------------------------
     # Session File Configs
@@ -7460,7 +7639,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Name is required")
         config_id = str(uuid.uuid4())
         database.insert_session_file_config(config_id, name, description)
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_created", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-configs/{config_id}/edit")
     async def update_session_file_config(config_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7468,12 +7647,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         name = str(form.get("name", "")).strip() or None
         description = str(form.get("description", "")).strip() or None
         database.update_session_file_config(config_id, name=name, description=description)
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=config_updated", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-configs/{config_id}/delete")
     async def delete_session_file_config(config_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_session_file_config(config_id)
-        return RedirectResponse("/ui/session-file-configs?saved=config_deleted", status_code=303)
+        return RedirectResponse("/ui/session-file-configs", status_code=303)
 
     @app.post("/ui/session_file_configs/bulk-action")
     async def session_file_configs_bulk_action(request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7523,7 +7702,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
 
                 cloned_count += 1
 
-        return RedirectResponse(f"/ui/session-file-configs?saved=cloned_{cloned_count}", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs", status_code=303)
 
     # -------------------------------------------------------------------------
     # Session File Definitions
@@ -7561,7 +7740,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         database.insert_session_file_definition(
             definition_id, config_id, filename, default_content, description=description, required=required, sync_on_exit=sync_on_exit, sort_order=sort_order
         )
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_created", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-definitions/{definition_id}/edit")
     async def update_session_file_definition(definition_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7582,7 +7761,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             sync_on_exit=sync_on_exit,
             sort_order=sort_order,
         )
-        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_updated", status_code=303)
+        return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
 
     @app.post("/session-file-definitions/{definition_id}/delete")
     async def delete_session_file_definition(definition_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7590,8 +7769,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         config_id = str(form.get("config_id", "")).strip()
         database.delete_session_file_definition(definition_id)
         if config_id:
-            return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit?saved=definition_deleted", status_code=303)
-        return RedirectResponse("/ui/session-file-configs?saved=definition_deleted", status_code=303)
+            return RedirectResponse(f"/ui/session-file-configs/{config_id}/edit", status_code=303)
+        return RedirectResponse("/ui/session-file-configs", status_code=303)
 
     # -------------------------------------------------------------------------
     # Session Files (per-agent file content)
@@ -7631,8 +7810,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Session file not found")
         database.update_session_file(file_id, content=content)
         if agent_id:
-            return RedirectResponse(f"/ui/session-files/{file_id}/edit?saved=file_updated", status_code=303)
-        return RedirectResponse(f"/ui/session-files/{file_id}/edit?saved=file_updated", status_code=303)
+            return RedirectResponse(f"/ui/session-files/{file_id}/edit", status_code=303)
+        return RedirectResponse(f"/ui/session-files/{file_id}/edit", status_code=303)
 
     @app.post("/session-files/{file_id}/delete")
     async def delete_session_file(file_id: str, request: Request, user: str = Depends(_require_login)) -> RedirectResponse:
@@ -7640,8 +7819,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         agent_id = str(form.get("agent_id", "")).strip()
         database.delete_session_file(file_id)
         if agent_id:
-            return RedirectResponse(f"/ui/agents/{agent_id}/edit?saved=file_deleted", status_code=303)
-        return RedirectResponse("/ui/agents?saved=file_deleted", status_code=303)
+            return RedirectResponse(f"/ui/agents/{agent_id}/edit", status_code=303)
+        return RedirectResponse("/ui/agents", status_code=303)
 
     # -------------------------------------------------------------------------
     # Metric Definitions UI
@@ -7704,7 +7883,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             recording_frequency_minutes=frequency,
             enabled=enabled,
         )
-        return RedirectResponse("/ui/metric-definitions?saved=definition_created", status_code=303)
+        return RedirectResponse("/ui/metric-definitions", status_code=303)
 
     @app.get("/ui/metric-definitions/{definition_id}/edit")
     def metric_definition_edit_ui(definition_id: str, request: Request, user: str = Depends(_require_login)) -> Response:
@@ -7739,12 +7918,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             recording_frequency_minutes=frequency,
             enabled=enabled,
         )
-        return RedirectResponse(f"/ui/metric-definitions/{definition_id}/edit?saved=definition_updated", status_code=303)
+        return RedirectResponse(f"/ui/metric-definitions/{definition_id}/edit", status_code=303)
 
     @app.post("/metric-definitions/{definition_id}/delete")
     def delete_metric_definition(definition_id: str, user: str = Depends(_require_login)) -> RedirectResponse:
         database.delete_metric_definition(definition_id)
-        return RedirectResponse("/ui/metric-definitions?saved=definition_deleted", status_code=303)
+        return RedirectResponse("/ui/metric-definitions", status_code=303)
 
     # -------------------------------------------------------------------------
     # Agent Metrics Logs UI

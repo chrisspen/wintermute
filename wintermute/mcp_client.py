@@ -521,10 +521,13 @@ def _ensure_initialized(mcp: MCPProcess) -> Optional[str]:
 
 
 def _pick_tool_name(mcp: MCPProcess, conversation_id: Optional[str]) -> str:
+    logger = logging.getLogger(__name__)
     tools = mcp.tools or []
     names = {tool.get("name") for tool in tools if isinstance(tool, dict)}
     if conversation_id and "codex-reply" in names:
+        logger.info("MCP tool selection: codex-reply (threadId=%s)", conversation_id)
         return "codex-reply"
+    logger.info("MCP tool selection: codex (conversation_id=%s, tools=%s)", conversation_id, names)
     return "codex"
 
 
@@ -556,7 +559,7 @@ def _send_tool_call(
     if config_overrides:
         arguments["config"] = config_overrides
     if conversation_id:
-        arguments["conversationId"] = conversation_id
+        arguments["threadId"] = conversation_id # Codex deprecated conversationId
     _send_json(
         mcp.proc,
         {
