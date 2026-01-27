@@ -3022,7 +3022,9 @@ class Database:
             elif agent_session_id:
                 stmt = stmt.where(CommentModel.agent_session_id == agent_session_id)
             if since:
-                stmt = stmt.where(CommentModel.created_at > since)
+                # Use >= to catch comments with same timestamp (chunked responses)
+                # Client deduplicates by comment ID via seenIds Set
+                stmt = stmt.where(CommentModel.created_at >= since)
             rows = session.execute(stmt.order_by(CommentModel.created_at.asc())).scalars().all()
         return [
             CommentRecord(

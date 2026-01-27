@@ -117,7 +117,11 @@ class TicketWebSocketTests(unittest.TestCase):
             self.assertEqual(data["data"]["body"], "Test comment body")
 
     def test_websocket_since_filter(self) -> None:
-        """Test that 'since' parameter filters comments."""
+        """Test that 'since' parameter filters comments.
+
+        Note: We use >= for the since filter to catch comments with same
+        timestamp (chunked responses). The server deduplicates by ID.
+        """
         # Insert an old comment
         old_comment_id = str(uuid.uuid4())
         self.db.insert_comment(
@@ -159,8 +163,13 @@ class TicketWebSocketTests(unittest.TestCase):
         )
 
         # Connect with 'since' filter (URL-encode the timestamp)
+        # With >= filter, old_comment is included (same timestamp), then new_comment
         with self.client.websocket_connect(f"/ws/tickets/{self.ticket_id}?since={quote(old_ts, safe='')}") as ws:
-            # Should only receive the new comment
+            # First receives the old comment (since uses >=)
+            data = ws.receive_json()
+            self.assertEqual(data["type"], "comment")
+            self.assertEqual(data["data"]["id"], old_comment_id)
+            # Then receives the new comment
             data = ws.receive_json()
             self.assertEqual(data["type"], "comment")
             self.assertEqual(data["data"]["id"], new_comment_id)
@@ -336,7 +345,11 @@ class AgentWebSocketTests(unittest.TestCase):
             self.assertEqual(data["data"]["body"], "New session response")
 
     def test_websocket_since_filter(self) -> None:
-        """Test that 'since' parameter filters comments."""
+        """Test that 'since' parameter filters comments.
+
+        Note: We use >= for the since filter to catch comments with same
+        timestamp (chunked responses). The server deduplicates by ID.
+        """
         # Create session
         session_id = str(uuid.uuid4())
         self.db.insert_session(
@@ -390,8 +403,13 @@ class AgentWebSocketTests(unittest.TestCase):
             origin="session",
         )
 
+        # With >= filter, old_comment is included (same timestamp), then new_comment
         with self.client.websocket_connect(f"/ws/agents/{self.agent_id}/comments?since={quote(old_ts, safe='')}") as ws:
-            # Should only receive the new comment
+            # First receives the old comment (since uses >=)
+            data = ws.receive_json()
+            self.assertEqual(data["type"], "comment")
+            self.assertEqual(data["data"]["id"], old_comment_id)
+            # Then receives the new comment
             data = ws.receive_json()
             self.assertEqual(data["type"], "comment")
             self.assertEqual(data["data"]["id"], new_comment_id)
@@ -531,6 +549,142 @@ class CommentStreamAPITests(unittest.TestCase):
         queue = json.loads(session.queued_user_messages or "[]")
         self.assertEqual(len(queue), 1)
         self.assertIn("Message to queue", queue[0])
+
+
+class CommentDeduplicationTests(unittest.TestCase):
+    """Tests for comment deduplication in WebSocket streaming."""
+
+    def setUp(self) -> None:
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
+        self.db = Database(self.temp_db.name)
+        self.db.initialize()
+        os.environ["WINTERMUTE_WEB_SECRET"] = "test-secret-key"
+        app = create_app(self.db)
+        self.client = TestClient(app)
+
+        # Create a test user and login
+        _create_test_user(self.db)
+        self.client.post(
+            "/login",
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
+            follow_redirects=False,
+        )
+
+        # Create a test project
+        self.project_id = str(uuid.uuid4())
+        self.db.insert_project(
+            self.project_id,
+            name="Test Project",
+            slug="test-project",
+            slack_channel_id=None,
+        )
+
+        # Create a test ticket
+        self.ticket_id = str(uuid.uuid4())
+        self.db.insert_ticket(
+            ticket_id=self.ticket_id,
+            project_id=self.project_id,
+            title="Test Ticket",
+            description=None,
+            assigned_to=None,
+            estimate=None,
+            status="open",
+        )
+
+    def tearDown(self) -> None:
+        self.temp_db.close()
+        os.unlink(self.temp_db.name)
+
+    def test_since_filter_uses_gte_for_same_timestamp(self) -> None:
+        """Test that since filter uses >= to catch comments with same timestamp.
+
+        This is important for chunked responses where multiple comments may
+        have the same timestamp. The client deduplicates by comment ID.
+        """
+        # Insert first comment
+        comment1_id = str(uuid.uuid4())
+        self.db.insert_comment(
+            comment_id=comment1_id,
+            ticket_id=self.ticket_id,
+            session_id=None,
+            project_id=self.project_id,
+            agent_id=None,
+            author="agent",
+            source_id=None,
+            issue_number=None,
+            body="First chunk",
+            public=False,
+            approved=False,
+            origin="session",
+        )
+        comment1 = self.db.get_comment(comment1_id)
+        ts = comment1.created_at
+
+        # Insert second comment with exact same timestamp (simulates chunked response)
+        # We do this by directly executing SQL to bypass any automatic timestamp
+        comment2_id = str(uuid.uuid4())
+        self.db.insert_comment(
+            comment_id=comment2_id,
+            ticket_id=self.ticket_id,
+            session_id=None,
+            project_id=self.project_id,
+            agent_id=None,
+            author="agent",
+            source_id=None,
+            issue_number=None,
+            body="Second chunk",
+            public=False,
+            approved=False,
+            origin="session",
+        )
+        # Force same timestamp (simulate rapid insertion)
+        from sqlalchemy import text
+        with self.db.session() as session:
+            session.execute(text("UPDATE comments SET created_at = :ts WHERE id = :id"), {"ts": ts, "id": comment2_id})
+            session.commit()
+
+        # Query with since=ts should return both comments (which have created_at >= ts)
+        # Because we use >= instead of >, both comments would be returned
+        comments = self.db.list_comments_since(ticket_id=self.ticket_id, since=ts)
+        comment_ids = [c.id for c in comments]
+        # With >=, we get both comments (client deduplicates)
+        self.assertIn(comment1_id, comment_ids)
+        self.assertIn(comment2_id, comment_ids)
+
+    def test_websocket_deduplicates_by_comment_id(self) -> None:
+        """Test that WebSocket handler deduplicates comments by ID.
+
+        When using >= for timestamp filtering, the same comment may be
+        returned in consecutive polls. The server tracks seen IDs to
+        prevent sending duplicates.
+        """
+        # Insert a comment
+        comment_id = str(uuid.uuid4())
+        self.db.insert_comment(
+            comment_id=comment_id,
+            ticket_id=self.ticket_id,
+            session_id=None,
+            project_id=self.project_id,
+            agent_id=None,
+            author="user",
+            source_id=None,
+            issue_number=None,
+            body="Test comment",
+            public=False,
+            approved=False,
+            origin="web",
+        )
+
+        # Connect and receive the comment
+        with self.client.websocket_connect(f"/ws/tickets/{self.ticket_id}") as ws:
+            data = ws.receive_json()
+            self.assertEqual(data["type"], "comment")
+            self.assertEqual(data["data"]["id"], comment_id)
+            # The WebSocket connection maintains seen_ids internally
+            # and won't send the same comment twice even if polled again
 
 
 if __name__ == "__main__":

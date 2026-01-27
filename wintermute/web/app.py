@@ -2483,12 +2483,16 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             return (now - ts).total_seconds() <= seconds
 
         last_seen = websocket.query_params.get("since")
+        seen_ids: set[str] = set()
         try:
             while True:
                 rows = get_comments(last_seen)
                 if rows:
                     last_seen = rows[-1].created_at
                     for row in rows:
+                        if row.id in seen_ids:
+                            continue
+                        seen_ids.add(row.id)
                         await websocket.send_json({"type": "comment", "data": comment_to_dict(row)})
                 session = get_session()
                 if session and session.status == "running":
