@@ -397,30 +397,28 @@ async def _run_claude_session(
         queue = []
 
     if not queue:
-        # Poll for any pending output (Claude may still be working)
-        if session.awaiting_response:
-            poll_result = poll_claude(session.id, timeout_seconds=5)
-            if _handle_claude_error(poll_result.error):
-                return
-            if poll_result.error:
-                logger.warning("Claude poll error for session %s: %s", session.id, poll_result.error)
-            if poll_result.response_text:
-                logger.info("Claude poll response received for session %s", session.id)
-                await _emit_output(ctx, session, project, agent, poll_result.response_text, force_comment=True)
-                await _handle_session_markers(ctx, session, poll_result.response_text)
-                await _apply_agent_responses(
-                    ctx,
-                    session,
-                    poll_result.response_text,
-                    sender=lambda text: _send_prompt(text),
-                )
-                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
-            elif poll_result.had_activity:
-                # Claude is outputting data (tool calls, etc.) but no final response yet
-                # Update last_output_at to keep the typing indicator alive
-                ctx.db.update_session(session.id, last_output_at=utc_now())
-        else:
-            # Check for keepalive
+        # Always poll for any pending output - Claude may generate responses autonomously
+        poll_result = poll_claude(session.id, timeout_seconds=5)
+        if _handle_claude_error(poll_result.error):
+            return
+        if poll_result.error:
+            logger.warning("Claude poll error for session %s: %s", session.id, poll_result.error)
+        if poll_result.response_text:
+            logger.info("Claude poll response received for session %s", session.id)
+            await _emit_output(ctx, session, project, agent, poll_result.response_text, force_comment=True)
+            await _handle_session_markers(ctx, session, poll_result.response_text)
+            await _apply_agent_responses(
+                ctx,
+                session,
+                poll_result.response_text,
+                sender=lambda text: _send_prompt(text),
+            )
+            ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+        elif poll_result.had_activity:
+            # Claude is outputting data (tool calls, etc.) but no final response yet
+            ctx.db.update_session(session.id, last_output_at=utc_now())
+        elif not session.awaiting_response:
+            # No activity and not awaiting - check for keepalive
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("Claude keepalive for session %s", session.id)
