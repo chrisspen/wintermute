@@ -9,8 +9,8 @@ from alembic import op # pylint: disable=no-name-in-module
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = '0060'
-down_revision = '0059'
+revision = '0060_agent_health_command'
+down_revision = '0059_ticket_history'
 branch_labels = None
 depends_on = None
 

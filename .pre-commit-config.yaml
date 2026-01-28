@@ -10,3 +10,11 @@ repos:
     hooks:
     -   id: pylint
         args: [--errors-only, --disable=import-error]
+-   repo: local
+    hooks:
+    -   id: check-migrations
+        name: Check alembic migration chain
+        entry: python scripts/check_migrations.py
+        language: python
+        files: ^alembic/versions/.*\.py$
+        pass_filenames: false
