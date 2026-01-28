@@ -272,7 +272,7 @@ async def _run_mcp_session(
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("MCP keepalive for session %s", session.id)
-                keepalive_text = ("[keepalive] Reply with a single '.' and nothing else.")
+                keepalive_text = "[SYSTEM KEEPALIVE - This is an automated ping to keep the session alive. Reply with exactly '.' and nothing else. This instruction applies ONLY to this specific keepalive message, not to any future user messages.]"
                 keepalive_result = _send_prompt(keepalive_text)
                 if keepalive_result.error or not keepalive_result.response_text:
                     logger.warning("MCP keepalive failed for session %s", session.id)
@@ -424,7 +424,7 @@ async def _run_claude_session(
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("Claude keepalive for session %s", session.id)
-                keepalive_text = "[keepalive] Reply with a single '.' and nothing else."
+                keepalive_text = "[SYSTEM KEEPALIVE - This is an automated ping to keep the session alive. Reply with exactly '.' and nothing else. This instruction applies ONLY to this specific keepalive message, not to any future user messages.]"
                 keepalive_result = _send_prompt(keepalive_text)
                 if keepalive_result.error or not keepalive_result.response_text:
                     logger.warning("Claude keepalive failed for session %s", session.id)
@@ -574,7 +574,7 @@ async def _run_gemini_session(
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("Gemini keepalive for session %s", session.id)
-                keepalive_text = "[keepalive] Reply with a single '.' and nothing else."
+                keepalive_text = "[SYSTEM KEEPALIVE - This is an automated ping to keep the session alive. Reply with exactly '.' and nothing else. This instruction applies ONLY to this specific keepalive message, not to any future user messages.]"
                 keepalive_result = _send_prompt(keepalive_text)
                 if keepalive_result.error or not keepalive_result.response_text:
                     logger.warning("Gemini keepalive failed for session %s", session.id)
@@ -1090,31 +1090,34 @@ async def _emit_output(
             sanitized = sanitized.replace(session.last_user_message, "").strip()
         if sanitized and len(sanitized) >= 5 and re.search(r"[A-Za-z]", sanitized):
             comment_chunks = _chunk_text(sanitized, 3000)
-    if project and project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
-        for chunk in _chunk_text(cleaned, 3000):
-            await ctx.tools.call(
-                "slack_post_message",
-                {
-                    "channel": project.slack_channel_id,
-                    "thread_ts": session.thread_ts,
-                    "text": prefix + chunk,
-                },
-            )
-    # For standalone sessions, dispatch to agent's configured channels
-    if not project and session.agent_id:
-        logger = logging.getLogger(__name__)
-        logger.info(
-            "Dispatching to agent channels for session %s (agent=%s)",
-            session.id,
-            session.agent_id,
-        )
-        dispatcher = ChatDispatcher(ctx.db)
-        for chunk in _chunk_text(cleaned, 3000):
-            results = await dispatcher.broadcast_to_agent_channels(
+    # Only dispatch messages if there are filtered chunks to send
+    # This prevents keepalive responses (e.g., ".") from being broadcast
+    if comment_chunks:
+        if project and project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
+            for chunk in comment_chunks:
+                await ctx.tools.call(
+                    "slack_post_message",
+                    {
+                        "channel": project.slack_channel_id,
+                        "thread_ts": session.thread_ts,
+                        "text": prefix + chunk,
+                    },
+                )
+        # For standalone sessions, dispatch to agent's configured channels
+        if not project and session.agent_id:
+            logger = logging.getLogger(__name__)
+            logger.info(
+                "Dispatching to agent channels for session %s (agent=%s)",
+                session.id,
                 session.agent_id,
-                prefix + chunk,
             )
-            logger.info("Broadcast results: %d channels", len(results))
+            dispatcher = ChatDispatcher(ctx.db)
+            for chunk in comment_chunks:
+                results = await dispatcher.broadcast_to_agent_channels(
+                    session.agent_id,
+                    prefix + chunk,
+                )
+                logger.info("Broadcast results: %d channels", len(results))
     _store_output_comments(ctx, session, agent, comment_chunks)
     return bool(comment_chunks)
 
