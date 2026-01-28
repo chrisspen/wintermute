@@ -736,6 +736,7 @@ class TicketSprintModel(Base):
 
 class TicketModel(Base):
     __tablename__ = "tickets"
+    __table_args__ = (UniqueConstraint("project_id", "count", name="uq_tickets_project_count"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
     project_id: Mapped[str] = mapped_column(String, nullable=False)
@@ -2811,36 +2812,47 @@ class Database:
         created_by_id: Optional[str] = None,
     ) -> None:
         now = utc_now()
-        with self.session() as session:
-            # Get next count for this project
-            max_count = session.execute(select(func.max(TicketModel.count)).where(TicketModel.project_id == project_id)).scalar() or 0
-            next_count = max_count + 1
-            session.add(
-                TicketModel(
-                    id=ticket_id,
-                    project_id=project_id,
-                    agent_id=agent_id,
-                    vm_target_id=vm_target_id,
-                    sprint_id=sprint_id,
-                    title=title,
-                    description=description,
-                    internal_notes=internal_notes,
-                    assigned_to=assigned_to,
-                    estimate=estimate,
-                    hours=str(hours) if hours is not None else None,
-                    story_points=str(story_points) if story_points is not None else None,
-                    priority=priority,
-                    status=status,
-                    source_url=source_url,
-                    github_comments_json=None,
-                    github_comments_fetched_at=None,
-                    auto_start=1 if auto_start else 0,
-                    count=next_count,
-                    created_by_id=created_by_id,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
+        # Retry loop to handle race condition on count assignment
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                with self.session() as session:
+                    # Get next count for this project
+                    max_count = session.execute(select(func.max(TicketModel.count)).where(TicketModel.project_id == project_id)).scalar() or 0
+                    next_count = max_count + 1
+                    session.add(
+                        TicketModel(
+                            id=ticket_id,
+                            project_id=project_id,
+                            agent_id=agent_id,
+                            vm_target_id=vm_target_id,
+                            sprint_id=sprint_id,
+                            title=title,
+                            description=description,
+                            internal_notes=internal_notes,
+                            assigned_to=assigned_to,
+                            estimate=estimate,
+                            hours=str(hours) if hours is not None else None,
+                            story_points=str(story_points) if story_points is not None else None,
+                            priority=priority,
+                            status=status,
+                            source_url=source_url,
+                            github_comments_json=None,
+                            github_comments_fetched_at=None,
+                            auto_start=1 if auto_start else 0,
+                            count=next_count,
+                            created_by_id=created_by_id,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                return # Success, exit the retry loop
+            except IntegrityError as e:
+                # Check if it's a unique constraint violation on count
+                if "uq_tickets_project_count" in str(e) or "UNIQUE constraint" in str(e):
+                    if attempt < max_retries - 1:
+                        continue # Retry with new count
+                raise # Re-raise if not a count conflict or max retries exceeded
 
     def update_ticket(
         self,
