@@ -318,6 +318,7 @@ class CommentRecord:
     sent: bool
     sent_at: Optional[str]
     origin: Optional[str] # web, slack, telegram, discord, etc.
+    seconds_spent_working: Optional[int] # time since prev comment, -1 if timed out
     created_at: str
     updated_at: str
 
@@ -492,6 +493,97 @@ class AgentWakeRecord:
     cancelled_at: Optional[str]
     cancelled_by: Optional[str] # user, agent, system
     updated_at: str
+
+
+# Agent work report records
+@dataclass(frozen=True)
+class AgentWorkTotalRecord:
+    """Total seconds worked per agent (all time)."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    total_seconds: int
+
+
+@dataclass(frozen=True)
+class AgentWorkByYearRecord:
+    """Total seconds worked per agent per year."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    year: int
+    total_seconds: int
+
+
+@dataclass(frozen=True)
+class AgentWorkByYearMonthRecord:
+    """Total seconds worked per agent per year/month."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    year: int
+    month: int
+    total_seconds: int
+
+
+@dataclass(frozen=True)
+class AgentWorkBySprintRecord:
+    """Total seconds worked per agent per sprint."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    sprint_id: str
+    sprint_name: str
+    total_seconds: int
+
+
+@dataclass(frozen=True)
+class AgentWorkByProjectRecord:
+    """Total seconds worked per agent per project."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    project_id: str
+    project_name: str
+    total_seconds: int
+
+
+@dataclass(frozen=True)
+class AgentWorkByProjectYearRecord:
+    """Total seconds worked per agent per project per year."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    project_id: str
+    project_name: str
+    year: int
+    total_seconds: int
+
+
+@dataclass(frozen=True)
+class AgentWorkByProjectYearMonthRecord:
+    """Total seconds worked per agent per project per year/month."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    project_id: str
+    project_name: str
+    year: int
+    month: int
+    total_seconds: int
+
+
+@dataclass(frozen=True)
+class AgentWorkByProjectSprintRecord:
+    """Total seconds worked per agent per project per sprint."""
+    agent_id: str
+    agent_name: str
+    agent_slug: str
+    project_id: str
+    project_name: str
+    sprint_id: str
+    sprint_name: str
+    total_seconds: int
 
 
 class Base(DeclarativeBase):
@@ -699,6 +791,7 @@ class CommentModel(Base):
     sent: Mapped[int] = mapped_column(Integer, nullable=False)
     sent_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     origin: Mapped[Optional[str]] = mapped_column(String, nullable=True) # web, slack, telegram, etc.
+    seconds_spent_working: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -3170,6 +3263,7 @@ class Database:
                 sent=bool(row.sent),
                 sent_at=row.sent_at,
                 origin=getattr(row, "origin", None),
+                seconds_spent_working=getattr(row, "seconds_spent_working", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
@@ -3212,6 +3306,7 @@ class Database:
                 sent=bool(row.sent),
                 sent_at=row.sent_at,
                 origin=getattr(row, "origin", None),
+                seconds_spent_working=getattr(row, "seconds_spent_working", None),
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
@@ -3238,6 +3333,7 @@ class Database:
             sent=bool(row.sent),
             sent_at=row.sent_at,
             origin=getattr(row, "origin", None),
+            seconds_spent_working=getattr(row, "seconds_spent_working", None),
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3259,6 +3355,39 @@ class Database:
         origin: Optional[str] = None,
     ) -> None:
         now = utc_now()
+        seconds_spent_working: Optional[int] = None
+
+        # Auto-calculate seconds_spent_working for agent comments
+        # Timeout threshold in seconds (30 minutes)
+        SECONDS_SPENT_WORKING_TIMEOUT = 30 * 60
+
+        if agent_id:
+            with self.session() as session:
+                # Find the previous comment in the same context (ticket or agent_session)
+                stmt = select(CommentModel).order_by(CommentModel.created_at.desc()).limit(1)
+                if ticket_id:
+                    stmt = stmt.where(CommentModel.ticket_id == ticket_id)
+                elif agent_session_id:
+                    stmt = stmt.where(CommentModel.agent_session_id == agent_session_id)
+                else:
+                    stmt = None # Can't calculate without context
+
+                if stmt is not None:
+                    prev_comment = session.execute(stmt).scalar_one_or_none()
+                    if prev_comment:
+                        # Parse timestamps and calculate difference
+                        from datetime import datetime
+                        try:
+                            now_dt = datetime.fromisoformat(now.replace('Z', '+00:00'))
+                            prev_dt = datetime.fromisoformat(prev_comment.created_at.replace('Z', '+00:00'))
+                            diff_seconds = int((now_dt - prev_dt).total_seconds())
+                            if diff_seconds > SECONDS_SPENT_WORKING_TIMEOUT:
+                                seconds_spent_working = -1 # Timed out
+                            else:
+                                seconds_spent_working = max(0, diff_seconds)
+                        except (ValueError, AttributeError):
+                            pass # Leave as None if parsing fails
+
         with self.session() as session:
             session.add(
                 CommentModel(
@@ -3275,6 +3404,7 @@ class Database:
                     approved=1 if approved else 0,
                     sent=0,
                     sent_at=None,
+                    seconds_spent_working=seconds_spent_working,
                     created_at=now,
                     updated_at=now,
                     agent_session_id=agent_session_id,
@@ -3339,6 +3469,7 @@ class Database:
                 updated_at=row.updated_at,
                 agent_session_id=getattr(row, "agent_session_id", None),
                 origin=getattr(row, "origin", None),
+                seconds_spent_working=getattr(row, "seconds_spent_working", None),
             ) for row in rows
         ]
 
@@ -4726,3 +4857,287 @@ class Database:
         avg = self.get_agent_average_memory_usage(agent_id)
         if avg is not None:
             self.update_agent(agent_id, average_memory_usage_mb=int(avg))
+
+    # Agent work reports
+    def get_agent_work_totals(self) -> list[AgentWorkTotalRecord]:
+        """Get total seconds worked per agent (all time)."""
+        with self.session() as session:
+            # Join comments with agents, sum seconds_spent_working where > 0
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).where(CommentModel.agent_id.isnot(None)).where(
+                    CommentModel.seconds_spent_working.isnot(None)
+                ).where(CommentModel.seconds_spent_working > 0).group_by(CommentModel.agent_id, AgentModel.name,
+                                                                         AgentModel.slug).order_by(func.sum(CommentModel.seconds_spent_working).desc())
+            ).all()
+        return [
+            AgentWorkTotalRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]
+
+    def get_agent_work_by_year(self) -> list[AgentWorkByYearRecord]:
+        """Get total seconds worked per agent per year."""
+        with self.session() as session:
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    func.substr(CommentModel.created_at, 1, 4).label("year"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).where(CommentModel.agent_id.isnot(None)
+                                                                                 ).where(CommentModel.seconds_spent_working.isnot(None)
+                                                                                         ).where(CommentModel.seconds_spent_working > 0).group_by(
+                                                                                             CommentModel.agent_id,
+                                                                                             AgentModel.name,
+                                                                                             AgentModel.slug,
+                                                                                             func.substr(CommentModel.created_at, 1, 4),
+                                                                                         ).order_by(
+                                                                                             func.substr(CommentModel.created_at, 1, 4).desc(),
+                                                                                             func.sum(CommentModel.seconds_spent_working).desc(),
+                                                                                         )
+            ).all()
+        return [
+            AgentWorkByYearRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                year=int(row.year),
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]
+
+    def get_agent_work_by_year_month(self) -> list[AgentWorkByYearMonthRecord]:
+        """Get total seconds worked per agent per year/month."""
+        with self.session() as session:
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    func.substr(CommentModel.created_at, 1, 4).label("year"),
+                    func.substr(CommentModel.created_at, 6, 2).label("month"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).where(CommentModel.agent_id.isnot(None)
+                                                                                 ).where(CommentModel.seconds_spent_working.isnot(None)
+                                                                                         ).where(CommentModel.seconds_spent_working > 0).group_by(
+                                                                                             CommentModel.agent_id,
+                                                                                             AgentModel.name,
+                                                                                             AgentModel.slug,
+                                                                                             func.substr(CommentModel.created_at, 1, 4),
+                                                                                             func.substr(CommentModel.created_at, 6, 2),
+                                                                                         ).order_by(
+                                                                                             func.substr(CommentModel.created_at, 1, 4).desc(),
+                                                                                             func.substr(CommentModel.created_at, 6, 2).desc(),
+                                                                                             func.sum(CommentModel.seconds_spent_working).desc(),
+                                                                                         )
+            ).all()
+        return [
+            AgentWorkByYearMonthRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                year=int(row.year),
+                month=int(row.month),
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]
+
+    def get_agent_work_by_sprint(self) -> list[AgentWorkBySprintRecord]:
+        """Get total seconds worked per agent per sprint."""
+        with self.session() as session:
+            # Need to join through tickets to get sprint
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    TicketModel.sprint_id,
+                    SprintModel.name.label("sprint_name"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).join(TicketModel, CommentModel.ticket_id == TicketModel.id).join(
+                    SprintModel, TicketModel.sprint_id == SprintModel.id
+                ).where(CommentModel.agent_id.isnot(None)).where(CommentModel.seconds_spent_working.isnot(None)
+                                                                 ).where(CommentModel.seconds_spent_working > 0
+                                                                         ).where(TicketModel.sprint_id.isnot(None)).group_by(
+                                                                             CommentModel.agent_id,
+                                                                             AgentModel.name,
+                                                                             AgentModel.slug,
+                                                                             TicketModel.sprint_id,
+                                                                             SprintModel.name,
+                                                                         ).order_by(func.sum(CommentModel.seconds_spent_working).desc())
+            ).all()
+        return [
+            AgentWorkBySprintRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                sprint_id=row.sprint_id,
+                sprint_name=row.sprint_name,
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]
+
+    def get_agent_work_by_project(self) -> list[AgentWorkByProjectRecord]:
+        """Get total seconds worked per agent per project."""
+        with self.session() as session:
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    CommentModel.project_id,
+                    ProjectModel.name.label("project_name"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).join(ProjectModel, CommentModel.project_id == ProjectModel.id).where(
+                    CommentModel.agent_id.isnot(None)
+                ).where(CommentModel.project_id.isnot(None)).where(CommentModel.seconds_spent_working.isnot(None)
+                                                                   ).where(CommentModel.seconds_spent_working > 0).group_by(
+                                                                       CommentModel.agent_id,
+                                                                       AgentModel.name,
+                                                                       AgentModel.slug,
+                                                                       CommentModel.project_id,
+                                                                       ProjectModel.name,
+                                                                   ).order_by(func.sum(CommentModel.seconds_spent_working).desc())
+            ).all()
+        return [
+            AgentWorkByProjectRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                project_id=row.project_id,
+                project_name=row.project_name,
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]
+
+    def get_agent_work_by_project_year(self) -> list[AgentWorkByProjectYearRecord]:
+        """Get total seconds worked per agent per project per year."""
+        with self.session() as session:
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    CommentModel.project_id,
+                    ProjectModel.name.label("project_name"),
+                    func.substr(CommentModel.created_at, 1, 4).label("year"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).join(ProjectModel, CommentModel.project_id == ProjectModel.id).where(
+                    CommentModel.agent_id.isnot(None)
+                ).where(CommentModel.project_id.isnot(None)).where(CommentModel.seconds_spent_working.isnot(None)
+                                                                   ).where(CommentModel.seconds_spent_working > 0).group_by(
+                                                                       CommentModel.agent_id,
+                                                                       AgentModel.name,
+                                                                       AgentModel.slug,
+                                                                       CommentModel.project_id,
+                                                                       ProjectModel.name,
+                                                                       func.substr(CommentModel.created_at, 1, 4),
+                                                                   ).order_by(
+                                                                       func.substr(CommentModel.created_at, 1, 4).desc(),
+                                                                       func.sum(CommentModel.seconds_spent_working).desc(),
+                                                                   )
+            ).all()
+        return [
+            AgentWorkByProjectYearRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                project_id=row.project_id,
+                project_name=row.project_name,
+                year=int(row.year),
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]
+
+    def get_agent_work_by_project_year_month(self) -> list[AgentWorkByProjectYearMonthRecord]:
+        """Get total seconds worked per agent per project per year/month."""
+        with self.session() as session:
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    CommentModel.project_id,
+                    ProjectModel.name.label("project_name"),
+                    func.substr(CommentModel.created_at, 1, 4).label("year"),
+                    func.substr(CommentModel.created_at, 6, 2).label("month"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).join(ProjectModel, CommentModel.project_id == ProjectModel.id).where(
+                    CommentModel.agent_id.isnot(None)
+                ).where(CommentModel.project_id.isnot(None)).where(CommentModel.seconds_spent_working.isnot(None)
+                                                                   ).where(CommentModel.seconds_spent_working > 0).group_by(
+                                                                       CommentModel.agent_id,
+                                                                       AgentModel.name,
+                                                                       AgentModel.slug,
+                                                                       CommentModel.project_id,
+                                                                       ProjectModel.name,
+                                                                       func.substr(CommentModel.created_at, 1, 4),
+                                                                       func.substr(CommentModel.created_at, 6, 2),
+                                                                   ).order_by(
+                                                                       func.substr(CommentModel.created_at, 1, 4).desc(),
+                                                                       func.substr(CommentModel.created_at, 6, 2).desc(),
+                                                                       func.sum(CommentModel.seconds_spent_working).desc(),
+                                                                   )
+            ).all()
+        return [
+            AgentWorkByProjectYearMonthRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                project_id=row.project_id,
+                project_name=row.project_name,
+                year=int(row.year),
+                month=int(row.month),
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]
+
+    def get_agent_work_by_project_sprint(self) -> list[AgentWorkByProjectSprintRecord]:
+        """Get total seconds worked per agent per project per sprint."""
+        with self.session() as session:
+            rows = session.execute(
+                select(
+                    CommentModel.agent_id,
+                    AgentModel.name.label("agent_name"),
+                    AgentModel.slug.label("agent_slug"),
+                    CommentModel.project_id,
+                    ProjectModel.name.label("project_name"),
+                    TicketModel.sprint_id,
+                    SprintModel.name.label("sprint_name"),
+                    func.sum(CommentModel.seconds_spent_working).label("total_seconds"),
+                ).join(AgentModel, CommentModel.agent_id == AgentModel.id).join(ProjectModel, CommentModel.project_id == ProjectModel.id).join(
+                    TicketModel, CommentModel.ticket_id == TicketModel.id
+                ).join(SprintModel,
+                       TicketModel.sprint_id == SprintModel.id).where(CommentModel.agent_id.isnot(None)).where(CommentModel.project_id.isnot(None)).where(
+                           CommentModel.seconds_spent_working.isnot(None)
+                       ).where(CommentModel.seconds_spent_working > 0).where(TicketModel.sprint_id.isnot(None)).group_by(
+                           CommentModel.agent_id,
+                           AgentModel.name,
+                           AgentModel.slug,
+                           CommentModel.project_id,
+                           ProjectModel.name,
+                           TicketModel.sprint_id,
+                           SprintModel.name,
+                       ).order_by(func.sum(CommentModel.seconds_spent_working).desc())
+            ).all()
+        return [
+            AgentWorkByProjectSprintRecord(
+                agent_id=row.agent_id,
+                agent_name=row.agent_name,
+                agent_slug=row.agent_slug,
+                project_id=row.project_id,
+                project_name=row.project_name,
+                sprint_id=row.sprint_id,
+                sprint_name=row.sprint_name,
+                total_seconds=row.total_seconds or 0,
+            ) for row in rows
+        ]

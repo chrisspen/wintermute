@@ -1062,7 +1062,275 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
             },
         ],
     },
+    # Agent work report tables (read-only)
+    "report_agent_work_totals": {
+        "default": ["agent_name", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
+    "report_agent_work_by_year": {
+        "default": ["agent_name", "year", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "year",
+                "label": "Year",
+                "cell_class": "font-mono text-sm"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
+    "report_agent_work_by_month": {
+        "default": ["agent_name", "year", "month", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "year",
+                "label": "Year",
+                "cell_class": "font-mono text-sm"
+            },
+            {
+                "key": "month",
+                "label": "Month",
+                "cell_class": "font-mono text-sm"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
+    "report_agent_work_by_sprint": {
+        "default": ["agent_name", "sprint_name", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "sprint_name",
+                "label": "Sprint"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
+    "report_agent_work_by_project": {
+        "default": ["agent_name", "project_name", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "project_name",
+                "label": "Project"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
+    "report_agent_work_by_project_year": {
+        "default": ["agent_name", "project_name", "year", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "project_name",
+                "label": "Project"
+            },
+            {
+                "key": "year",
+                "label": "Year",
+                "cell_class": "font-mono text-sm"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
+    "report_agent_work_by_project_month": {
+        "default": ["agent_name", "project_name", "year", "month", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "project_name",
+                "label": "Project"
+            },
+            {
+                "key": "year",
+                "label": "Year",
+                "cell_class": "font-mono text-sm"
+            },
+            {
+                "key": "month",
+                "label": "Month",
+                "cell_class": "font-mono text-sm"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
+    "report_agent_work_by_project_sprint": {
+        "default": ["agent_name", "project_name", "sprint_name", "total_seconds", "total_hours"],
+        "filters": [],
+        "sortable": [],
+        "columns": [
+            {
+                "key": "agent_name",
+                "label": "Agent"
+            },
+            {
+                "key": "agent_slug",
+                "label": "Slug",
+                "cell_class": "font-mono text-xs"
+            },
+            {
+                "key": "project_name",
+                "label": "Project"
+            },
+            {
+                "key": "sprint_name",
+                "label": "Sprint"
+            },
+            {
+                "key": "total_seconds",
+                "label": "Total Seconds",
+                "cell_class": "font-mono text-sm text-right"
+            },
+            {
+                "key": "total_hours",
+                "label": "Total Hours",
+                "cell_class": "font-mono text-sm text-right"
+            },
+        ],
+    },
 }
+
+
+def _format_hours(seconds: int) -> str:
+    """Format seconds as hours with 2 decimal places."""
+    return f"{seconds / 3600:.2f}"
 
 
 def _hash_password(password: str, salt: bytes) -> str:
@@ -8443,6 +8711,300 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             {
                 "title": "Agent Metrics Logs",
                 "active_nav": "agent_metrics_logs",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    # =========================================================================
+    # REPORTS
+    # =========================================================================
+
+    @app.get("/ui/reports/agent-work-totals")
+    def report_agent_work_totals_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_totals()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_totals",
+            title="Agent Work Totals",
+            description="Total time worked by each agent (all time)",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work Totals",
+                "active_nav": "report_agent_work_totals",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/reports/agent-work-by-year")
+    def report_agent_work_by_year_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_by_year()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "year": r.year,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_by_year",
+            title="Agent Work by Year",
+            description="Total time worked by each agent per year",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work by Year",
+                "active_nav": "report_agent_work_by_year",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/reports/agent-work-by-month")
+    def report_agent_work_by_month_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_by_year_month()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "year": r.year,
+            "month": r.month,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_by_month",
+            title="Agent Work by Month",
+            description="Total time worked by each agent per year/month",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work by Month",
+                "active_nav": "report_agent_work_by_month",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/reports/agent-work-by-sprint")
+    def report_agent_work_by_sprint_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_by_sprint()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "sprint_id": r.sprint_id,
+            "sprint_name": r.sprint_name,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_by_sprint",
+            title="Agent Work by Sprint",
+            description="Total time worked by each agent per sprint",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work by Sprint",
+                "active_nav": "report_agent_work_by_sprint",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/reports/agent-work-by-project")
+    def report_agent_work_by_project_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_by_project()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "project_id": r.project_id,
+            "project_name": r.project_name,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_by_project",
+            title="Agent Work by Project",
+            description="Total time worked by each agent per project",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work by Project",
+                "active_nav": "report_agent_work_by_project",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/reports/agent-work-by-project-year")
+    def report_agent_work_by_project_year_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_by_project_year()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "project_id": r.project_id,
+            "project_name": r.project_name,
+            "year": r.year,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_by_project_year",
+            title="Agent Work by Project/Year",
+            description="Total time worked by each agent per project per year",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work by Project/Year",
+                "active_nav": "report_agent_work_by_project_year",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/reports/agent-work-by-project-month")
+    def report_agent_work_by_project_month_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_by_project_year_month()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "project_id": r.project_id,
+            "project_name": r.project_name,
+            "year": r.year,
+            "month": r.month,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_by_project_month",
+            title="Agent Work by Project/Month",
+            description="Total time worked by each agent per project per year/month",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work by Project/Month",
+                "active_nav": "report_agent_work_by_project_month",
+                "growl_message": growl_message,
+                **table_context,
+            },
+        )
+
+    @app.get("/ui/reports/agent-work-by-project-sprint")
+    def report_agent_work_by_project_sprint_ui(request: Request, user: str = Depends(_require_login)) -> Response:
+        growl_message = "Saved" if request.query_params.get("saved") else None
+        records = database.get_agent_work_by_project_sprint()
+        rows = [{
+            "agent_id": r.agent_id,
+            "agent_name": r.agent_name,
+            "agent_slug": r.agent_slug,
+            "project_id": r.project_id,
+            "project_name": r.project_name,
+            "sprint_id": r.sprint_id,
+            "sprint_name": r.sprint_name,
+            "total_seconds": r.total_seconds,
+            "total_hours": _format_hours(r.total_seconds),
+        } for r in records]
+        table_context = _build_table_context(
+            database=database,
+            request=request,
+            user=user,
+            model="report_agent_work_by_project_sprint",
+            title="Agent Work by Project/Sprint",
+            description="Total time worked by each agent per project per sprint",
+            create_label=None,
+            create_url=None,
+            rows=rows,
+            empty_message="No agent work data yet.",
+        )
+        return _render_template(
+            request,
+            "table_list.html",
+            {
+                "title": "Agent Work by Project/Sprint",
+                "active_nav": "report_agent_work_by_project_sprint",
                 "growl_message": growl_message,
                 **table_context,
             },

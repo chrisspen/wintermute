@@ -159,6 +159,55 @@
             >
               Agent Metrics
             </a>
+            <div class="mt-4 mb-2 text-xs uppercase tracking-[0.15em] text-slate-400 dark:text-slate-500 px-3">Reports</div>
+            <a
+              href="/ui/reports/agent-work-totals"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_totals' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Agent
+            </a>
+            <a
+              href="/ui/reports/agent-work-by-year"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_by_year' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Year
+            </a>
+            <a
+              href="/ui/reports/agent-work-by-month"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_by_month' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Month
+            </a>
+            <a
+              href="/ui/reports/agent-work-by-sprint"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_by_sprint' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Sprint
+            </a>
+            <a
+              href="/ui/reports/agent-work-by-project"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_by_project' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Project
+            </a>
+            <a
+              href="/ui/reports/agent-work-by-project-year"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_by_project_year' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Project/Year
+            </a>
+            <a
+              href="/ui/reports/agent-work-by-project-month"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_by_project_month' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Project/Month
+            </a>
+            <a
+              href="/ui/reports/agent-work-by-project-sprint"
+              class="flex items-center rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white {% if active_nav == 'report_agent_work_by_project_sprint' %}bg-slate-100 text-slate-900 font-semibold dark:bg-slate-800 dark:text-white{% endif %}"
+            >
+              Work by Project/Sprint
+            </a>
           </nav>
           {% if user %}
           <div class="mt-6 border-t border-slate-200 pt-4 text-sm relative dark:border-slate-800">
