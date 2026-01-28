@@ -18,15 +18,13 @@ def _create_test_user(db: Database, username: str = "testuser", password: str = 
     """Create a test user with proper password hash."""
     salt = os.urandom(16)
     salt_b64 = base64.b64encode(salt).decode("ascii")
-    password_hash = base64.b64encode(
-        hashlib.scrypt(
-            password.encode("utf-8"),
-            salt=salt,
-            n=2**14,
-            r=8,
-            p=1,
-        )
-    ).decode("ascii")
+    password_hash = base64.b64encode(hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=2**14,
+        r=8,
+        p=1,
+    )).decode("ascii")
     user_id = str(uuid.uuid4())
     db.insert_user(
         user_id=user_id,
@@ -68,7 +66,10 @@ class AgentSessionAPITests(unittest.TestCase):
         _create_test_user(self.db)
         self.client.post(
             "/login",
-            data={"username": "testuser", "password": "testpass"},
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
             follow_redirects=False,
         )
 
@@ -105,9 +106,7 @@ class AgentSessionAPITests(unittest.TestCase):
 
     def test_session_status_no_session(self) -> None:
         """Test session status when no session is running."""
-        response = self.client.get(
-            f"/api/agents/{self.agent_id}/session-status",
-        )
+        response = self.client.get(f"/api/agents/{self.agent_id}/session-status",)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertFalse(data["running"])
@@ -117,9 +116,7 @@ class AgentSessionAPITests(unittest.TestCase):
     @patch("wintermute.runner.start_session")
     def test_start_session(self, mock_start_session, mock_run) -> None:
         """Test starting a standalone session."""
-        response = self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
+        response = self.client.post(f"/api/agents/{self.agent_id}/start-session",)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertIn("session_id", data)
@@ -132,15 +129,11 @@ class AgentSessionAPITests(unittest.TestCase):
     def test_session_status_after_start(self, mock_start_session, mock_run) -> None:
         """Test session status after starting a session."""
         # Start a session first
-        start_response = self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
+        start_response = self.client.post(f"/api/agents/{self.agent_id}/start-session",)
         session_id = start_response.json()["session_id"]
 
         # Check status
-        response = self.client.get(
-            f"/api/agents/{self.agent_id}/session-status",
-        )
+        response = self.client.get(f"/api/agents/{self.agent_id}/session-status",)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["running"])
@@ -151,14 +144,10 @@ class AgentSessionAPITests(unittest.TestCase):
     def test_start_session_already_running(self, mock_start_session, mock_run) -> None:
         """Test that starting a session fails if one is already running."""
         # Start first session
-        self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
+        self.client.post(f"/api/agents/{self.agent_id}/start-session",)
 
         # Try to start another session
-        response = self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
+        response = self.client.post(f"/api/agents/{self.agent_id}/start-session",)
         self.assertEqual(response.status_code, 409)
         self.assertIn("already running", response.json()["detail"])
 
@@ -168,23 +157,17 @@ class AgentSessionAPITests(unittest.TestCase):
     def test_stop_session(self, mock_stop_session, mock_start_session, mock_run) -> None:
         """Test stopping a running session."""
         # Start a session first
-        self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
+        self.client.post(f"/api/agents/{self.agent_id}/start-session",)
 
         # Stop the session
-        response = self.client.post(
-            f"/api/agents/{self.agent_id}/session/stop",
-        )
+        response = self.client.post(f"/api/agents/{self.agent_id}/session/stop",)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["success"])
 
     def test_stop_session_no_running_session(self) -> None:
         """Test stopping fails when no session is running."""
-        response = self.client.post(
-            f"/api/agents/{self.agent_id}/session/stop",
-        )
+        response = self.client.post(f"/api/agents/{self.agent_id}/session/stop",)
         self.assertEqual(response.status_code, 404)
         self.assertIn("No running session", response.json()["detail"])
 
@@ -194,33 +177,23 @@ class AgentSessionAPITests(unittest.TestCase):
     def test_session_status_after_stop(self, mock_stop_session, mock_start_session, mock_run) -> None:
         """Test session status returns not running after stop."""
         # Start and then stop a session
-        self.client.post(
-            f"/api/agents/{self.agent_id}/start-session",
-        )
-        self.client.post(
-            f"/api/agents/{self.agent_id}/session/stop",
-        )
+        self.client.post(f"/api/agents/{self.agent_id}/start-session",)
+        self.client.post(f"/api/agents/{self.agent_id}/session/stop",)
 
         # Check status
-        response = self.client.get(
-            f"/api/agents/{self.agent_id}/session-status",
-        )
+        response = self.client.get(f"/api/agents/{self.agent_id}/session-status",)
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertFalse(data["running"])
 
     def test_start_session_agent_not_found(self) -> None:
         """Test starting session for non-existent agent."""
-        response = self.client.post(
-            "/api/agents/nonexistent-id/start-session",
-        )
+        response = self.client.post("/api/agents/nonexistent-id/start-session",)
         self.assertEqual(response.status_code, 404)
 
     def test_session_status_agent_not_found(self) -> None:
         """Test session status for non-existent agent."""
-        response = self.client.get(
-            "/api/agents/nonexistent-id/session-status",
-        )
+        response = self.client.get("/api/agents/nonexistent-id/session-status",)
         self.assertEqual(response.status_code, 404)
 
     def test_start_session_no_vm_target(self) -> None:
@@ -242,9 +215,7 @@ class AgentSessionAPITests(unittest.TestCase):
             response_prefix=None,
         )
 
-        response = self.client.post(
-            f"/api/agents/{agent_id}/start-session",
-        )
+        response = self.client.post(f"/api/agents/{agent_id}/start-session",)
         self.assertEqual(response.status_code, 400)
         self.assertIn("no VM target", response.json()["detail"])
 
@@ -264,7 +235,10 @@ class SessionFileSyncTests(unittest.TestCase):
         _create_test_user(self.db)
         self.client.post(
             "/login",
-            data={"username": "testuser", "password": "testpass"},
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
             follow_redirects=False,
         )
 
@@ -332,6 +306,7 @@ class SessionFileSyncTests(unittest.TestCase):
 
     def _mock_scp_with_files(self, files_content: dict):
         """Create a mock for subprocess.run that writes files during SCP."""
+
         def mock_run(cmd, **kwargs):
             result = MagicMock()
             result.returncode = 0
@@ -358,9 +333,10 @@ class SessionFileSyncTests(unittest.TestCase):
             elif "test -d" in cmd_str:
                 result.stdout = "exists\n"
             elif "mkdir -p" in cmd_str:
-                pass  # No-op for mkdir
+                pass # No-op for mkdir
 
             return result
+
         return mock_run
 
     @patch("wintermute.runner.start_session")
@@ -375,9 +351,7 @@ class SessionFileSyncTests(unittest.TestCase):
 
         with patch("subprocess.run", side_effect=self._mock_scp_with_files(mock_files)):
             # Start a session
-            start_response = self.client.post(
-                f"/api/agents/{self.agent_id}/start-session",
-            )
+            start_response = self.client.post(f"/api/agents/{self.agent_id}/start-session",)
             self.assertEqual(start_response.status_code, 200)
 
             # Verify session files were created with default content initially
@@ -385,9 +359,7 @@ class SessionFileSyncTests(unittest.TestCase):
             self.assertEqual(len(files_before), 2)
 
             # Stop the session - this should sync files back
-            stop_response = self.client.post(
-                f"/api/agents/{self.agent_id}/session/stop",
-            )
+            stop_response = self.client.post(f"/api/agents/{self.agent_id}/session/stop",)
             self.assertEqual(stop_response.status_code, 200)
 
             # Verify session files were updated with new content
@@ -427,9 +399,7 @@ class SessionFileSyncTests(unittest.TestCase):
         }
 
         with patch("subprocess.run", side_effect=self._mock_scp_with_files(mock_files)):
-            response = self.client.post(
-                f"/api/agents/{self.agent_id}/pull-session-files",
-            )
+            response = self.client.post(f"/api/agents/{self.agent_id}/pull-session-files",)
             self.assertEqual(response.status_code, 200)
             data = response.json()
             self.assertTrue(data["success"])
@@ -467,9 +437,7 @@ class SessionFileSyncTests(unittest.TestCase):
             response_prefix=None,
         )
 
-        response = self.client.post(
-            f"/api/agents/{agent_id}/pull-session-files",
-        )
+        response = self.client.post(f"/api/agents/{agent_id}/pull-session-files",)
         self.assertEqual(response.status_code, 400)
         self.assertIn("no VM target", response.json()["detail"])
 
@@ -492,9 +460,7 @@ class SessionFileSyncTests(unittest.TestCase):
             response_prefix=None,
         )
 
-        response = self.client.post(
-            f"/api/agents/{agent_id}/pull-session-files",
-        )
+        response = self.client.post(f"/api/agents/{agent_id}/pull-session-files",)
         self.assertEqual(response.status_code, 400)
         self.assertIn("no session file config", response.json()["detail"])
 
@@ -514,7 +480,10 @@ class SessionFileTimestampConflictTests(unittest.TestCase):
         _create_test_user(self.db)
         self.client.post(
             "/login",
-            data={"username": "testuser", "password": "testpass"},
+            data={
+                "username": "testuser",
+                "password": "testpass"
+            },
             follow_redirects=False,
         )
 
@@ -572,6 +541,7 @@ class SessionFileTimestampConflictTests(unittest.TestCase):
 
     def _create_mock_run(self, remote_timestamp: int):
         """Create a mock for subprocess.run that returns specific timestamps."""
+
         def mock_run(cmd, **kwargs):
             result = MagicMock()
             result.returncode = 0
@@ -591,6 +561,7 @@ class SessionFileTimestampConflictTests(unittest.TestCase):
                 result.stdout = "Mem: 8000000000 2000000000 6000000000\n"
 
             return result
+
         return mock_run
 
     @patch("wintermute.runner.start_session")
@@ -607,9 +578,7 @@ class SessionFileTimestampConflictTests(unittest.TestCase):
         remote_ts = local_ts + 3600
 
         with patch("subprocess.run", side_effect=self._create_mock_run(remote_ts)):
-            response = self.client.post(
-                f"/api/agents/{self.agent_id}/start-session",
-            )
+            response = self.client.post(f"/api/agents/{self.agent_id}/start-session",)
             self.assertEqual(response.status_code, 409)
             data = response.json()
             self.assertEqual(data["conflict"], "session_files_newer_on_target")
@@ -625,7 +594,7 @@ class SessionFileTimestampConflictTests(unittest.TestCase):
         from datetime import datetime
         local_dt = datetime.fromisoformat(local_file.updated_at.replace("Z", "+00:00"))
         local_ts = int(local_dt.timestamp())
-        remote_ts = local_ts + 3600  # Remote is newer
+        remote_ts = local_ts + 3600 # Remote is newer
 
         scp_called = []
 
@@ -671,7 +640,7 @@ class SessionFileTimestampConflictTests(unittest.TestCase):
         from datetime import datetime
         local_dt = datetime.fromisoformat(local_file.updated_at.replace("Z", "+00:00"))
         local_ts = int(local_dt.timestamp())
-        remote_ts = local_ts + 3600  # Remote is newer
+        remote_ts = local_ts + 3600 # Remote is newer
 
         scp_called = []
 
@@ -720,9 +689,7 @@ class SessionFileTimestampConflictTests(unittest.TestCase):
         remote_ts = local_ts - 3600
 
         with patch("subprocess.run", side_effect=self._create_mock_run(remote_ts)):
-            response = self.client.post(
-                f"/api/agents/{self.agent_id}/start-session",
-            )
+            response = self.client.post(f"/api/agents/{self.agent_id}/start-session",)
             # Should succeed, not return conflict
             self.assertEqual(response.status_code, 200)
             self.assertIn("session_id", response.json())

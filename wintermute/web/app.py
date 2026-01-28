@@ -7876,7 +7876,8 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Build filter options for dropdowns
         filter_options = {
             "project_id": [("", "All Projects")] + [(p.id, p.name) for p in projects],
-            "status": [("", "All Statuses"), ("open", "Open"), ("in-progress", "In Progress"), ("needs-feedback", "Needs Feedback"), ("done", "Done"), ("cancelled", "Cancelled")],
+            "status": [("", "All Statuses"), ("open", "Open"), ("in-progress", "In Progress"), ("needs-feedback", "Needs Feedback"), ("done", "Done"),
+                       ("cancelled", "Cancelled")],
         }
 
         table_context = _build_table_context(
