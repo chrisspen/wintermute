@@ -189,6 +189,11 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
                 "label": "Status",
                 "type": "select",
             },
+            {
+                "key": "assigned_to",
+                "label": "Assignee",
+                "type": "select",
+            },
         ],
         "bulk_actions": [
             {
@@ -200,7 +205,7 @@ LIST_TABLE_CONFIGS: dict[str, dict[str, Any]] = {
                 "label": "Cancel (set status to cancelled)"
             },
         ],
-        "sortable": ["updated_at"],
+        "sortable": ["updated_at", "priority"],
         "columns": [
             {
                 "key": "id",
@@ -1305,7 +1310,11 @@ def _resolve_table_columns(database: Database, user: str, model: str, available_
 def _safe_return_to(request: Request, fallback: str) -> str:
     return_to = request.url.path
     if request.url.query:
-        return_to = f"{return_to}?{request.url.query}"
+        # Strip out 'saved' param to prevent accumulation
+        params = urllib.parse.parse_qs(request.url.query)
+        params.pop("saved", None)
+        if params:
+            return_to = f"{return_to}?{urllib.parse.urlencode(params, doseq=True)}"
     if not return_to.startswith("/ui"):
         return fallback
     return return_to
@@ -1316,13 +1325,26 @@ def _build_ticket_rows(
     project_lookup: dict[str, str],
     agent_lookup: dict[str, str],
     user_lookup: Optional[dict[str, str]] = None,
+    agent_slug_lookup: Optional[dict[str, str]] = None,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     user_lookup = user_lookup or {}
+    agent_slug_lookup = agent_slug_lookup or {}
     for ticket in tickets:
         project_name = project_lookup.get(ticket.project_id, ticket.project_id)
         agent_name = agent_lookup.get(ticket.agent_id, ticket.agent_id) if ticket.agent_id else None
         created_by_name = user_lookup.get(ticket.created_by_id) if ticket.created_by_id else None
+        # Format assigned_to to show agent slug instead of UUID
+        assigned_to_display = ticket.assigned_to
+        if ticket.assigned_to:
+            if ticket.assigned_to.startswith("agent:"):
+                agent_id = ticket.assigned_to[6:] # Strip "agent:" prefix
+                agent_slug = agent_slug_lookup.get(agent_id, agent_id)
+                assigned_to_display = f"agent:{agent_slug}"
+            elif ticket.assigned_to.startswith("user:"):
+                user_id = ticket.assigned_to[5:] # Strip "user:" prefix
+                username = user_lookup.get(user_id, user_id)
+                assigned_to_display = f"user:{username}"
         cells = {
             "id": {
                 "text": _display_value(ticket.id)
@@ -1344,7 +1366,7 @@ def _build_ticket_rows(
                 "href": f"/ui/agents/{ticket.agent_id}/edit" if ticket.agent_id else None,
             },
             "assigned_to": {
-                "text": _display_value(ticket.assigned_to)
+                "text": _display_value(assigned_to_display)
             },
             "created_by_id": {
                 "text": _display_value(created_by_name)
@@ -7861,6 +7883,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         # Extract filter params
         filter_project_id = request.query_params.get("project_id", "").strip() or None
         filter_status = request.query_params.get("status", "").strip() or None
+        filter_assigned_to = request.query_params.get("assigned_to", "").strip() or None
 
         # Extract sort params
         sort_param = request.query_params.get("sort", "")
@@ -7876,20 +7899,31 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 elif part and part in sortable_cols:
                     order_by.append((part, "asc"))
 
-        tickets = database.list_tickets(project_id=filter_project_id, status=filter_status, order_by=order_by if order_by else None)
+        tickets = database.list_tickets(
+            project_id=filter_project_id, status=filter_status, assigned_to=filter_assigned_to, order_by=order_by if order_by else None
+        )
         projects = database.list_projects()
         agents = database.list_agents()
         users = database.list_users()
         project_lookup = {project.id: project.name for project in projects}
         agent_lookup = {agent.id: agent.name for agent in agents}
+        agent_slug_lookup = {agent.id: agent.slug for agent in agents}
         user_lookup = {u.id: u.username for u in users}
         growl_message = _growl_message(request.query_params.get("saved"))
 
         # Build filter options for dropdowns
+        # Build assignee options: users and agents
+        assignee_options: list[tuple[str, str]] = [("", "All Assignees")]
+        for u in users:
+            assignee_options.append((f"user:{u.id}", f"User: {u.username}"))
+        for a in agents:
+            assignee_options.append((f"agent:{a.id}", f"Agent: {a.slug}"))
         filter_options = {
             "project_id": [("", "All Projects")] + [(p.id, p.name) for p in projects],
             "status": [("", "All Statuses"), ("open", "Open"), ("in-progress", "In Progress"), ("needs-feedback", "Needs Feedback"), ("done", "Done"),
                        ("cancelled", "Cancelled")],
+            "assigned_to":
+            assignee_options,
         }
 
         table_context = _build_table_context(
@@ -7901,7 +7935,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
             description=None,
             create_label="Create Ticket",
             create_url="/ui/tickets/create?return_to=/ui/tickets",
-            rows=_build_ticket_rows(tickets, project_lookup, agent_lookup, user_lookup),
+            rows=_build_ticket_rows(tickets, project_lookup, agent_lookup, user_lookup, agent_slug_lookup),
             empty_message="No tickets yet.",
             filter_options=filter_options,
         )
@@ -7928,6 +7962,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not return_to.startswith("/ui"):
             return_to = "/ui/tickets"
         selected_project_id = request.query_params.get("project_id", "")
+        # Determine default assignee from project's source_agent_id
+        default_assigned_to = ""
+        if selected_project_id:
+            project = database.get_project(selected_project_id)
+            if project and project.source_agent_id:
+                default_assigned_to = f"agent:{project.source_agent_id}"
         return _render_template(
             request,
             "ticket_create.html",
@@ -7943,6 +7983,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 "users": users,
                 "return_to": return_to,
                 "selected_project_id": selected_project_id,
+                "default_assigned_to": default_assigned_to,
             },
         )
 

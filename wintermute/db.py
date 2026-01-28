@@ -2658,6 +2658,7 @@ class Database:
         project_id: Optional[str] = None,
         sprint_id: Optional[str] = None,
         status: Optional[str] = None,
+        assigned_to: Optional[str] = None,
         order_by: Optional[list[tuple[str, str]]] = None,
     ) -> list[TicketRecord]:
         with self.session() as session:
@@ -2669,6 +2670,8 @@ class Database:
                 stmt = stmt.where(TicketModel.sprint_id == sprint_id)
             if status:
                 stmt = stmt.where(TicketModel.status == status)
+            if assigned_to:
+                stmt = stmt.where(TicketModel.assigned_to == assigned_to)
             # Apply custom ordering if provided
             if order_by:
                 for col_name, direction in order_by:

@@ -8,6 +8,11 @@
 
   <div class="flex flex-nowrap items-center gap-4">
     <form class="flex min-w-0 flex-1 items-center gap-2" method="get" action="{{ table_search_action }}">
+      {% for filter in table_filters %}
+      {% if filter.value %}
+      <input type="hidden" name="{{ filter.key }}" value="{{ filter.value }}" />
+      {% endif %}
+      {% endfor %}
       <div class="relative flex-1">
         <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 pointer-events-none"></i>
         <input

@@ -52,19 +52,19 @@
         </div>
         <div class="field-group">
           <label>Assigned To</label>
-          <select name="assigned_to">
+          <select name="assigned_to" id="assigned_to">
             <option value="">(unassigned)</option>
             {% if users %}
             <optgroup label="Users">
               {% for user in users %}
-              <option value="user:{{ user.id }}">{{ user.username }}</option>
+              <option value="user:{{ user.id }}"{% if default_assigned_to == 'user:' ~ user.id %} selected{% endif %}>{{ user.username }}</option>
               {% endfor %}
             </optgroup>
             {% endif %}
             {% if agents %}
             <optgroup label="Agents">
               {% for agent in agents %}
-              <option value="agent:{{ agent.id }}">{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
+              <option value="agent:{{ agent.id }}"{% if default_assigned_to == 'agent:' ~ agent.id %} selected{% endif %}>{{ agent.name }}{% if vm_names and vm_names.get(agent.vm_target_id) %} ({{ vm_names[agent.vm_target_id] }}){% endif %}</option>
               {% endfor %}
             </optgroup>
             {% endif %}
@@ -118,4 +118,27 @@
     </div>
   </div>
 </div>
+<script>
+// Map project IDs to their default agent IDs
+var projectDefaultAgents = {
+{% for project in projects %}
+{% if project.source_agent_id %}
+  "{{ project.id }}": "agent:{{ project.source_agent_id }}",
+{% endif %}
+{% endfor %}
+};
+
+// When project changes, update assigned_to if it's currently unassigned
+document.querySelector('select[name="project_id"]').addEventListener('change', function() {
+  var projectId = this.value;
+  var assignedToSelect = document.getElementById('assigned_to');
+  // Only auto-fill if currently unassigned
+  if (!assignedToSelect.value) {
+    var defaultAgent = projectDefaultAgents[projectId];
+    if (defaultAgent) {
+      assignedToSelect.value = defaultAgent;
+    }
+  }
+});
+</script>
 {% endblock %}
