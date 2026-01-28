@@ -6144,6 +6144,11 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 if priority and priority not in ("low", "medium", "high"):
                     raise HTTPException(status_code=400, detail="Invalid priority")
             updates["priority"] = priority
+        if "assigned_to" in payload:
+            assigned_to = payload["assigned_to"]
+            if assigned_to is not None:
+                assigned_to = str(assigned_to).strip() or None
+            updates["assigned_to"] = assigned_to
         if "story_points" in payload:
             sp = payload["story_points"]
             if sp is not None and sp != "":
