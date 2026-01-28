@@ -148,6 +148,34 @@ def ensure_vm_tools(spec: SSHSpec, agent_command: str, session_mode: str) -> tup
     return True, ""
 
 
+def run_health_check(spec: SSHSpec, health_command: str, timeout: int = 60) -> tuple[bool, str]:
+    """Run a health check command on the VM before starting an agent session.
+
+    Returns (ok, error_message). If ok is False, error_message explains what failed.
+    """
+    logger = logging.getLogger(__name__)
+    logger.info("Running health check on %s: %s", spec.host, health_command)
+
+    try:
+        result = subprocess.run(
+            ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", health_command],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"Health check timed out after {timeout} seconds"
+    except Exception as e:
+        return False, f"Health check failed to execute: {e}"
+
+    if result.returncode != 0:
+        error_output = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        return False, f"Health check failed (exit code {result.returncode}): {error_output}"
+
+    logger.info("Health check passed on %s", spec.host)
+    return True, ""
+
+
 def build_ssh_spec_with_options(vm: VMTargetRecord, options: list[str]) -> SSHSpec:
     # Always include BatchMode=yes to prevent password prompts (fail fast if no key auth)
     final_options = list(options)

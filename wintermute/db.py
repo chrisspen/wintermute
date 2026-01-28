@@ -371,6 +371,7 @@ class AgentRecord:
     working_directory: Optional[str]
     session_directory: Optional[str]
     autostart: bool
+    health_command: Optional[str]
     created_at: str
     updated_at: str
 
@@ -810,6 +811,7 @@ class AgentModel(Base):
     working_directory: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     session_directory: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     autostart: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    health_command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
@@ -3458,6 +3460,7 @@ class Database:
                 working_directory=row.working_directory,
                 session_directory=row.session_directory,
                 autostart=bool(row.autostart),
+                health_command=row.health_command,
                 created_at=row.created_at,
                 updated_at=row.updated_at,
             ) for row in rows
@@ -3558,6 +3561,7 @@ class Database:
         working_directory: Optional[str] = None,
         session_directory: Optional[str] = None,
         autostart: bool = False,
+        health_command: Optional[str] = None,
     ) -> None:
         now = utc_now()
         with self.session() as session:
@@ -3583,6 +3587,7 @@ class Database:
                     working_directory=working_directory,
                     session_directory=session_directory,
                     autostart=1 if autostart else 0,
+                    health_command=health_command,
                     created_at=now,
                     updated_at=now,
                 )
@@ -3613,6 +3618,7 @@ class Database:
         working_directory: Optional[str] = ..., # type: ignore[assignment]
         session_directory: Optional[str] = ..., # type: ignore[assignment]
         autostart: Optional[bool] = None,
+        health_command: Optional[str] = ..., # type: ignore[assignment]
     ) -> None:
         with self.session() as session:
             row = session.get(AgentModel, agent_id)
@@ -3659,6 +3665,8 @@ class Database:
                 row.session_directory = session_directory
             if autostart is not None:
                 row.autostart = 1 if autostart else 0
+            if health_command is not ...:
+                row.health_command = health_command
             row.updated_at = utc_now()
 
     def delete_agent(self, agent_id: str) -> None:
@@ -3692,6 +3700,7 @@ class Database:
             working_directory=row.working_directory,
             session_directory=row.session_directory,
             autostart=bool(row.autostart),
+            health_command=row.health_command,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
@@ -3723,6 +3732,7 @@ class Database:
             working_directory=row.working_directory,
             session_directory=row.session_directory,
             autostart=bool(row.autostart),
+            health_command=row.health_command,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )

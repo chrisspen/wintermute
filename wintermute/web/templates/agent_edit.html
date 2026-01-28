@@ -147,6 +147,11 @@
           <p class="muted" style="font-size: 12px; margin-top: 4px;">Where session files are stored. Relative paths are relative to working directory.</p>
         </div>
         <div class="field-group">
+          <label>Health Check Command</label>
+          <input type="text" name="health_command" value="{{ agent.health_command or '' }}" placeholder="e.g. test -f /tmp/ready.flag" />
+          <p class="muted" style="font-size: 12px; margin-top: 4px;">Optional command to run before session start. If it fails (non-zero exit), session won't start.</p>
+        </div>
+        <div class="field-group">
           <label style="display: flex; align-items: center; gap: 8px;">
             <input type="checkbox" name="autostart" value="1" {% if agent.autostart %}checked{% endif %} style="width: auto; margin: 0;" />
             Autostart

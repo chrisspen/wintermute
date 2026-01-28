@@ -60,6 +60,9 @@
         <label>Session Directory</label>
         <input type="text" name="session_directory" placeholder="e.g. .claude (relative) or /home/user/.agent (absolute)" />
         <p class="muted" style="font-size: 12px; margin-top: 4px;">Where session files are stored. Relative paths are relative to working directory.</p>
+        <label>Health Check Command</label>
+        <input type="text" name="health_command" placeholder="e.g. test -f /tmp/ready.flag" />
+        <p class="muted" style="font-size: 12px; margin-top: 4px;">Optional command to run before session start. If it fails (non-zero exit), session won't start.</p>
         <div class="field-group" style="margin-top: 12px;">
           <label style="display: flex; align-items: center; gap: 8px;">
             <input type="checkbox" name="autostart" value="1" style="width: auto; margin: 0;" />

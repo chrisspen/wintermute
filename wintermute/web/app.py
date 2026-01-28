@@ -49,6 +49,7 @@ from wintermute.runner import (
     prepare_issue_branch,
     prepare_local_ticket_branch,
     prepare_ticket_branch,
+    run_health_check,
     send_input,
     set_codex_trust,
     start_session,
@@ -4883,6 +4884,12 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         if not tools_ok:
             raise HTTPException(status_code=400, detail=tools_error)
 
+        # Run health check if configured
+        if agent.health_command:
+            health_ok, health_error = run_health_check(spec, agent.health_command)
+            if not health_ok:
+                raise HTTPException(status_code=400, detail=health_error)
+
         # Memory check before starting agent
         database.refresh_agent_average_memory_usage(agent.id)
         agent = database.get_agent(agent.id) # Refresh to get updated memory avg
@@ -6365,6 +6372,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         llm_model = str(form.get("llm_model", "")).strip() or None
         working_directory = str(form.get("working_directory", "")).strip() or None
         session_directory = str(form.get("session_directory", "")).strip() or None
+        health_command = str(form.get("health_command", "")).strip() or None
         autostart = str(form.get("autostart", "")).strip() in ("1", "true", "on")
         return_to = str(form.get("return_to", "/ui/agents")).strip() or "/ui/agents"
         if not return_to.startswith("/ui"):
@@ -6391,6 +6399,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 working_directory=working_directory,
                 session_directory=session_directory,
                 autostart=autostart,
+                health_command=health_command,
             )
         except IntegrityError as exc:
             field, message = _parse_integrity_error(exc)
@@ -6449,6 +6458,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     working_directory=agent.working_directory,
                     session_directory=agent.session_directory,
                     autostart=agent.autostart,
+                    health_command=agent.health_command,
                 )
                 cloned_count += 1
 
@@ -6543,6 +6553,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
         initial_prompt = str(form.get("initial_prompt", "")).strip() or None
         working_directory = str(form.get("working_directory", "")).strip() or None
         session_directory = str(form.get("session_directory", "")).strip() or None
+        health_command = str(form.get("health_command", "")).strip() or None
         autostart = str(form.get("autostart", "")).strip() in ("1", "true", "on")
         if not name or not slug or not command:
             raise HTTPException(status_code=400, detail="Missing agent fields")
@@ -6567,6 +6578,7 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                 initial_prompt=initial_prompt,
                 working_directory=working_directory,
                 session_directory=session_directory,
+                health_command=health_command,
                 autostart=autostart,
             )
         except IntegrityError as exc:

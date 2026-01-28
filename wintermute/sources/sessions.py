@@ -1084,6 +1084,8 @@ async def _emit_output(
     comment_chunks: list[str] = []
     for block in blocks:
         comment_chunks.extend(_chunk_text(block, 3000))
+    # Filter out trivial/keepalive responses (short or no letters)
+    comment_chunks = [chunk for chunk in comment_chunks if len(chunk) >= 5 and re.search(r"[A-Za-z]", chunk)]
     if force_comment and not comment_chunks:
         sanitized = _strip_control_sequences(cleaned)
         if session.last_user_message:
