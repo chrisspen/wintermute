@@ -353,7 +353,7 @@ async def _run_claude_session(
             return False
         lowered = error.lower()
         # Check for fatal errors that should end the session
-        if "exited" in lowered or "closed" in lowered:
+        if "exited" in lowered or "closed" in lowered or "not found" in lowered:
             logger.warning("Claude process error for session %s: %s", session.id, error)
             close_claude_process(session.id)
             ctx.db.update_session(session.id, status="done", awaiting_response=0)

@@ -132,35 +132,61 @@ class AutostartWorkItem(WorkItem):
         session_id = str(uuid.uuid4())
         default_initial_prompt = "Read your AGENTS.md file and then wait for further instructions."
         initial_prompt = agent.initial_prompt or default_initial_prompt
-        db.insert_session(
-            session_id=session_id,
-            project_id=None,
-            agent_id=agent_id,
-            ticket_id=None,
-            status="running",
-            repo_path=workspace,
-            thread_ts=None,
-            initial_prompt=initial_prompt,
-            workspace_path=workspace,
-        )
 
-        # Start the session
-        try:
-            start_session(spec, session_id, agent, workspace)
+        # For claude/gemini modes, don't start a tmux session - just create the session record
+        # with the initial prompt as prompt_pending. The session source will handle the actual
+        # Claude/Gemini process via claude_client/gemini_client.
+        if agent.session_mode in ("claude", "gemini"):
+            db.insert_session(
+                session_id=session_id,
+                project_id=None,
+                agent_id=agent_id,
+                ticket_id=None,
+                status="running",
+                repo_path=workspace,
+                thread_ts=None,
+                initial_prompt=initial_prompt,
+                workspace_path=workspace,
+            )
+            # Set prompt_pending via update since insert_session doesn't support it
+            db.update_session(session_id, prompt_pending=initial_prompt)
             logger.info("Autostart: started session %s for agent %s", session_id, agent.name)
-        except Exception as exc:
-            logger.error("Autostart: failed to start session for agent %s: %s", agent.name, exc)
-            db.update_session(session_id, status="failed")
-            return
+        else:
+            # For tmux/mcp modes, use the traditional session start
+            db.insert_session(
+                session_id=session_id,
+                project_id=None,
+                agent_id=agent_id,
+                ticket_id=None,
+                status="running",
+                repo_path=workspace,
+                thread_ts=None,
+                initial_prompt=initial_prompt,
+                workspace_path=workspace,
+            )
 
-        # Create initial prompt comment
+            # Start the session
+            try:
+                start_session(spec, session_id, agent, workspace)
+                logger.info("Autostart: started session %s for agent %s", session_id, agent.name)
+            except Exception as exc:
+                logger.error("Autostart: failed to start session for agent %s: %s", agent.name, exc)
+                db.update_session(session_id, status="failed")
+                return
+
+        # Create initial prompt comment (use correct insert_comment params)
         db.insert_comment(
             comment_id=str(uuid.uuid4()),
+            ticket_id=None,
+            session_id=None,
+            project_id=None,
+            agent_id=agent_id,
+            author="autostart",
+            source_id=None,
+            issue_number=None,
+            body=initial_prompt,
+            public=False,
             agent_session_id=session_id,
-            is_from_agent=False,
-            content=initial_prompt,
-            status="sent",
-            username="autostart",
         )
 
 
