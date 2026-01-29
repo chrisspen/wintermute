@@ -66,7 +66,7 @@ class AutostartWorkItem(WorkItem):
 
         # Memory check before starting agent
         db.refresh_agent_average_memory_usage(agent.id)
-        agent = db.get_agent(agent.id)  # Refresh to get updated memory avg
+        agent = db.get_agent(agent.id) # Refresh to get updated memory avg
         if agent and vm.required_reserve_memory_gb > 0:
             mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
             if not mem_ok:
@@ -76,22 +76,21 @@ class AutostartWorkItem(WorkItem):
         # Determine workspace: use working_directory if set, otherwise create temp
         if agent.working_directory:
             # Verify the working directory exists on the VM
-            check_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}",
-                         f"test -d {shlex.quote(agent.working_directory)} && echo exists"]
+            check_cmd = [
+                "ssh", "-p",
+                str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"test -d {shlex.quote(agent.working_directory)} && echo exists"
+            ]
             result = subprocess.run(check_cmd, capture_output=True, text=True, timeout=30)
             if result.stdout.strip() != "exists":
-                logger.warning("Autostart: working directory %s does not exist for agent %s",
-                               agent.working_directory, agent.name)
+                logger.warning("Autostart: working directory %s does not exist for agent %s", agent.working_directory, agent.name)
                 return
             workspace = agent.working_directory
         else:
             # Create temp workspace on VM target
-            mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}",
-                         f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
+            mktemp_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mktemp -d /tmp/agent_{agent.slug}_XXXXXXXX"]
             result = subprocess.run(mktemp_cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
-                logger.warning("Autostart: failed to create workspace for agent %s: %s",
-                               agent.name, result.stderr)
+                logger.warning("Autostart: failed to create workspace for agent %s: %s", agent.name, result.stderr)
                 return
             workspace = result.stdout.strip()
 
@@ -102,8 +101,7 @@ class AutostartWorkItem(WorkItem):
             else:
                 session_files_dir = f"{workspace}/{agent.session_directory}"
             # Ensure session directory exists
-            mkdir_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}",
-                         f"mkdir -p {shlex.quote(session_files_dir)}"]
+            mkdir_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mkdir -p {shlex.quote(session_files_dir)}"]
             subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=30)
         else:
             session_files_dir = workspace
@@ -125,12 +123,10 @@ class AutostartWorkItem(WorkItem):
                     files_to_copy.append(local_path)
 
                 if files_to_copy:
-                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options, *files_to_copy,
-                               f"{spec.user}@{spec.host}:{session_files_dir}/"]
+                    scp_cmd = ["scp", "-P", str(spec.port), *spec.options, *files_to_copy, f"{spec.user}@{spec.host}:{session_files_dir}/"]
                     scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                     if scp_result.returncode != 0:
-                        logger.warning("Autostart: failed to copy session files for agent %s: %s",
-                                       agent.name, scp_result.stderr)
+                        logger.warning("Autostart: failed to copy session files for agent %s: %s", agent.name, scp_result.stderr)
 
         # Create the session
         session_id = str(uuid.uuid4())
@@ -141,10 +137,11 @@ class AutostartWorkItem(WorkItem):
             project_id=None,
             agent_id=agent_id,
             ticket_id=None,
-            workspace_path=workspace,
             status="running",
             repo_path=workspace,
+            thread_ts=None,
             initial_prompt=initial_prompt,
+            workspace_path=workspace,
         )
 
         # Start the session
@@ -171,7 +168,7 @@ class AutostartSource(TaskSource):
     id = "autostart"
     enabled = True
     base_priority = 50
-    poll_interval_seconds = 300  # 5 minutes
+    poll_interval_seconds = 300 # 5 minutes
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
         db: Database = ctx["db"]
@@ -200,26 +197,21 @@ class AutostartSource(TaskSource):
 
             # Check if already running
             all_sessions = db.list_sessions(agent_id=agent.id)
-            is_running = any(
-                not sess.ticket_id and sess.status in ("running", "blocked")
-                for sess in all_sessions
-            )
+            is_running = any(not sess.ticket_id and sess.status in ("running", "blocked") for sess in all_sessions)
             if is_running:
                 continue
 
             # Create work item to start this agent
             work_id = f"autostart:{agent.id}:{utc_now()}"
-            drafts.append(
-                WorkItemDraft(
-                    work_id=work_id,
-                    priority=priority,
-                    source_id=self.id,
-                    checkpoint={
-                        "agent_id": agent.id,
-                        "agent_name": agent.name,
-                    },
-                )
-            )
+            drafts.append(WorkItemDraft(
+                work_id=work_id,
+                priority=priority,
+                source_id=self.id,
+                checkpoint={
+                    "agent_id": agent.id,
+                    "agent_name": agent.name,
+                },
+            ))
 
         return drafts
 
