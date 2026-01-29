@@ -2813,7 +2813,7 @@ class Database:
     ) -> None:
         now = utc_now()
         # Retry loop to handle race condition on count assignment
-        max_retries = 5
+        max_retries = 10
         for attempt in range(max_retries):
             try:
                 with self.session() as session:
@@ -2851,6 +2851,10 @@ class Database:
                 # Check if it's a unique constraint violation on count
                 if "uq_tickets_project_count" in str(e) or "UNIQUE constraint" in str(e):
                     if attempt < max_retries - 1:
+                        # Add randomized backoff to reduce contention
+                        import random
+                        import time
+                        time.sleep(random.uniform(0.01, 0.05))
                         continue # Retry with new count
                 raise # Re-raise if not a count conflict or max retries exceeded
 

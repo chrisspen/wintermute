@@ -32,8 +32,11 @@ def upgrade() -> None:
             conn.execute(sa.text("UPDATE tickets SET count = :count WHERE id = :id"), {"count": i, "id": ticket_id})
 
     # Now add unique constraint on (project_id, count)
-    op.create_unique_constraint('uq_tickets_project_count', 'tickets', ['project_id', 'count'])
+    # SQLite requires batch mode for ALTER TABLE constraints
+    with op.batch_alter_table('tickets', schema=None) as batch_op:
+        batch_op.create_unique_constraint('uq_tickets_project_count', ['project_id', 'count'])
 
 
 def downgrade() -> None:
-    op.drop_constraint('uq_tickets_project_count', 'tickets', type_='unique')
+    with op.batch_alter_table('tickets', schema=None) as batch_op:
+        batch_op.drop_constraint('uq_tickets_project_count', type_='unique')
