@@ -252,7 +252,10 @@
       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
         <h3 style="margin: 0;">Session Files</h3>
         {% if session_file_definitions and agent.vm_target_id %}
-        <button type="button" id="pull-session-files-btn" style="font-size: 11px; padding: 4px 10px; width: auto;">Pull from VM</button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" id="pull-session-files-btn" style="font-size: 11px; padding: 4px 10px; width: auto;">Pull from VM</button>
+          <button type="button" id="push-session-files-btn" style="font-size: 11px; padding: 4px 10px; width: auto;">Push to VM</button>
+        </div>
         {% endif %}
       </div>
       <p class="muted" style="font-size: 12px; margin-bottom: 12px;">Agent memory files that persist across sessions. Copied to agent workspace on start, synced back on exit.</p>
@@ -894,6 +897,32 @@
       }
       pullBtn.disabled = false;
       pullBtn.textContent = "Pull from VM";
+    });
+  }
+
+  // Push session files to VM
+  var pushBtn = document.getElementById("push-session-files-btn");
+  if (pushBtn) {
+    pushBtn.addEventListener("click", async function() {
+      pushBtn.disabled = true;
+      pushBtn.textContent = "Pushing...";
+      try {
+        var response = await fetch("/api/agents/" + encodeURIComponent(agentId) + "/push-session-files", {
+          method: "POST"
+        });
+        var payload = await response.json();
+        if (!response.ok) {
+          showGrowl(payload.detail || "Unable to push files", "error");
+          pushBtn.disabled = false;
+          pushBtn.textContent = "Push to VM";
+          return;
+        }
+        showGrowl("Files pushed successfully (" + (payload.files_pushed || 0) + " files)", "success");
+      } catch (err) {
+        showGrowl("Unable to push files: " + err, "error");
+      }
+      pushBtn.disabled = false;
+      pushBtn.textContent = "Push to VM";
     });
   }
 

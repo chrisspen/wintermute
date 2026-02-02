@@ -1,0 +1,130 @@
+# Wintermute Skills
+
+This file documents commands you can use to interact with Wintermute, the system managing your session.
+
+## Wake Timers
+
+Schedule delayed self-invocation to check on async operations without requiring user intervention.
+
+### /wakeme
+
+Schedule a wake-up message to be delivered after a delay.
+
+```
+/wakeme <duration> [context]
+```
+
+**Parameters:**
+- `duration` (required): Time until wake. Formats: `30s`, `5m`, `2h`, `1d`
+- `context` (optional): Quoted string included in wake message as a reminder
+
+**Examples:**
+```
+/wakeme 5m
+/wakeme 5m "check pipeline status for bugfixes branch"
+/wakeme 30s "verify deployment completed"
+/wakeme 2h "check if long-running import finished"
+```
+
+When the timer expires, you'll receive:
+```
+[WINTERMUTE] Wake timer expired (5m). Context: "check pipeline status"
+```
+
+### /clear-wakes
+
+Cancel all pending wake timers for the current conversation.
+
+```
+/clear-wakes
+```
+
+## Output Markers
+
+Special prefixes that trigger Wintermute actions when included in your output.
+
+### PUBLIC:
+
+Create a public comment pending approval. Once approved, it will be posted to the external source (GitHub, GitLab, etc.).
+
+```
+PUBLIC: This is a comment that will be posted publicly after approval.
+```
+
+Aliases: `GITHUB:`, `GITLAB:`
+
+### NOTE:
+
+Create an internal note that stays within Wintermute (not sent externally).
+
+```
+NOTE: This is an internal observation for the team.
+```
+
+### BLOCKER:
+
+Mark the session as blocked and move the associated ticket to needs-feedback status.
+
+```
+BLOCKER: Waiting for API credentials to proceed.
+```
+
+### STANDUP:
+
+Reply to daily standup prompts.
+
+```
+STANDUP: Yesterday I completed the auth refactor. Today I'll work on tests.
+```
+
+## Ticket Actions (WM: Commands)
+
+Commands to manage the ticket associated with your current session.
+
+### WM:STATUS:
+
+Set the ticket status.
+
+```
+WM:STATUS:open
+WM:STATUS:in-progress
+WM:STATUS:needs-feedback
+WM:STATUS:done
+WM:STATUS:cancelled
+```
+
+### WM:REASSIGN:
+
+Reassign the ticket to another user.
+
+```
+WM:REASSIGN:creator      # Reassign to the user who created the ticket
+WM:REASSIGN:<username>   # Reassign to a specific user
+```
+
+## Common Patterns
+
+### Completing a task
+
+When you finish a task, mark it done and reassign to the creator for review:
+
+```
+WM:STATUS:done
+WM:REASSIGN:creator
+```
+
+### Waiting for external process
+
+When waiting on a CI pipeline or deployment:
+
+```
+/wakeme 5m "check if CI pipeline completed"
+```
+
+### Blocked and need human input
+
+When you cannot proceed without human intervention:
+
+```
+BLOCKER: Need clarification on the authentication flow requirements.
+```

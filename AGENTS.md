@@ -97,7 +97,13 @@ The web admin console provides:
 - `.codex/token` stores `WINTERMUTE_ADMIN_API_TOKEN=<token>`; strip the prefix when sending the bearer token.
 
 ## Agent output markers
-Agents can include special markers in their output to trigger Wintermute actions:
+Agents can include special markers in their output to trigger Wintermute actions.
+
+**For full documentation, read `SKILLS.md`** in your session directory. It contains detailed examples and usage patterns for all Wintermute commands.
+
+### Wake timers
+- `/wakeme <duration> [context]` — Schedule a delayed self-wake (e.g., `/wakeme 5m "check CI"`)
+- `/clear-wakes` — Cancel all pending wake timers
 
 ### Comment markers
 - `PUBLIC:<text>` — Create a public comment pending approval (sent to source when approved)

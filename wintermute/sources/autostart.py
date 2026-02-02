@@ -122,6 +122,17 @@ class AutostartWorkItem(WorkItem):
                         f.write(content)
                     files_to_copy.append(local_path)
 
+                # Write SKILLS.md from template
+                import os
+                skills_template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills.md.template")
+                if os.path.exists(skills_template_path):
+                    with open(skills_template_path, "r") as f:
+                        skills_content = f.read()
+                    skills_path = f"{tmpdir}/SKILLS.md"
+                    with open(skills_path, "w") as f:
+                        f.write(skills_content)
+                    files_to_copy.append(skills_path)
+
                 if files_to_copy:
                     scp_cmd = ["scp", "-P", str(spec.port), *spec.options, *files_to_copy, f"{spec.user}@{spec.host}:{session_files_dir}/"]
                     scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)

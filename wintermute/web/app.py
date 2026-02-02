@@ -4592,6 +4592,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                         local_path = os.path.join(local_tmp, defn.filename)
                         with open(local_path, "w") as f:
                             f.write(file_content)
+                    # Write SKILLS.md from template
+                    skills_template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills.md.template")
+                    if os.path.exists(skills_template_path):
+                        with open(skills_template_path, "r") as f:
+                            skills_content = f.read()
+                        with open(os.path.join(local_tmp, "SKILLS.md"), "w") as f:
+                            f.write(skills_content)
                     scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{session_files_dir}/"]
                     scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
                     if scp_result.returncode != 0:
@@ -5346,6 +5353,13 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                     local_path = os.path.join(local_tmp, defn.filename)
                     with open(local_path, "w") as f:
                         f.write(file_content)
+                # Write SKILLS.md from template
+                skills_template_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "skills.md.template")
+                if os.path.exists(skills_template_path):
+                    with open(skills_template_path, "r") as f:
+                        skills_content = f.read()
+                    with open(os.path.join(local_tmp, "SKILLS.md"), "w") as f:
+                        f.write(skills_content)
                 # SCP files to VM (to session_files_dir, not workspace)
                 scp_cmd = ["scp", "-P", str(spec.port), *spec.options, "-r", f"{local_tmp}/.", f"{spec.user}@{spec.host}:{session_files_dir}/"]
                 scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=60)
@@ -5610,6 +5624,79 @@ def create_app(db: Optional[Database] = None) -> FastAPI:
                             break
 
         return {"success": True, "files": updated_files}
+
+    @app.post("/api/agents/{agent_id}/push-session-files")
+    async def api_push_session_files(agent_id: str, user: str = Depends(_require_login)) -> dict:
+        """Push session files from Wintermute to the VM."""
+        import subprocess
+        import tempfile
+
+        agent = database.get_agent(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        if not agent.vm_target_id:
+            raise HTTPException(status_code=400, detail="Agent has no VM target configured")
+        if not agent.session_file_config_id:
+            raise HTTPException(status_code=400, detail="Agent has no session file config")
+
+        vm = database.get_vm_target(agent.vm_target_id)
+        if not vm:
+            raise HTTPException(status_code=400, detail="VM target not found")
+
+        spec = build_ssh_spec(vm, agent.required_ssh_options)
+
+        # Determine working directory - use configured working_directory or agent's home
+        if agent.working_directory:
+            workspace = agent.working_directory
+        else:
+            # Use agent's home directory on the VM
+            home_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", "echo $HOME"]
+            home_result = subprocess.run(home_cmd, capture_output=True, text=True, timeout=10)
+            if home_result.returncode != 0:
+                raise HTTPException(status_code=500, detail=f"Failed to get home directory: {home_result.stderr}")
+            workspace = home_result.stdout.strip()
+
+        # Calculate session files directory
+        if agent.session_directory:
+            if agent.session_directory.startswith("/"):
+                session_files_dir = agent.session_directory
+            else:
+                session_files_dir = f"{workspace}/{agent.session_directory}"
+        else:
+            session_files_dir = workspace
+
+        definitions = database.list_session_file_definitions(agent.session_file_config_id)
+        session_files = database.list_session_files(agent_id)
+
+        # Build a map of definition_id -> session_file
+        file_map = {sf.definition_id: sf for sf in session_files}
+
+        files_pushed = 0
+
+        # Create a local temp dir to stage files for upload
+        with tempfile.TemporaryDirectory() as local_tmp:
+            files_to_push = []
+            for defn in definitions:
+                sf = file_map.get(defn.id)
+                if sf and sf.content:
+                    local_path = os.path.join(local_tmp, defn.filename)
+                    with open(local_path, "w") as f:
+                        f.write(sf.content)
+                    files_to_push.append(local_path)
+
+            if files_to_push:
+                # Ensure the remote directory exists
+                mkdir_cmd = ["ssh", "-p", str(spec.port), *spec.options, f"{spec.user}@{spec.host}", f"mkdir -p {session_files_dir}"]
+                subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=10)
+
+                # SCP files to the VM
+                scp_cmd = ["scp", "-P", str(spec.port), *spec.options, *files_to_push, f"{spec.user}@{spec.host}:{session_files_dir}/"]
+                scp_result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=30)
+                if scp_result.returncode != 0:
+                    raise HTTPException(status_code=500, detail=f"Failed to push files to VM: {scp_result.stderr}")
+                files_pushed = len(files_to_push)
+
+        return {"success": True, "files_pushed": files_pushed}
 
     @app.websocket("/ws/agents/{agent_id}/comments")
     async def ws_agent_comments(websocket: WebSocket, agent_id: str) -> None:
