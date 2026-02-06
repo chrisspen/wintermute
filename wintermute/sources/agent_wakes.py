@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 import json
 import logging
 
-from wintermute.db import Database, utc_now
+from wintermute.db import AsyncDatabase, utc_now
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 
@@ -26,7 +26,7 @@ class AgentWakeWorkItem(WorkItem):
             logger.warning("AgentWakeWorkItem missing wake_id")
             return
 
-        wake = ctx.db.get_agent_wake(wake_id)
+        wake = await ctx.db.get_agent_wake(wake_id)
         if not wake:
             logger.warning("Agent wake %s not found", wake_id)
             return
@@ -35,10 +35,10 @@ class AgentWakeWorkItem(WorkItem):
             logger.info("Agent wake %s already %s, skipping", wake_id, wake.status)
             return
 
-        session = ctx.db.get_session(wake.agent_session_id)
+        session = await ctx.db.get_session(wake.agent_session_id)
         if not session:
             logger.warning("Session %s not found for wake %s", wake.agent_session_id, wake_id)
-            ctx.db.cancel_agent_wake(wake_id, "system")
+            await ctx.db.cancel_agent_wake(wake_id, "system")
             return
 
         if session.status not in ("running", "blocked"):
@@ -48,7 +48,7 @@ class AgentWakeWorkItem(WorkItem):
                 session.status,
                 wake_id,
             )
-            ctx.db.cancel_agent_wake(wake_id, "system")
+            await ctx.db.cancel_agent_wake(wake_id, "system")
             return
 
         # Build the wake message
@@ -59,13 +59,13 @@ class AgentWakeWorkItem(WorkItem):
             message = f"[WINTERMUTE] Wake timer expired ({duration_str})."
 
         # Queue the wake message to the session
-        if _queue_session_prompt(ctx.db, session, message):
+        if await _queue_session_prompt(ctx.db, session, message):
             logger.info("Delivered wake %s to session %s", wake_id, session.id)
         else:
             logger.info("Wake message already queued for session %s", session.id)
 
         # Mark the wake as fired
-        ctx.db.fire_agent_wake(wake_id)
+        await ctx.db.fire_agent_wake(wake_id)
 
 
 class AgentWakeSource(TaskSource):
@@ -83,11 +83,11 @@ class AgentWakeSource(TaskSource):
         return datetime.now(timezone.utc)
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
+        db: AsyncDatabase = ctx["db"]
         now_iso = self._now().isoformat()
 
         # Get all pending wakes that should fire now
-        pending_wakes = db.get_pending_agent_wakes(before=now_iso)
+        pending_wakes = await db.get_pending_agent_wakes(before=now_iso)
 
         drafts = []
         for wake in pending_wakes:
@@ -117,7 +117,7 @@ class AgentWakeSource(TaskSource):
         )
 
 
-def _queue_session_prompt(db: Database, session: Any, prompt: str) -> bool:
+async def _queue_session_prompt(db: AsyncDatabase, session: Any, prompt: str) -> bool:
     """Queue a prompt message to a session."""
     raw_queue = session.queued_user_messages or "[]"
     try:
@@ -129,7 +129,7 @@ def _queue_session_prompt(db: Database, session: Any, prompt: str) -> bool:
     if prompt in queue:
         return False
     queue.append(prompt)
-    db.update_session(session.id, queued_user_messages=json.dumps(queue))
+    await db.update_session(session.id, queued_user_messages=json.dumps(queue))
     return True
 
 

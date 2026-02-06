@@ -11,7 +11,7 @@ import urllib.parse
 
 import aiohttp
 
-from wintermute.db import Database
+from wintermute.db import AsyncDatabase
 from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,
@@ -93,15 +93,15 @@ class GitLabIssueWorkItem(WorkItem):
     async def resume(self, ctx: WorkItemContext) -> None:
         logger = logging.getLogger(__name__)
         source_id = self.checkpoint.get("gitlab_source_id")
-        source = ctx.db.get_gitlab_source(source_id) if source_id else None
+        source = await ctx.db.get_gitlab_source(source_id) if source_id else None
         if source:
-            self._sync_ticket(ctx, source)
+            await self._sync_ticket(ctx, source)
         if source and source.auto_start:
             logger.info("GitLab work item %s auto-start enabled", self.work_id)
             await self._auto_start(ctx, source)
             return
         logger.info("GitLab work item %s using LLM decision path", self.work_id)
-        agent = ctx.db.get_agent(source.agent_id) if source and source.agent_id else None
+        agent = await ctx.db.get_agent(source.agent_id) if source and source.agent_id else None
         await self._llm_decide(ctx, agent)
 
     async def _llm_decide(self, ctx: WorkItemContext, agent: Any) -> None:
@@ -137,7 +137,7 @@ class GitLabIssueWorkItem(WorkItem):
             await ctx.checkpoint({"yield_reason": decision.payload["reason"]})
             return
 
-    def _sync_ticket(self, ctx: WorkItemContext, source: Any) -> None:
+    async def _sync_ticket(self, ctx: WorkItemContext, source: Any) -> None:
         issue_number = self.checkpoint.get("issue_number")
         if issue_number is None:
             return
@@ -145,13 +145,13 @@ class GitLabIssueWorkItem(WorkItem):
         issue_title = str(self.checkpoint.get("title") or "")
         issue_body = str(self.checkpoint.get("body") or "")
         issue_url = self.checkpoint.get("web_url") or ""
-        existing_ticket = ctx.db.get_ticket(ticket_id)
+        existing_ticket = await ctx.db.get_ticket(ticket_id)
         if not existing_ticket:
             assigned_to = None
             if source.agent_id:
-                agent = ctx.db.get_agent(source.agent_id)
+                agent = await ctx.db.get_agent(source.agent_id)
                 assigned_to = agent.name if agent else None
-            ctx.db.insert_ticket(
+            await ctx.db.insert_ticket(
                 ticket_id=ticket_id,
                 project_id=source.project_id,
                 agent_id=source.agent_id or None,
@@ -165,31 +165,31 @@ class GitLabIssueWorkItem(WorkItem):
                 auto_start=source.auto_start,
             )
             return
-        ctx.db.update_ticket(
+        await ctx.db.update_ticket(
             ticket_id,
             title=issue_title or existing_ticket.title,
             description=issue_body or existing_ticket.description,
             source_url=issue_url or existing_ticket.source_url,
         )
         if not existing_ticket.agent_id and source.agent_id:
-            ctx.db.update_ticket(ticket_id, agent_id=source.agent_id)
+            await ctx.db.update_ticket(ticket_id, agent_id=source.agent_id)
 
     async def _auto_start(self, ctx: WorkItemContext, source: Any) -> None:
         logger = logging.getLogger(__name__)
-        project = ctx.db.get_project(source.project_id)
+        project = await ctx.db.get_project(source.project_id)
         if not project:
             return
         if not source.agent_id:
             await self._notify(ctx, project.slack_channel_id, "GitLab source missing agent assignment.")
             return
-        agent = ctx.db.get_agent(source.agent_id)
+        agent = await ctx.db.get_agent(source.agent_id)
         if not agent:
             await self._notify(ctx, project.slack_channel_id, "GitLab source agent not found.")
             return
         if not agent.vm_target_id:
             await self._notify(ctx, project.slack_channel_id, "Agent has no VM target configured.")
             return
-        vm = ctx.db.get_vm_target(agent.vm_target_id)
+        vm = await ctx.db.get_vm_target(agent.vm_target_id)
         if not vm:
             await self._notify(ctx, project.slack_channel_id, "VM target not found for this agent.")
             return
@@ -198,11 +198,11 @@ class GitLabIssueWorkItem(WorkItem):
             return
         issue_url = self.checkpoint.get("web_url") or ""
         ticket_id = f"gitlab:{source.id}:{issue_number}"
-        existing_ticket = ctx.db.get_ticket(ticket_id)
+        existing_ticket = await ctx.db.get_ticket(ticket_id)
         issue_title = str(self.checkpoint.get("title") or "")
         issue_body = str(self.checkpoint.get("body") or "")
         if not existing_ticket:
-            ctx.db.insert_ticket(
+            await ctx.db.insert_ticket(
                 ticket_id=ticket_id,
                 project_id=project.id,
                 agent_id=agent.id,
@@ -215,33 +215,33 @@ class GitLabIssueWorkItem(WorkItem):
                 source_url=issue_url or None,
             )
         else:
-            ctx.db.update_ticket(
+            await ctx.db.update_ticket(
                 ticket_id,
                 title=issue_title or existing_ticket.title,
                 description=issue_body or existing_ticket.description,
                 source_url=issue_url or existing_ticket.source_url,
             )
             if not existing_ticket.agent_id:
-                ctx.db.update_ticket(ticket_id, agent_id=agent.id)
-        if ctx.db.get_session_by_ticket(ticket_id):
+                await ctx.db.update_ticket(ticket_id, agent_id=agent.id)
+        if await ctx.db.get_session_by_ticket(ticket_id):
             logger.info("Session already exists for ticket %s", ticket_id)
             return
         if project.repo_mode == "mirror":
-            running = ctx.db.list_sessions(project_id=project.id, status="running")
+            running = await ctx.db.list_sessions(project_id=project.id, status="running")
             if running:
                 logger.info("Project session already running for %s", project.id)
                 raise WorkItemBlocked("Project session already running", delay_seconds=60)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
         # Memory check before starting agent
-        ctx.db.refresh_agent_average_memory_usage(agent.id)
-        agent = ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
+        await ctx.db.refresh_agent_average_memory_usage(agent.id)
+        agent = await ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
         if agent and vm.required_reserve_memory_gb > 0:
             mem_ok, mem_error = check_vm_memory_available(session_spec, vm, agent)
             if not mem_ok:
                 raise WorkItemBlocked(mem_error, delay_seconds=300)
         base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
         base_spec = build_ssh_spec_with_options(vm, base_options)
-        token_record = ctx.db.get_gitlab_token(source.token_id) if source.token_id else None
+        token_record = await ctx.db.get_gitlab_token(source.token_id) if source.token_id else None
         comments: list[dict[str, Any]] = []
         if token_record:
             try:
@@ -260,7 +260,7 @@ class GitLabIssueWorkItem(WorkItem):
             f"{title_line}\n{issue_url}\nStarting agent session...",
         )
         session_id = f"{project.slug}-{agent.slug}-issue-{issue_number}"
-        repo_resource, resource_error = ctx.db.acquire_repo_resource(
+        repo_resource, resource_error = await ctx.db.acquire_repo_resource(
             project=project,
             session_id=session_id,
             agent_id=agent.id,
@@ -272,12 +272,12 @@ class GitLabIssueWorkItem(WorkItem):
         try:
             repo_path = ensure_repo(base_spec, project, repo_path=repo_resource.path)
         except Exception as exc:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             message = f"Repo setup failed: {exc}"
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=60) from exc
         if not repo_path:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             message = "Repository not configured for this project."
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
@@ -294,11 +294,11 @@ class GitLabIssueWorkItem(WorkItem):
         try:
             branch_name = prepare_issue_branch(base_spec, repo_path, int(issue_number))
         except Exception as exc:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             message = f"Branch prep failed: {exc}"
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=60) from exc
-        ctx.db.insert_session(
+        await ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,
             agent_id=agent.id,
@@ -310,7 +310,7 @@ class GitLabIssueWorkItem(WorkItem):
         logger.info("Started session %s for issue %s", session_id, issue_number)
         if agent.session_mode != "mcp":
             start_session(session_spec, session_id, agent, repo_path)
-        session = ctx.db.get_session(session_id)
+        session = await ctx.db.get_session(session_id)
         if session:
             internal_notes = None
             if existing_ticket:
@@ -326,7 +326,7 @@ class GitLabIssueWorkItem(WorkItem):
                 project_slug=project.slug,
                 prompt_template=project.prompt_template,
             )
-            ctx.db.update_session(session_id, prompt_pending=prompt)
+            await ctx.db.update_session(session_id, prompt_pending=prompt)
         if thread_ts:
             await self._notify(
                 ctx,
@@ -427,10 +427,10 @@ class GitLabIssuesSource(TaskSource):
         self._last_poll: dict[str, float] = {}
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
+        db: AsyncDatabase = ctx["db"]
         logger = logging.getLogger(__name__)
         drafts: list[WorkItemDraft] = []
-        sources = db.list_gitlab_sources()
+        sources = await db.list_gitlab_sources()
         now = datetime.now(timezone.utc).timestamp()
         for repo_source in sources:
             if not repo_source.enabled:
@@ -442,7 +442,7 @@ class GitLabIssuesSource(TaskSource):
             if now - last_poll < repo_source.poll_interval_seconds:
                 continue
             self._last_poll[repo_source.id] = now
-            token_record = db.get_gitlab_token(repo_source.token_id)
+            token_record = await db.get_gitlab_token(repo_source.token_id)
             if not token_record:
                 continue
             try:

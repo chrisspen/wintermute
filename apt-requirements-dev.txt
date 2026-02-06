@@ -1,0 +1,10 @@
+sqlite3
+python3.12-dev
+python3.12-venv
+build-essential
+lsof
+curl
+git
+libsqlite3-dev
+pkg-config
+

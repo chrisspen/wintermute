@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from wintermute.db import Database, utc_now
+from wintermute.db import AsyncDatabase, utc_now
 from wintermute.runner import build_ssh_spec, ensure_vm_tools, check_vm_memory_available, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
@@ -29,8 +29,8 @@ class AutostartWorkItem(WorkItem):
             logger.error("AutostartWorkItem missing agent_id in checkpoint")
             return
 
-        db: Database = ctx.db
-        agent = db.get_agent(agent_id)
+        db: AsyncDatabase = ctx.db
+        agent = await db.get_agent(agent_id)
         if not agent:
             logger.warning("Autostart: agent %s not found", agent_id)
             return
@@ -43,13 +43,13 @@ class AutostartWorkItem(WorkItem):
             logger.warning("Autostart: agent %s has no VM target configured", agent.name)
             return
 
-        vm = db.get_vm_target(agent.vm_target_id)
+        vm = await db.get_vm_target(agent.vm_target_id)
         if not vm:
             logger.warning("Autostart: VM target not found for agent %s", agent.name)
             return
 
         # Check if already running
-        all_sessions = db.list_sessions(agent_id=agent_id)
+        all_sessions = await db.list_sessions(agent_id=agent_id)
         for sess in all_sessions:
             if not sess.ticket_id and sess.status in ("running", "blocked"):
                 logger.info("Autostart: agent %s already has running session", agent.name)
@@ -65,8 +65,8 @@ class AutostartWorkItem(WorkItem):
             return
 
         # Memory check before starting agent
-        db.refresh_agent_average_memory_usage(agent.id)
-        agent = db.get_agent(agent.id) # Refresh to get updated memory avg
+        await db.refresh_agent_average_memory_usage(agent.id)
+        agent = await db.get_agent(agent.id) # Refresh to get updated memory avg
         if agent and vm.required_reserve_memory_gb > 0:
             mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
             if not mem_ok:
@@ -108,8 +108,8 @@ class AutostartWorkItem(WorkItem):
 
         # Copy session files if configured (use_wintermute mode - no timestamp check)
         if agent.session_file_config_id:
-            definitions = db.list_session_file_definitions(agent.session_file_config_id)
-            session_files = db.list_session_files(agent_id)
+            definitions = await db.list_session_file_definitions(agent.session_file_config_id)
+            session_files = await db.list_session_files(agent_id)
             file_map = {sf.definition_id: sf for sf in session_files}
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -148,7 +148,7 @@ class AutostartWorkItem(WorkItem):
         # with the initial prompt as prompt_pending. The session source will handle the actual
         # Claude/Gemini process via claude_client/gemini_client.
         if agent.session_mode in ("claude", "gemini"):
-            db.insert_session(
+            await db.insert_session(
                 session_id=session_id,
                 project_id=None,
                 agent_id=agent_id,
@@ -160,11 +160,11 @@ class AutostartWorkItem(WorkItem):
                 workspace_path=workspace,
             )
             # Set prompt_pending via update since insert_session doesn't support it
-            db.update_session(session_id, prompt_pending=initial_prompt)
+            await db.update_session(session_id, prompt_pending=initial_prompt)
             logger.info("Autostart: started session %s for agent %s", session_id, agent.name)
         else:
             # For tmux/mcp modes, use the traditional session start
-            db.insert_session(
+            await db.insert_session(
                 session_id=session_id,
                 project_id=None,
                 agent_id=agent_id,
@@ -182,11 +182,11 @@ class AutostartWorkItem(WorkItem):
                 logger.info("Autostart: started session %s for agent %s", session_id, agent.name)
             except Exception as exc:
                 logger.error("Autostart: failed to start session for agent %s: %s", agent.name, exc)
-                db.update_session(session_id, status="failed")
+                await db.update_session(session_id, status="failed")
                 return
 
         # Create initial prompt comment (use correct insert_comment params)
-        db.insert_comment(
+        await db.insert_comment(
             comment_id=str(uuid.uuid4()),
             ticket_id=None,
             session_id=None,
@@ -208,8 +208,8 @@ class AutostartSource(TaskSource):
     poll_interval_seconds = 300 # 5 minutes
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
-        source = db.get_task_source(self.id)
+        db: AsyncDatabase = ctx["db"]
+        source = await db.get_task_source(self.id)
 
         # Use source config if exists, otherwise use defaults
         if source:
@@ -220,7 +220,7 @@ class AutostartSource(TaskSource):
             priority = self.base_priority
 
         # Find all agents with autostart=True
-        agents = db.list_agents()
+        agents = await db.list_agents()
         autostart_agents = [a for a in agents if a.autostart]
 
         if not autostart_agents:
@@ -233,7 +233,7 @@ class AutostartSource(TaskSource):
                 continue
 
             # Check if already running
-            all_sessions = db.list_sessions(agent_id=agent.id)
+            all_sessions = await db.list_sessions(agent_id=agent.id)
             is_running = any(not sess.ticket_id and sess.status in ("running", "blocked") for sess in all_sessions)
             if is_running:
                 continue

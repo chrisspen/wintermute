@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Optional
 
 from wintermute import __version__
-from wintermute.db import Database, WorkItemRecord, utc_now
+from wintermute.db import AsyncDatabase, Database, WorkItemRecord, utc_now
 from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext, WorkItemBlocked
 from wintermute.sources.demo import DemoSource
@@ -68,7 +68,7 @@ class Supervisor:
 
     def __init__(
         self,
-        db: Database,
+        db: AsyncDatabase,
         sources: Iterable[TaskSource],
         executor: Executor,
         tools: ToolRegistry,
@@ -99,36 +99,36 @@ class Supervisor:
         )
 
     async def run(self) -> None:
-        self.db.initialize()
-        self._ensure_task_sources()
+        await self.db.initialize()
+        await self._ensure_task_sources()
         try:
             while not self._stop_event.is_set():
                 logger.debug("Supervisor loop tick.")
                 await self._refresh_runtime()
                 await self._poll_sources()
-                self._update_state("polled sources")
+                await self._update_state("polled sources")
                 await self._refresh_queue()
-                self._update_state("refreshed queue")
+                await self._update_state("refreshed queue")
                 await self._cleanup_repo_resources()
                 await self._cycle_sprints()
                 await self._collect_agent_metrics()
                 if not self._current_work_id:
                     await self._run_next()
-                self._update_state("idle")
+                await self._update_state("idle")
                 await asyncio.sleep(1)
         finally:
             self._stop_event.set()
-            self._update_state("stopped")
+            await self._update_state("stopped")
 
     def stop(self) -> None:
         self._stop_event.set()
 
-    def _ensure_task_sources(self) -> None:
-        existing = {row.id for row in self.db.list_task_sources()}
+    async def _ensure_task_sources(self) -> None:
+        existing = {row.id for row in await self.db.list_task_sources()}
         for source in self.sources:
             if source.id in existing:
                 continue
-            self.db.upsert_task_source(
+            await self.db.upsert_task_source(
                 source.id,
                 source.enabled,
                 source.base_priority,
@@ -137,7 +137,7 @@ class Supervisor:
             )
 
     async def _poll_sources(self) -> None:
-        rows = {row.id: row for row in self.db.list_task_sources()}
+        rows = {row.id: row for row in await self.db.list_task_sources()}
         now = datetime.now(timezone.utc).timestamp()
         for source in self.sources:
             row = rows.get(source.id)
@@ -151,7 +151,7 @@ class Supervisor:
             drafts = await source.poll({"db": self.db})
             logger.debug("Source %s emitted %d drafts", source.id, len(drafts))
             for draft in drafts:
-                inserted = self.db.insert_work_item_if_absent(
+                inserted = await self.db.insert_work_item_if_absent(
                     draft.work_id,
                     draft.source_id,
                     draft.priority,
@@ -160,13 +160,13 @@ class Supervisor:
                 if inserted:
                     logger.info("Queued work item %s", draft.work_id)
                     if self._current_work_id:
-                        current = self.db.get_work_item(self._current_work_id)
+                        current = await self.db.get_work_item(self._current_work_id)
                         if current and draft.priority < current.priority:
                             self._preempt_event.set()
 
     async def _refresh_queue(self) -> None:
         self._queue.clear()
-        for item in self.db.fetch_ready_work_items(utc_now()):
+        for item in await self.db.fetch_ready_work_items(utc_now()):
             if item.work_id == self._current_work_id:
                 continue
             # Use run_after as tiebreaker (not created_at) for fair scheduling
@@ -177,7 +177,7 @@ class Supervisor:
         if not self._queue:
             return
         _, _, work_id = heapq.heappop(self._queue)
-        record = self.db.get_work_item(work_id)
+        record = await self.db.get_work_item(work_id)
         if not record:
             return
         logger.debug("Running work item %s", work_id)
@@ -188,9 +188,9 @@ class Supervisor:
         self._preempt_event.clear()
 
     async def _run_work_item(self, record: WorkItemRecord) -> None:
-        self.db.update_work_item_status(record.work_id, "running")
-        run_id = self.db.record_run_start(record.work_id)
-        self._update_state(f"running {record.work_id}")
+        await self.db.update_work_item_status(record.work_id, "running")
+        run_id = await self.db.record_run_start(record.work_id)
+        await self._update_state(f"running {record.work_id}")
         try:
             source = self._get_source(record.source_id)
             work_item = await source.build_work_item({"db": self.db}, record)
@@ -199,7 +199,7 @@ class Supervisor:
             async def checkpoint(patch: dict[str, Any]) -> None:
                 new_checkpoint = dict(record.checkpoint)
                 new_checkpoint.update(patch)
-                self.db.update_work_item_status(record.work_id, "running", checkpoint=new_checkpoint)
+                await self.db.update_work_item_status(record.work_id, "running", checkpoint=new_checkpoint)
 
             ctx = WorkItemContext(
                 db=self.db,
@@ -211,57 +211,57 @@ class Supervisor:
             await work_item.resume(ctx)
             logger.debug("Work item %s resume completed", record.work_id)
             if self._preempt_event.is_set():
-                self.db.update_work_item_status(record.work_id, "queued")
-                self.db.record_run_end(run_id, "preempted")
-                self._update_state(f"preempted {record.work_id}")
+                await self.db.update_work_item_status(record.work_id, "queued")
+                await self.db.record_run_end(run_id, "preempted")
+                await self._update_state(f"preempted {record.work_id}")
                 return
             if record.source_id == "session":
                 session_id = record.checkpoint.get("session_id")
-                session = self.db.get_session(session_id) if session_id else None
+                session = await self.db.get_session(session_id) if session_id else None
                 if session and session.status == "running":
-                    self.db.update_work_item_status(
+                    await self.db.update_work_item_status(
                         record.work_id,
                         "queued",
                         run_after=utc_now(),
                         clear_errors=True,
                     )
-                    self.db.record_run_end(run_id, "queued")
-                    self._update_state(f"queued {record.work_id}")
+                    await self.db.record_run_end(run_id, "queued")
+                    await self._update_state(f"queued {record.work_id}")
                     return
-            self.db.update_work_item_status(record.work_id, "done", clear_errors=True)
-            self.db.record_run_end(run_id, "done")
-            self._update_state(f"completed {record.work_id}")
+            await self.db.update_work_item_status(record.work_id, "done", clear_errors=True)
+            await self.db.record_run_end(run_id, "done")
+            await self._update_state(f"completed {record.work_id}")
         except WorkItemBlocked as exc:
             logger.info("Work item %s blocked: %s", record.work_id, exc.reason)
             run_after = (datetime.now(timezone.utc).timestamp() + exc.delay_seconds)
             run_after_iso = datetime.fromtimestamp(run_after, tz=timezone.utc).isoformat()
-            self.db.update_work_item_status(
+            await self.db.update_work_item_status(
                 record.work_id,
                 "queued",
                 run_after=run_after_iso,
                 last_error=exc.reason,
             )
-            self.db.record_run_end(run_id, "blocked", error=exc.reason)
-            self._update_state(f"blocked {record.work_id}")
+            await self.db.record_run_end(run_id, "blocked", error=exc.reason)
+            await self._update_state(f"blocked {record.work_id}")
         except Exception as exc: # pragma: no cover - safeguard
             tb = traceback.format_exc()
             logger.error("Work item %s failed: %s", record.work_id, exc)
             attempts = record.attempts + 1
             if attempts >= self.max_attempts:
-                self.db.update_work_item_status(
+                await self.db.update_work_item_status(
                     record.work_id,
                     "failed",
                     attempts=attempts,
                     last_error=str(exc),
                     last_traceback=tb,
                 )
-                self.db.record_run_end(run_id, "failed", error=str(exc))
-                self._update_state(f"failed {record.work_id}")
+                await self.db.record_run_end(run_id, "failed", error=str(exc))
+                await self._update_state(f"failed {record.work_id}")
                 return
             delay_seconds = 2**attempts
             run_after = (datetime.now(timezone.utc).timestamp() + delay_seconds)
             run_after_iso = datetime.fromtimestamp(run_after, tz=timezone.utc).isoformat()
-            self.db.update_work_item_status(
+            await self.db.update_work_item_status(
                 record.work_id,
                 "queued",
                 attempts=attempts,
@@ -269,8 +269,8 @@ class Supervisor:
                 last_error=str(exc),
                 last_traceback=tb,
             )
-            self.db.record_run_end(run_id, "retrying", error=str(exc))
-            self._update_state(f"retrying {record.work_id}")
+            await self.db.record_run_end(run_id, "retrying", error=str(exc))
+            await self._update_state(f"retrying {record.work_id}")
 
     def _get_source(self, source_id: str) -> TaskSource:
         for source in self.sources:
@@ -278,9 +278,9 @@ class Supervisor:
                 return source
         raise KeyError(f"Unknown source: {source_id}")
 
-    def _update_state(self, last_action: str) -> None:
+    async def _update_state(self, last_action: str) -> None:
         status = "stopped" if self._stop_event.is_set() else "running"
-        self.db.update_supervisor_state(
+        await self.db.update_supervisor_state(
             status=status,
             current_work_id=self._current_work_id,
             last_action=last_action,
@@ -294,15 +294,15 @@ class Supervisor:
         self._last_repo_cleanup = now
         ttl_days = int(os.environ.get("WINTERMUTE_REPO_RESOURCE_TTL_DAYS", "30"))
         cutoff = datetime.now(timezone.utc) - timedelta(days=ttl_days)
-        resources = self.db.list_repo_resources_for_cleanup(cutoff.isoformat())
+        resources = await self.db.list_repo_resources_for_cleanup(cutoff.isoformat())
         if not resources:
             return
         for resource in resources:
-            agent = self.db.get_agent(resource.agent_id) if resource.agent_id else None
-            vm = self.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+            agent = await self.db.get_agent(resource.agent_id) if resource.agent_id else None
+            vm = await self.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
             if not vm:
                 logger.info("Repo cleanup dropping stale resource %s", resource.id)
-                self.db.delete_repo_resource(resource.id)
+                await self.db.delete_repo_resource(resource.id)
                 continue
             spec = build_ssh_spec(vm, "")
             try:
@@ -310,21 +310,21 @@ class Supervisor:
             except Exception as exc:
                 logger.warning("Repo cleanup failed for %s: %s", resource.path, exc)
                 continue
-            self.db.delete_repo_resource(resource.id)
+            await self.db.delete_repo_resource(resource.id)
 
     async def _refresh_runtime(self) -> None:
         version = (
-            self.db.get_latest_credential_update(),
-            self.db.get_latest_github_token_update(),
-            self.db.get_latest_gitlab_token_update(),
+            await self.db.get_latest_credential_update(),
+            await self.db.get_latest_github_token_update(),
+            await self.db.get_latest_gitlab_token_update(),
         )
         if version != self._tools_version:
-            self.tools = build_default_tools(self.db)
+            self.tools = await build_default_tools(self.db)
             self._tools_version = version
         slack_source = self._get_slack_source()
         if slack_source:
-            bot = self.db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
-            app = self.db.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
+            bot = await self.db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+            app = await self.db.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
             signature = (
                 bot.reference if bot else None,
                 app.reference if app else None,
@@ -336,7 +336,7 @@ class Supervisor:
     async def _cycle_sprints(self) -> None:
         """Check for expired sprints with auto-cycle enabled and create new ones."""
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        sprints = self.db.list_sprints(status="active")
+        sprints = await self.db.list_sprints(status="active")
         for sprint in sprints:
             if not sprint.enabled:
                 continue
@@ -361,7 +361,7 @@ class Supervisor:
             else:
                 new_name = sprint.name + " 2"
             new_sprint_id = str(uuid.uuid4())
-            self.db.insert_sprint(
+            await self.db.insert_sprint(
                 sprint_id=new_sprint_id,
                 name=new_name,
                 start_date=new_start.strftime("%Y-%m-%d"),
@@ -370,9 +370,9 @@ class Supervisor:
                 status="active",
             )
             # Move open tickets to new sprint
-            moved = self.db.move_open_tickets_to_sprint(sprint.id, new_sprint_id)
+            moved = await self.db.move_open_tickets_to_sprint(sprint.id, new_sprint_id)
             # Close old sprint
-            self.db.update_sprint(sprint.id, status="closed")
+            await self.db.update_sprint(sprint.id, status="closed")
             logger.info(
                 "Cycled sprint %s -> %s, moved %d tickets",
                 sprint.name,
@@ -383,7 +383,7 @@ class Supervisor:
     async def _collect_agent_metrics(self) -> None:
         """Collect memory usage metrics for running agent sessions."""
         # Get enabled metric definitions
-        definitions = self.db.list_metric_definitions()
+        definitions = await self.db.list_metric_definitions()
         memory_def = None
         for defn in definitions:
             if defn.metric_type == "MEMORY_USAGE" and defn.enabled:
@@ -396,23 +396,23 @@ class Supervisor:
         freq_seconds = memory_def.recording_frequency_minutes * 60
 
         # Get all running sessions
-        running_sessions = self.db.list_sessions(status="running")
+        running_sessions = await self.db.list_sessions(status="running")
         for sess in running_sessions:
-            agent = self.db.get_agent(sess.agent_id)
+            agent = await self.db.get_agent(sess.agent_id)
             if not agent or not agent.vm_target_id:
                 continue
             # Check if enough time has passed since last collection for this agent
             last_collection = self._last_metrics_collection.get(agent.id, 0.0)
             if now - last_collection < freq_seconds:
                 continue
-            vm = self.db.get_vm_target(agent.vm_target_id)
+            vm = await self.db.get_vm_target(agent.vm_target_id)
             if not vm:
                 continue
             spec = build_ssh_spec(vm, agent.required_ssh_options)
             memory_mb = get_session_memory_usage_mb(spec, sess.id)
             if memory_mb is not None and memory_mb > 0:
                 log_id = str(uuid.uuid4())
-                self.db.insert_agent_metrics_log(
+                await self.db.insert_agent_metrics_log(
                     log_id=log_id,
                     agent_id=agent.id,
                     metric_definition_id=memory_def.id,
@@ -432,20 +432,20 @@ class Supervisor:
         return None
 
 
-def build_default_tools(db: Optional[Database] = None) -> ToolRegistry:
+async def build_default_tools(db: Optional[AsyncDatabase] = None) -> ToolRegistry:
     registry = ToolRegistry()
     allowlist = _parse_allowlist(os.environ.get("WINTERMUTE_FS_ALLOWLIST", ""))
     if allowlist:
         registry.register(ReadFileTool(allowlist=allowlist))
     if db:
-        slack_bot = db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+        slack_bot = await db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
         if slack_bot:
             registry.register(SlackPostMessageTool(token=slack_bot.reference))
-        if db.list_github_tokens():
+        if await db.list_github_tokens():
             registry.register(GitHubListIssuesTool(db=db))
             registry.register(GitHubGetIssueTool(db=db))
             registry.register(GitHubCommentIssueTool(db=db))
-        if db.list_gitlab_tokens():
+        if await db.list_gitlab_tokens():
             registry.register(GitLabListIssuesTool(db=db))
             registry.register(GitLabGetIssueTool(db=db))
             registry.register(GitLabCommentIssueTool(db=db))
@@ -474,19 +474,19 @@ async def main() -> None:
     register(StandupSource())
     register(AutostartSource())
     register(AgentWakeSource())
-    db = Database()
+    db = AsyncDatabase()
 
     # Reset any work items stuck in "running" state from previous crash/kill
-    stuck_items = db.list_work_items(status="running")
+    stuck_items = await db.list_work_items(status="running")
     if stuck_items:
         logger = logging.getLogger(__name__)
         logger.info("Resetting %d stuck work items from previous run", len(stuck_items))
         for item in stuck_items:
-            db.update_work_item_status(item.work_id, "queued")
+            await db.update_work_item_status(item.work_id, "queued")
             logger.info("Reset stuck work item: %s", item.work_id)
 
     executor = Executor()
-    tools = build_default_tools(db)
+    tools = await build_default_tools(db)
     supervisor = Supervisor(db=db, sources=all_sources(), executor=executor, tools=tools)
     print(f"Wintermute supervisor v{__version__} starting...")
     print("Supervisor ready. Polling sources and processing tasks.")

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any
 
-from wintermute.db import Database
+from wintermute.db import AsyncDatabase
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 from wintermute.tickets import parse_issue_ticket
 
@@ -20,7 +20,7 @@ class CommentDispatchWorkItem(WorkItem):
 
     async def resume(self, ctx: WorkItemContext) -> None:
         logger = logging.getLogger(__name__)
-        comment = ctx.db.get_comment(self.comment_id)
+        comment = await ctx.db.get_comment(self.comment_id)
         if not comment:
             return
         if not comment.public or not comment.approved or comment.sent:
@@ -32,7 +32,7 @@ class CommentDispatchWorkItem(WorkItem):
             logger.warning("Comment %s missing source or issue number", comment.id)
             return
         if provider == "github":
-            source = ctx.db.get_github_source(source_id)
+            source = await ctx.db.get_github_source(source_id)
             if not source or not source.token_id:
                 logger.warning("Comment %s missing GitHub source/token", comment.id)
                 return
@@ -51,7 +51,7 @@ class CommentDispatchWorkItem(WorkItem):
                 },
             )
         elif provider == "gitlab":
-            source = ctx.db.get_gitlab_source(source_id)
+            source = await ctx.db.get_gitlab_source(source_id)
             if not source or not source.token_id:
                 logger.warning("Comment %s missing GitLab source/token", comment.id)
                 return
@@ -71,7 +71,7 @@ class CommentDispatchWorkItem(WorkItem):
         else:
             logger.warning("Comment %s provider unsupported", comment.id)
             return
-        ctx.db.mark_comment_sent(comment.id)
+        await ctx.db.mark_comment_sent(comment.id)
 
 
 class CommentDispatchSource(TaskSource):
@@ -81,11 +81,11 @@ class CommentDispatchSource(TaskSource):
     poll_interval_seconds = 5
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
-        source = db.get_task_source(self.id)
+        db: AsyncDatabase = ctx["db"]
+        source = await db.get_task_source(self.id)
         if source and not source.enabled:
             return []
-        comments = db.list_pending_comments()
+        comments = await db.list_pending_comments()
         drafts: list[WorkItemDraft] = []
         for comment in comments:
             drafts.append(

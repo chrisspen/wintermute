@@ -59,11 +59,11 @@ It must return one of:
 ## State & storage
 - **SQLite** is the source of truth for: TaskSources config, WorkItems, checkpoints, run history, and credentials references.
 - Database location: `~/dbs/wintermute/wintermute.db` (override with `WINTERMUTE_DB` env var).
-- **SQLAlchemy ORM** is used for persistence with **Alembic** migrations (see `alembic/` and `alembic.ini`).
+- **Django ORM** is used for persistence with Django migrations (see `wintermute/migrations/`).
 - Checkpoints must be small (<256KB) and JSON-only.
 - Secrets are stored via a pluggable secret backend (env vars by default; optional OS keychain later).
 
-## Admin console (FastAPI)
+## Admin console (Django + Unfold)
 The web admin console provides:
 - Session-based admin login (salted password hash stored in SQLite).
 - TaskSources CRUD: enable/disable, priority, polling interval, endpoint config.
@@ -94,7 +94,7 @@ The web admin console provides:
 - Stop scripts (`stop_web.sh`, `stop_supervisor.sh`) request a clean shutdown.
 - PID/status endpoint: `GET /api/admin/pids`.
 - Log tail endpoint: `GET /api/admin/logs?service=web|supervisor&lines=200`.
-- `.codex/token` stores `WINTERMUTE_ADMIN_API_TOKEN=<token>`; strip the prefix when sending the bearer token.
+- `.<agent>/wintermute.token` stores `<token>`
 
 ## Agent output markers
 Agents can include special markers in their output to trigger Wintermute actions.
@@ -150,18 +150,21 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 - `wintermute/executor.py` — LLM adapter + structured output parsing
 - `wintermute/tools/` — tool definitions + permission gating
 - `wintermute/tools/gitlab.py` — GitLab API tools
-- `wintermute/web/` — FastAPI app + UI
-- `wintermute/db.py` — SQLite ORM models/migrations
+- `config/` — Django settings, ASGI, URLs
+- `wintermute/admin.py` — Django admin configuration
+- `wintermute/models/` — Django ORM models
 - `wintermute/runner.py` — SSH + tmux session runner for agent sessions
 - `wintermute/mcp_client.py` — MCP stdio client for Codex sessions
 - `tests/` — unit + integration tests with mocked endpoints
-- `alembic/` + `alembic.ini` — SQLAlchemy migrations
+- `wintermute/migrations/` — Django migrations
 - `setup.sh`, `run_web.sh`, `run_supervisor.sh`, `_run_web.sh`, `_run_supervisor.sh` — local setup and runners
 
 ## Development norms
+- **CRITICAL: NEVER START WEB OR SUPERVISOR PROCESSES.** Agents must NEVER run `./run_web.sh`, `./run_supervisor.sh`, `daphne`, or any command that starts the web server or supervisor process. The user manages these processes manually. Only proceed if the user gives EXPLICIT permission to start a process.
 - **CRITICAL: CHECK `.claude/commands/` FIRST.** Before doing common tasks (restart server, run tests, etc.), check what slash commands are available. Use `/restart-web`, `/restart-supervisor`, `/run-tests` instead of manual approaches. The commands exist to prevent mistakes.
 - **CRITICAL: NEVER ACCESS THE DATABASE DIRECTLY.** No Python commands that touch the database AT ALL - no `from wintermute.db import Database`, no sqlite3, no touching `~/dbs/wintermute/wintermute.db` in any way. The database is on a network filesystem and ANY direct access CORRUPTS IT. **USE THE API ONLY** - all data access via `curl http://192.168.123.1:8000/api/...`
 - **CRITICAL: NEVER run `./run_supervisor.sh` or `./run_web.sh` locally.** These are blocking relauncher scripts. Killing them mid-execution CORRUPTS THE SQLITE DATABASE. To restart services, use the API endpoint instead.
+- **CRITICAL: Web server restart procedure.** Django dev server auto-reloads on file changes. If you need a full restart: (1) Run `./stop_web.sh` FIRST to cleanly stop; (2) THEN run `./run_web.sh`. NEVER use KillShell or pkill - these orphan processes and leave the port in use. If port is stuck, use `fuser -k 9777/tcp` to force-kill.
 - Keep the scheduler deterministic and testable: no hidden global state.
 - Prefer typed, structured outputs from the model; reject non-conforming responses.
 - Every external call (Jira/GitHub/IM) must be mockable and have timeouts + retries.
@@ -175,7 +178,7 @@ Wintermute uses the OpenAI-compatible Chat Completions API:
 When running as an agent inside a VM, the web server runs on the host machine. Use the gateway IP (typically `192.168.123.1`) to reach host services:
 - Find gateway: `ip route | grep default | awk '{print $3}'`
 - API calls: `curl -H "Authorization: Bearer $TOKEN" http://192.168.123.1:8000/api/...`
-- API token: read from `.codex/token` (strip the `WINTERMUTE_ADMIN_API_TOKEN=` prefix)
+- API token: read from `.{agent}/wintermute.token`
 - After completing web server changes you're confident will work, restart via: `curl -s -X POST -H "Authorization: Bearer $TOKEN" http://192.168.123.1:8000/api/admin/restart-web`
 
 ## Minimal local run (dev)

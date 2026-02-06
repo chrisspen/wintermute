@@ -29,8 +29,8 @@ while true; do
       rm -f "$STOP_FLAG"
       break
     fi
-    if [ "$status" -eq 143 ]; then
-      echo "Web exited with SIGTERM; restarting."
+    if [ "$status" -eq 143 ] || [ "$status" -eq 137 ]; then
+      echo "Web exited with signal (status $status); restarting."
       sleep 0.5
       continue
     fi

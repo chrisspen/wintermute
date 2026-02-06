@@ -1,0 +1,169 @@
+{% extends "admin/change_form.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'css/wintermute.css' %}">
+{% endblock %}
+
+{% block form_before %}
+    {{ block.super }}
+    {% if change %}
+    <div id="agent-session-controls" class="mb-4 p-4 bg-base-50 dark:bg-base-800 rounded-default border border-base-200 dark:border-base-700">
+        <div class="flex items-center gap-4 flex-wrap">
+            <span class="font-medium text-base-700 dark:text-base-300">Session:</span>
+            <span id="session-status" class="flex items-center gap-2">
+                <span id="status-dot" class="w-2 h-2 rounded-full bg-base-400"></span>
+                <span id="status-text" class="text-sm text-base-600 dark:text-base-400">Checking...</span>
+            </span>
+            <div class="flex gap-2 ml-auto">
+                <button type="button" id="start-session-btn" onclick="startSession()"
+                    class="session-btn session-btn-start">
+                    Start Session
+                </button>
+                <button type="button" id="stop-session-btn" onclick="stopSession()" disabled
+                    class="session-btn session-btn-stop">
+                    Stop Session
+                </button>
+                {% if session_mode == "tmux" %}
+                <button type="button" id="open-terminal-btn" onclick="openTerminal()" disabled
+                    class="session-btn session-btn-terminal">
+                    Open Terminal
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const agentId = "{{ agent_id }}";
+        let currentSessionId = null;
+        let pollingInterval = null;
+
+        function updateStatus(running, sessionId) {
+            const dot = document.getElementById('status-dot');
+            const text = document.getElementById('status-text');
+            const startBtn = document.getElementById('start-session-btn');
+            const stopBtn = document.getElementById('stop-session-btn');
+            const terminalBtn = document.getElementById('open-terminal-btn');
+
+            currentSessionId = sessionId;
+
+            if (running) {
+                dot.className = 'w-2 h-2 rounded-full bg-green-500 animate-pulse';
+                text.textContent = 'Running';
+                text.className = 'text-sm text-green-600 dark:text-green-400';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                terminalBtn.disabled = false;
+            } else {
+                dot.className = 'w-2 h-2 rounded-full bg-base-400';
+                text.textContent = 'Not Running';
+                text.className = 'text-sm text-base-600 dark:text-base-400';
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                terminalBtn.disabled = true;
+            }
+        }
+
+        async function checkStatus() {
+            try {
+                const response = await fetch('/agents/' + agentId + '/session/status/', {
+                    credentials: 'same-origin'
+                });
+                if (response.redirected || !response.ok) {
+                    console.error('Auth error - response status:', response.status, 'redirected:', response.redirected);
+                    document.getElementById('status-text').textContent = 'Auth Error';
+                    return;
+                }
+                const data = await response.json();
+                updateStatus(data.running, data.session_id);
+            } catch (e) {
+                console.error('Failed to check status:', e);
+                document.getElementById('status-text').textContent = 'Error';
+            }
+        }
+
+        async function startSession() {
+            const startBtn = document.getElementById('start-session-btn');
+            startBtn.disabled = true;
+            startBtn.textContent = 'Starting...';
+
+            try {
+                const response = await fetch('/agents/' + agentId + '/session/start/', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus(true, data.session_id);
+                } else {
+                    const error = await response.json();
+                    alert('Failed to start session: ' + (error.detail || 'Unknown error'));
+                    startBtn.disabled = false;
+                }
+            } catch (e) {
+                console.error('Failed to start session:', e);
+                alert('Failed to start session: ' + e.message);
+                startBtn.disabled = false;
+            }
+
+            startBtn.textContent = 'Start Session';
+        }
+
+        async function stopSession() {
+            const stopBtn = document.getElementById('stop-session-btn');
+            stopBtn.disabled = true;
+            stopBtn.textContent = 'Stopping...';
+
+            try {
+                const response = await fetch('/agents/' + agentId + '/session/stop/', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                    }
+                });
+
+                if (response.ok) {
+                    updateStatus(false, null);
+                } else {
+                    const error = await response.json();
+                    alert('Failed to stop session: ' + (error.detail || 'Unknown error'));
+                    stopBtn.disabled = false;
+                }
+            } catch (e) {
+                console.error('Failed to stop session:', e);
+                alert('Failed to stop session: ' + e.message);
+                stopBtn.disabled = false;
+            }
+
+            stopBtn.textContent = 'Stop Session';
+        }
+
+        function openTerminal() {
+            if (currentSessionId) {
+                window.open('/terminal/' + currentSessionId + '/', '_blank', 'width=1200,height=800');
+            }
+        }
+
+        // Initial status check
+        document.addEventListener('DOMContentLoaded', function() {
+            checkStatus();
+            // Poll status every 10 seconds
+            pollingInterval = setInterval(checkStatus, 10000);
+        });
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', function() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+        });
+    </script>
+    {% endif %}
+{% endblock %}

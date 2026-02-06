@@ -1,0 +1,44 @@
+/* Wintermute custom styles */
+
+/* Session control buttons */
+.session-btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    transition: all 0.2s;
+    cursor: pointer;
+    border: none;
+}
+
+.session-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.session-btn-start {
+    background-color: #16a34a;
+    color: white;
+}
+
+.session-btn-start:hover:not(:disabled) {
+    background-color: #15803d;
+}
+
+.session-btn-stop {
+    background-color: #dc2626;
+    color: white;
+}
+
+.session-btn-stop:hover:not(:disabled) {
+    background-color: #b91c1c;
+}
+
+.session-btn-terminal {
+    background-color: #7c3aed;
+    color: white;
+}
+
+.session-btn-terminal:hover:not(:disabled) {
+    background-color: #6d28d9;
+}

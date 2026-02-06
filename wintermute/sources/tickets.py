@@ -8,7 +8,7 @@ import re
 from typing import Any, Optional
 import uuid
 
-from wintermute.db import Database, TicketRecord
+from wintermute.db import AsyncDatabase, TicketRecord
 from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,
@@ -50,45 +50,45 @@ class TicketAutoStartWorkItem(WorkItem):
         provider, _source_id, _issue_number = parse_issue_ticket(ticket_id)
         if provider:
             return
-        ticket = ctx.db.get_ticket(ticket_id)
+        ticket = await ctx.db.get_ticket(ticket_id)
         if not ticket or not ticket.auto_start or ticket.status != "open":
             return
         await self._auto_start(ctx, ticket)
 
     async def _auto_start(self, ctx: WorkItemContext, ticket: TicketRecord) -> None:
         logger = logging.getLogger(__name__)
-        project = ctx.db.get_project(ticket.project_id)
+        project = await ctx.db.get_project(ticket.project_id)
         if not project:
             return
         agent_id = _resolve_ticket_agent_id(ticket)
         if agent_id and agent_id != ticket.agent_id:
-            ctx.db.update_ticket(ticket.id, agent_id=agent_id)
+            await ctx.db.update_ticket(ticket.id, agent_id=agent_id)
         if not agent_id:
             await self._notify(ctx, project.slack_channel_id, "Ticket missing agent assignment.")
             return
-        agent = ctx.db.get_agent(agent_id)
+        agent = await ctx.db.get_agent(agent_id)
         if not agent:
             await self._notify(ctx, project.slack_channel_id, "Ticket agent not found.")
             return
         if not agent.vm_target_id:
             await self._notify(ctx, project.slack_channel_id, "Agent has no VM target configured.")
             return
-        vm = ctx.db.get_vm_target(agent.vm_target_id)
+        vm = await ctx.db.get_vm_target(agent.vm_target_id)
         if not vm:
             await self._notify(ctx, project.slack_channel_id, "VM target not found for this agent.")
             return
-        if ctx.db.get_session_by_ticket(ticket.id):
+        if await ctx.db.get_session_by_ticket(ticket.id):
             logger.info("Session already exists for ticket %s", ticket.id)
             return
         if project.repo_mode == "mirror":
-            running = ctx.db.list_sessions(project_id=project.id, status="running")
+            running = await ctx.db.list_sessions(project_id=project.id, status="running")
             if running:
                 logger.info("Project session already running for %s", project.id)
                 raise WorkItemBlocked("Project session already running", delay_seconds=60)
         session_spec = build_ssh_spec(vm, agent.required_ssh_options)
         # Memory check before starting agent
-        ctx.db.refresh_agent_average_memory_usage(agent.id)
-        agent = ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
+        await ctx.db.refresh_agent_average_memory_usage(agent.id)
+        agent = await ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
         if agent and vm.required_reserve_memory_gb > 0:
             mem_ok, mem_error = check_vm_memory_available(session_spec, vm, agent)
             if not mem_ok:
@@ -104,7 +104,7 @@ class TicketAutoStartWorkItem(WorkItem):
         safe_id = re.sub(r"[^a-zA-Z0-9]+", "-", ticket.id.strip().lower()).strip("-")
         short_id = safe_id[:10] if safe_id else "ticket"
         session_id = f"{project.slug}-{agent.slug}-ticket-{short_id}"
-        repo_resource, resource_error = ctx.db.acquire_repo_resource(
+        repo_resource, resource_error = await ctx.db.acquire_repo_resource(
             project=project,
             session_id=session_id,
             agent_id=agent.id,
@@ -116,12 +116,12 @@ class TicketAutoStartWorkItem(WorkItem):
         try:
             repo_path = ensure_repo(base_spec, project, repo_path=repo_resource.path)
         except Exception as exc:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             message = f"Repo setup failed: {exc}"
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=60) from exc
         if not repo_path:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             message = "Repository not configured for this project."
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=300)
@@ -130,11 +130,11 @@ class TicketAutoStartWorkItem(WorkItem):
         try:
             branch_name = prepare_ticket_branch(base_spec, repo_path, ticket.id)
         except Exception as exc:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             message = f"Branch prep failed: {exc}"
             await self._notify(ctx, project.slack_channel_id, message)
             raise WorkItemBlocked(message, delay_seconds=60) from exc
-        ctx.db.insert_session(
+        await ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,
             agent_id=agent.id,
@@ -157,10 +157,10 @@ class TicketAutoStartWorkItem(WorkItem):
             project_slug=project.slug,
             prompt_template=project.prompt_template,
         )
-        session = ctx.db.get_session(session_id)
+        session = await ctx.db.get_session(session_id)
         if session:
-            ctx.db.update_session(session_id, prompt_pending=prompt)
-            ctx.db.insert_comment(
+            await ctx.db.update_session(session_id, prompt_pending=prompt)
+            await ctx.db.insert_comment(
                 comment_id=str(uuid.uuid4()),
                 ticket_id=ticket.id,
                 session_id=session_id,
@@ -174,7 +174,7 @@ class TicketAutoStartWorkItem(WorkItem):
                 approved=True,
             )
         if ticket.status == "open":
-            ctx.db.update_ticket(ticket.id, status="in-progress")
+            await ctx.db.update_ticket(ticket.id, status="in-progress")
         if thread_ts:
             await self._notify(
                 ctx,
@@ -257,12 +257,12 @@ class TicketAutoStartSource(TaskSource):
     poll_interval_seconds = 30
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
-        source = db.get_task_source(self.id)
+        db: AsyncDatabase = ctx["db"]
+        source = await db.get_task_source(self.id)
         if not source or not source.enabled:
             return []
         drafts: list[WorkItemDraft] = []
-        for ticket in db.list_auto_start_tickets():
+        for ticket in await db.list_auto_start_tickets():
             provider, _source_id, _issue_number = parse_issue_ticket(ticket.id)
             if provider:
                 continue

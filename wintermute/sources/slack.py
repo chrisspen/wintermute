@@ -14,7 +14,7 @@ from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
-from wintermute.db import Database, utc_now
+from wintermute.db import AsyncDatabase, utc_now
 from wintermute.runner import build_ssh_spec, check_vm_memory_available, ensure_repo, is_codex_command, send_input, set_codex_trust, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
@@ -44,16 +44,16 @@ class SlackCommandWorkItem(WorkItem):
         logger = logging.getLogger(__name__)
 
         # Check if this is a message from an agent channel
-        agent_channel = ctx.db.get_channel_by_external_id("slack", self.message.channel)
+        agent_channel = await ctx.db.get_channel_by_external_id("slack", self.message.channel)
         if agent_channel:
             await self._handle_agent_channel_message(ctx, agent_channel, logger)
             return
 
         if self.message.thread_ts and self.message.thread_ts != self.message.ts:
-            session = ctx.db.get_session_by_thread(self.message.thread_ts)
+            session = await ctx.db.get_session_by_thread(self.message.thread_ts)
             if session:
-                agent = ctx.db.get_agent(session.agent_id)
-                vm = ctx.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+                agent = await ctx.db.get_agent(session.agent_id)
+                vm = await ctx.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
                 if agent and vm:
                     spec = build_ssh_spec(vm, agent.required_ssh_options)
                     send_input(spec, session, self.message.text)
@@ -77,7 +77,7 @@ class SlackCommandWorkItem(WorkItem):
 
         project_slug = parts[1].lower()
         agent_slug = parts[2].lower()
-        project = ctx.db.get_project_by_slug(project_slug)
+        project = await ctx.db.get_project_by_slug(project_slug)
         if not project:
             logger.info("Slack start failed: project %s not found", project_slug)
             await ctx.tools.call(
@@ -100,7 +100,7 @@ class SlackCommandWorkItem(WorkItem):
                 },
             )
             return
-        agent = ctx.db.get_agent_by_slug(agent_slug)
+        agent = await ctx.db.get_agent_by_slug(agent_slug)
         if not agent:
             logger.info("Slack start failed: agent %s not found", agent_slug)
             await ctx.tools.call(
@@ -124,7 +124,7 @@ class SlackCommandWorkItem(WorkItem):
             )
             return
         if project.repo_mode == "mirror":
-            existing = ctx.db.list_sessions(project_id=project.id, status="running")
+            existing = await ctx.db.list_sessions(project_id=project.id, status="running")
             if existing:
                 logger.info("Slack start blocked: session already running for project %s", project_slug)
                 await ctx.tools.call(
@@ -136,7 +136,7 @@ class SlackCommandWorkItem(WorkItem):
                     },
                 )
                 return
-        vm = ctx.db.get_vm_target(agent.vm_target_id)
+        vm = await ctx.db.get_vm_target(agent.vm_target_id)
         if not vm:
             logger.info("Slack start failed: VM target missing for agent %s", agent_slug)
             await ctx.tools.call(
@@ -151,8 +151,8 @@ class SlackCommandWorkItem(WorkItem):
 
         spec = build_ssh_spec(vm, agent.required_ssh_options)
         # Memory check before starting agent
-        ctx.db.refresh_agent_average_memory_usage(agent.id)
-        agent = ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
+        await ctx.db.refresh_agent_average_memory_usage(agent.id)
+        agent = await ctx.db.get_agent(agent.id) # Refresh to get updated memory avg
         if agent and vm.required_reserve_memory_gb > 0:
             mem_ok, mem_error = check_vm_memory_available(spec, vm, agent)
             if not mem_ok:
@@ -166,7 +166,7 @@ class SlackCommandWorkItem(WorkItem):
                 )
                 return
         session_id = f"{project_slug}-{agent_slug}-{self.message.ts.replace('.', '')}"
-        repo_resource, resource_error = ctx.db.acquire_repo_resource(
+        repo_resource, resource_error = await ctx.db.acquire_repo_resource(
             project=project,
             session_id=session_id,
             agent_id=agent.id,
@@ -184,7 +184,7 @@ class SlackCommandWorkItem(WorkItem):
         try:
             repo_path = ensure_repo(spec, project, repo_path=repo_resource.path)
         except Exception as exc:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             logger.info("Slack start failed: repo setup error %s", exc)
             await ctx.tools.call(
                 "slack_post_message",
@@ -196,7 +196,7 @@ class SlackCommandWorkItem(WorkItem):
             )
             return
         if not repo_path:
-            ctx.db.release_repo_resource_for_session(session_id)
+            await ctx.db.release_repo_resource_for_session(session_id)
             logger.info("Slack start failed: repo not configured for project %s", project_slug)
             await ctx.tools.call(
                 "slack_post_message",
@@ -209,7 +209,7 @@ class SlackCommandWorkItem(WorkItem):
             return
         if is_codex_command(agent.command) and agent.trust_level:
             set_codex_trust(spec, repo_path, agent.trust_level)
-        ctx.db.insert_session(
+        await ctx.db.insert_session(
             session_id=session_id,
             project_id=project.id,
             agent_id=agent.id,
@@ -235,13 +235,13 @@ class SlackCommandWorkItem(WorkItem):
         Routes the message to the agent's standalone session, stores it as a comment,
         and queues it for the agent to process.
         """
-        agent = ctx.db.get_agent(agent_channel.agent_id)
+        agent = await ctx.db.get_agent(agent_channel.agent_id)
         if not agent:
             logger.warning("Agent not found for channel %s", agent_channel.name)
             return
 
         # Find the agent's standalone session
-        sessions = ctx.db.list_sessions(agent_id=agent.id)
+        sessions = await ctx.db.list_sessions(agent_id=agent.id)
         standalone_session = None
         for sess in sessions:
             if not sess.ticket_id and sess.status in ("running", "blocked"):
@@ -268,7 +268,7 @@ class SlackCommandWorkItem(WorkItem):
         # Get Slack user info for author name
         author = f"slack:{self.message.user}"
         try:
-            bot_token = ctx.db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+            bot_token = await ctx.db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
             if bot_token:
                 from slack_sdk.web.async_client import AsyncWebClient
                 web_client = AsyncWebClient(token=bot_token.reference)
@@ -285,7 +285,7 @@ class SlackCommandWorkItem(WorkItem):
         # Insert comment (same as web UI does)
         now = datetime.utcnow().isoformat()
         comment_id = str(uuid.uuid4())
-        ctx.db.insert_comment(
+        await ctx.db.insert_comment(
             comment_id=comment_id,
             ticket_id=None,
             session_id=standalone_session.id,
@@ -316,7 +316,7 @@ class SlackCommandWorkItem(WorkItem):
             queue = []
 
         queue.append(queued_message)
-        ctx.db.update_session(
+        await ctx.db.update_session(
             standalone_session.id,
             queued_user_messages=json.dumps(queue),
             awaiting_response=1,
@@ -359,13 +359,13 @@ class SlackSource(TaskSource):
         self._bot_user_id = None
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
-        source = db.get_task_source(self.id)
+        db: AsyncDatabase = ctx["db"]
+        source = await db.get_task_source(self.id)
         if not source or not source.enabled:
             return []
         logger = logging.getLogger(__name__)
         # Include both project channels and agent channels in the filter
-        self._channels_filter = self._build_channel_filter(db, source.config)
+        self._channels_filter = await self._build_channel_filter(db, source.config)
         try:
             await self._ensure_socket(db, source.config)
         except Exception:
@@ -414,11 +414,11 @@ class SlackSource(TaskSource):
             message=message,
         )
 
-    async def _ensure_socket(self, db: Database, config: dict[str, Any]) -> None:
+    async def _ensure_socket(self, db: AsyncDatabase, config: dict[str, Any]) -> None:
         if self._socket_task:
             return
-        bot_token = db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
-        app_token = db.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
+        bot_token = await db.get_credential_by_name(SLACK_PROVIDER, SLACK_BOT_TOKEN_NAME)
+        app_token = await db.get_credential_by_name(SLACK_PROVIDER, SLACK_APP_TOKEN_NAME)
         if not bot_token or not app_token:
             return
         web_client = AsyncWebClient(token=bot_token.reference)
@@ -486,7 +486,7 @@ class SlackSource(TaskSource):
                 channels.append(cleaned)
         return set(channels) or None
 
-    def _build_channel_filter(self, db: Database, config: dict[str, Any]) -> Optional[set[str]]:
+    async def _build_channel_filter(self, db: AsyncDatabase, config: dict[str, Any]) -> Optional[set[str]]:
         """Build channel filter including both project channels and agent channels."""
         channels: set[str] = set()
 
@@ -496,7 +496,7 @@ class SlackSource(TaskSource):
             channels.update(project_channels)
 
         # Add agent channels (Slack channels configured for agents)
-        all_channels = db.list_channels()
+        all_channels = await db.list_channels()
         for ch in all_channels:
             if ch.type == "slack" and ch.external_channel_id and ch.enabled:
                 channels.add(ch.external_channel_id)

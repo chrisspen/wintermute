@@ -1,1 +1,0 @@
-"""Web admin console package."""

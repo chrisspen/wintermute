@@ -6,7 +6,8 @@ multiple chat platforms based on channel configuration.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import inspect
+from typing import Any, Optional, Union
 import logging
 
 from wintermute.chat.adapters import (
@@ -154,7 +155,12 @@ class ChatDispatcher:
         Returns:
             List of (channel, result) tuples.
         """
-        channels = self._db.list_channels(agent_id=agent_id)
+        channels_result = self._db.list_channels(agent_id=agent_id)
+        # Support both sync Database and AsyncDatabase
+        if inspect.iscoroutine(channels_result):
+            channels = await channels_result
+        else:
+            channels = channels_result
         self._logger.info("Broadcasting to %d channels for agent %s", len(channels), agent_id)
         results: list[tuple[ChannelRecord, MessageResult]] = []
 

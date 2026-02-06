@@ -12,7 +12,7 @@ import os
 
 import uuid
 
-from wintermute.db import Database, AgentSessionRecord, utc_now
+from wintermute.db import AsyncDatabase, AgentSessionRecord, utc_now
 from wintermute.claude_client import close_claude_process, poll_claude, run_claude_prompt
 from wintermute.gemini_client import close_gemini_process, poll_gemini, run_gemini_prompt
 from wintermute.mcp_client import close_mcp_process, poll_codex_mcp, run_codex_mcp
@@ -39,13 +39,13 @@ class SessionWorkItem(WorkItem):
 
     async def resume(self, ctx: WorkItemContext) -> None:
         logger = logging.getLogger(__name__)
-        session = ctx.db.get_session(self.session_id)
+        session = await ctx.db.get_session(self.session_id)
         if not session:
             logger.warning("Session %s not found", self.session_id)
             return
-        project = ctx.db.get_project(session.project_id) if session.project_id else None
-        agent = ctx.db.get_agent(session.agent_id)
-        vm = ctx.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
+        project = await ctx.db.get_project(session.project_id) if session.project_id else None
+        agent = await ctx.db.get_agent(session.agent_id)
+        vm = await ctx.db.get_vm_target(agent.vm_target_id) if agent and agent.vm_target_id else None
         # Require agent and vm; project is optional for standalone sessions
         if not (agent and vm):
             logger.warning("Session %s missing agent or vm", self.session_id)
@@ -60,11 +60,11 @@ class SessionWorkItem(WorkItem):
             await _run_gemini_session(ctx, session, project, agent, vm)
             return
         if session.status != "running":
-            ctx.db.release_repo_resource_for_session(session.id)
+            await ctx.db.release_repo_resource_for_session(session.id)
             if session.output_buffer:
                 cleaned_buffer = _strip_echo_lines(session.output_buffer, agent.input_echo_prefix)
                 await _emit_output(ctx, session, project, agent, cleaned_buffer, force_comment=True)
-                ctx.db.update_session(
+                await ctx.db.update_session(
                     session.id,
                     output_buffer="",
                     output_buffer_updated_at=utc_now(),
@@ -75,13 +75,13 @@ class SessionWorkItem(WorkItem):
             if session.output_buffer:
                 cleaned_buffer = _strip_echo_lines(session.output_buffer, agent.input_echo_prefix)
                 await _emit_output(ctx, session, project, agent, cleaned_buffer, force_comment=True)
-                ctx.db.update_session(
+                await ctx.db.update_session(
                     session.id,
                     output_buffer="",
                     output_buffer_updated_at=utc_now(),
                 )
-            ctx.db.update_session(session.id, status="done")
-            ctx.db.release_repo_resource_for_session(session.id)
+            await ctx.db.update_session(session.id, status="done")
+            await ctx.db.release_repo_resource_for_session(session.id)
             if project and project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
                 await ctx.tools.call(
                     "slack_post_message",
@@ -98,7 +98,7 @@ class SessionWorkItem(WorkItem):
         if output:
             logger.info("Session %s produced %d bytes", session.id, len(output))
             combined = buffer_text + output
-            ctx.db.update_session(
+            await ctx.db.update_session(
                 session.id,
                 last_output=output,
                 last_output_offset=new_offset,
@@ -125,13 +125,13 @@ class SessionWorkItem(WorkItem):
                 )
                 await _handle_session_markers(ctx, session, cleaned_buffer)
                 if stored:
-                    ctx.db.update_session(
+                    await ctx.db.update_session(
                         session.id,
                         awaiting_response=0,
                         last_user_message="",
                         awaiting_response_offset=0,
                     )
-                ctx.db.update_session(
+                await ctx.db.update_session(
                     session.id,
                     output_buffer="",
                     output_buffer_updated_at=utc_now(),
@@ -158,13 +158,13 @@ class SessionWorkItem(WorkItem):
             )
             await _handle_session_markers(ctx, session, cleaned_buffer)
             if session.awaiting_response and stored:
-                ctx.db.update_session(
+                await ctx.db.update_session(
                     session.id,
                     awaiting_response=0,
                     last_user_message="",
                     awaiting_response_offset=0,
                 )
-            ctx.db.update_session(
+            await ctx.db.update_session(
                 session.id,
                 output_buffer="",
                 output_buffer_updated_at=utc_now(),
@@ -185,13 +185,13 @@ async def _run_mcp_session(
     keepalive_seconds = int(os.environ.get("WINTERMUTE_MCP_KEEPALIVE_SECONDS", "600"))
     if session.status != "running":
         close_mcp_process(session.id)
-        ctx.db.release_repo_resource_for_session(session.id)
+        await ctx.db.release_repo_resource_for_session(session.id)
         return
     base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
     spec = build_ssh_spec_with_options(vm, base_options)
     conversation_id = session.mcp_conversation_id
 
-    def _send_prompt(prompt: str) -> Any:
+    async def _send_prompt(prompt: str) -> Any:
         nonlocal conversation_id
         result = run_codex_mcp(
             spec,
@@ -203,28 +203,28 @@ async def _run_mcp_session(
         )
         if result.conversation_id and result.conversation_id != conversation_id:
             conversation_id = result.conversation_id
-            ctx.db.update_session(session.id, mcp_conversation_id=conversation_id)
+            await ctx.db.update_session(session.id, mcp_conversation_id=conversation_id)
         return result
 
-    def _handle_mcp_error(error: Optional[str]) -> bool:
+    async def _handle_mcp_error(error: Optional[str]) -> bool:
         if not error:
             return False
         lowered = error.lower()
         if "mcp process" in lowered:
             logger.warning("MCP process error for session %s: %s", session.id, error)
             close_mcp_process(session.id)
-            ctx.db.update_session(session.id, status="done", awaiting_response=0)
-            ctx.db.release_repo_resource_for_session(session.id)
+            await ctx.db.update_session(session.id, status="done", awaiting_response=0)
+            await ctx.db.release_repo_resource_for_session(session.id)
             return True
         return False
 
     if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
-        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
+        await ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
         if prompt:
             logger.info("MCP prompt queued for session %s", session.id)
-            result = _send_prompt(prompt)
-            if _handle_mcp_error(result.error):
+            result = await _send_prompt(prompt)
+            if await _handle_mcp_error(result.error):
                 return
             if result.error:
                 logger.warning("MCP prompt error for session %s: %s", session.id, result.error)
@@ -238,7 +238,7 @@ async def _run_mcp_session(
                     result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
+                await ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
             else:
                 logger.info("MCP prompt returned no response for session %s", session.id)
                 # awaiting_response already set above
@@ -253,7 +253,7 @@ async def _run_mcp_session(
     if not queue:
         if session.awaiting_response:
             poll_result = poll_codex_mcp(session.id, timeout_seconds=5)
-            if _handle_mcp_error(poll_result.error):
+            if await _handle_mcp_error(poll_result.error):
                 return
             if poll_result.error:
                 logger.warning("MCP poll error for session %s: %s", session.id, poll_result.error)
@@ -267,31 +267,34 @@ async def _run_mcp_session(
                     poll_result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+                await ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
         else:
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("MCP keepalive for session %s", session.id)
                 keepalive_text = "[SYSTEM KEEPALIVE - This is an automated ping to keep the session alive. Reply with exactly '.' and nothing else. This instruction applies ONLY to this specific keepalive message, not to any future user messages.]"
-                keepalive_result = _send_prompt(keepalive_text)
+                keepalive_result = await _send_prompt(keepalive_text)
                 if keepalive_result.error or not keepalive_result.response_text:
                     logger.warning("MCP keepalive failed for session %s", session.id)
                     close_mcp_process(session.id)
-                    ctx.db.update_session(session.id, status="done", awaiting_response=0)
-                    ctx.db.release_repo_resource_for_session(session.id)
+                    await ctx.db.update_session(session.id, status="done", awaiting_response=0)
+                    await ctx.db.release_repo_resource_for_session(session.id)
                 else:
-                    ctx.db.update_session(session.id, last_output_at=utc_now())
+                    await ctx.db.update_session(session.id, last_output_at=utc_now())
         return
     message = str(queue.pop(0))
-    ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
     if not message.strip():
+        # Empty message, update queue and return
+        await ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
         return
     logger.info("MCP reply queued for session %s", session.id)
     # Note: Comment already created by the source (web API, Slack, initial_prompt)
     # Set last_user_message before sending so typing indicator shows immediately
-    ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
-    result = _send_prompt(message)
-    if _handle_mcp_error(result.error):
+    await ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
+    result = await _send_prompt(message)
+    # Only update queue after successful send to prevent data loss if send fails
+    await ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
+    if await _handle_mcp_error(result.error):
         return
     if result.error:
         logger.warning("MCP reply error for session %s: %s", session.id, result.error)
@@ -305,7 +308,7 @@ async def _run_mcp_session(
             result.response_text,
             sender=lambda text: _send_prompt(text),
         )
-        ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
+        await ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
     else:
         logger.info("MCP reply returned no response for session %s", session.id)
         # awaiting_response already set above
@@ -329,13 +332,13 @@ async def _run_claude_session(
     if session.status != "running":
         logger.info("Claude session %s not running (status=%s), closing", session.id, session.status)
         close_claude_process(session.id)
-        ctx.db.release_repo_resource_for_session(session.id)
+        await ctx.db.release_repo_resource_for_session(session.id)
         return
 
     base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
     spec = build_ssh_spec_with_options(vm, base_options)
 
-    def _send_prompt(prompt: str) -> Any:
+    async def _send_prompt(prompt: str) -> Any:
         result = run_claude_prompt(
             spec,
             agent,
@@ -345,10 +348,10 @@ async def _run_claude_session(
             timeout_seconds=int(os.environ.get("WINTERMUTE_CLAUDE_TIMEOUT_SECONDS", "300")),
         )
         if result.session_id:
-            ctx.db.update_session(session.id, claude_session_id=result.session_id)
+            await ctx.db.update_session(session.id, claude_session_id=result.session_id)
         return result
 
-    def _handle_claude_error(error: Optional[str]) -> bool:
+    async def _handle_claude_error(error: Optional[str]) -> bool:
         if not error:
             return False
         lowered = error.lower()
@@ -356,19 +359,19 @@ async def _run_claude_session(
         if "exited" in lowered or "closed" in lowered or "not found" in lowered:
             logger.warning("Claude process error for session %s: %s", session.id, error)
             close_claude_process(session.id)
-            ctx.db.update_session(session.id, status="done", awaiting_response=0)
-            ctx.db.release_repo_resource_for_session(session.id)
+            await ctx.db.update_session(session.id, status="done", awaiting_response=0)
+            await ctx.db.release_repo_resource_for_session(session.id)
             return True
         return False
 
     # Handle pending prompt
     if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
-        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
+        await ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
         if prompt:
             logger.info("Claude prompt queued for session %s", session.id)
-            result = _send_prompt(prompt)
-            if _handle_claude_error(result.error):
+            result = await _send_prompt(prompt)
+            if await _handle_claude_error(result.error):
                 return
             if result.error:
                 logger.warning("Claude prompt error for session %s: %s", session.id, result.error)
@@ -382,7 +385,7 @@ async def _run_claude_session(
                     result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
+                await ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
             else:
                 logger.info("Claude prompt returned no response for session %s", session.id)
                 # awaiting_response already set above
@@ -399,7 +402,7 @@ async def _run_claude_session(
     if not queue:
         # Always poll for any pending output - Claude may generate responses autonomously
         poll_result = poll_claude(session.id, timeout_seconds=5)
-        if _handle_claude_error(poll_result.error):
+        if await _handle_claude_error(poll_result.error):
             return
         if poll_result.error:
             logger.warning("Claude poll error for session %s: %s", session.id, poll_result.error)
@@ -413,37 +416,40 @@ async def _run_claude_session(
                 poll_result.response_text,
                 sender=lambda text: _send_prompt(text),
             )
-            ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+            await ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
         elif poll_result.had_activity:
             # Claude is outputting data (tool calls, etc.) but no final response yet
-            ctx.db.update_session(session.id, last_output_at=utc_now())
+            await ctx.db.update_session(session.id, last_output_at=utc_now())
         elif not session.awaiting_response:
             # No activity and not awaiting - check for keepalive
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("Claude keepalive for session %s", session.id)
                 keepalive_text = "[SYSTEM KEEPALIVE - This is an automated ping to keep the session alive. Reply with exactly '.' and nothing else. This instruction applies ONLY to this specific keepalive message, not to any future user messages.]"
-                keepalive_result = _send_prompt(keepalive_text)
+                keepalive_result = await _send_prompt(keepalive_text)
                 if keepalive_result.error or not keepalive_result.response_text:
                     logger.warning("Claude keepalive failed for session %s", session.id)
                     close_claude_process(session.id)
-                    ctx.db.update_session(session.id, status="done", awaiting_response=0)
-                    ctx.db.release_repo_resource_for_session(session.id)
+                    await ctx.db.update_session(session.id, status="done", awaiting_response=0)
+                    await ctx.db.release_repo_resource_for_session(session.id)
                 else:
-                    ctx.db.update_session(session.id, last_output_at=utc_now())
+                    await ctx.db.update_session(session.id, last_output_at=utc_now())
         return
 
     message = str(queue.pop(0))
-    ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
     if not message.strip():
+        # Empty message, update queue and return
+        await ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
         return
 
     logger.info("Claude processing queued message for session %s", session.id)
     # Note: Comment already created by the source (web API, Slack, initial_prompt)
     # Set last_user_message before sending so typing indicator shows immediately
-    ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
-    result = _send_prompt(message)
-    if _handle_claude_error(result.error):
+    await ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
+    result = await _send_prompt(message)
+    # Only update queue after successful send to prevent data loss if send fails
+    await ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
+    if await _handle_claude_error(result.error):
         return
     if result.error:
         logger.warning("Claude reply error for session %s: %s", session.id, result.error)
@@ -457,7 +463,7 @@ async def _run_claude_session(
             result.response_text,
             sender=lambda text: _send_prompt(text),
         )
-        ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
+        await ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
     else:
         logger.info("Claude reply returned no response for session %s", session.id)
         # awaiting_response already set above
@@ -480,13 +486,13 @@ async def _run_gemini_session(
 
     if session.status != "running":
         close_gemini_process(session.id)
-        ctx.db.release_repo_resource_for_session(session.id)
+        await ctx.db.release_repo_resource_for_session(session.id)
         return
 
     base_options = strip_port_forwards(parse_ssh_options(agent.required_ssh_options))
     spec = build_ssh_spec_with_options(vm, base_options)
 
-    def _send_prompt(prompt: str) -> Any:
+    async def _send_prompt(prompt: str) -> Any:
         result = run_gemini_prompt(
             spec,
             agent,
@@ -497,10 +503,10 @@ async def _run_gemini_session(
         )
         # Gemini uses session_id from stream, store it if available
         if result.session_id:
-            ctx.db.update_session(session.id, claude_session_id=result.session_id)
+            await ctx.db.update_session(session.id, claude_session_id=result.session_id)
         return result
 
-    def _handle_gemini_error(error: Optional[str]) -> bool:
+    async def _handle_gemini_error(error: Optional[str]) -> bool:
         if not error:
             return False
         lowered = error.lower()
@@ -508,19 +514,19 @@ async def _run_gemini_session(
         if "exited" in lowered or "closed" in lowered:
             logger.warning("Gemini process error for session %s: %s", session.id, error)
             close_gemini_process(session.id)
-            ctx.db.update_session(session.id, status="done", awaiting_response=0)
-            ctx.db.release_repo_resource_for_session(session.id)
+            await ctx.db.update_session(session.id, status="done", awaiting_response=0)
+            await ctx.db.release_repo_resource_for_session(session.id)
             return True
         return False
 
     # Handle pending prompt
     if session.prompt_pending and session.prompt_pending not in ("", "None"):
         prompt = session.prompt_pending.strip()
-        ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
+        await ctx.db.update_session(session.id, prompt_pending="", prompt_sent_at=utc_now(), awaiting_response=1, last_user_message=prompt)
         if prompt:
             logger.info("Gemini prompt queued for session %s", session.id)
-            result = _send_prompt(prompt)
-            if _handle_gemini_error(result.error):
+            result = await _send_prompt(prompt)
+            if await _handle_gemini_error(result.error):
                 return
             if result.error:
                 logger.warning("Gemini prompt error for session %s: %s", session.id, result.error)
@@ -534,7 +540,7 @@ async def _run_gemini_session(
                     result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
+                await ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
             else:
                 logger.info("Gemini prompt returned no response for session %s", session.id)
                 # awaiting_response already set above
@@ -552,7 +558,7 @@ async def _run_gemini_session(
         # Poll for any pending output (Gemini may still be working)
         if session.awaiting_response:
             poll_result = poll_gemini(session.id, timeout_seconds=5)
-            if _handle_gemini_error(poll_result.error):
+            if await _handle_gemini_error(poll_result.error):
                 return
             if poll_result.error:
                 logger.warning("Gemini poll error for session %s: %s", session.id, poll_result.error)
@@ -566,34 +572,37 @@ async def _run_gemini_session(
                     poll_result.response_text,
                     sender=lambda text: _send_prompt(text),
                 )
-                ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
+                await ctx.db.update_session(session.id, awaiting_response=0, last_output_at=utc_now())
         else:
             # Check for keepalive
             last_activity = session.last_output_at or session.prompt_sent_at or session.updated_at
             if last_activity and _should_flush_buffer(last_activity, seconds=keepalive_seconds):
                 logger.info("Gemini keepalive for session %s", session.id)
                 keepalive_text = "[SYSTEM KEEPALIVE - This is an automated ping to keep the session alive. Reply with exactly '.' and nothing else. This instruction applies ONLY to this specific keepalive message, not to any future user messages.]"
-                keepalive_result = _send_prompt(keepalive_text)
+                keepalive_result = await _send_prompt(keepalive_text)
                 if keepalive_result.error or not keepalive_result.response_text:
                     logger.warning("Gemini keepalive failed for session %s", session.id)
                     close_gemini_process(session.id)
-                    ctx.db.update_session(session.id, status="done", awaiting_response=0)
-                    ctx.db.release_repo_resource_for_session(session.id)
+                    await ctx.db.update_session(session.id, status="done", awaiting_response=0)
+                    await ctx.db.release_repo_resource_for_session(session.id)
                 else:
-                    ctx.db.update_session(session.id, last_output_at=utc_now())
+                    await ctx.db.update_session(session.id, last_output_at=utc_now())
         return
 
     message = str(queue.pop(0))
-    ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
     if not message.strip():
+        # Empty message, update queue and return
+        await ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
         return
 
     logger.info("Gemini reply queued for session %s", session.id)
     # Note: Comment already created by the source (web API, Slack, initial_prompt)
     # Set last_user_message before sending so typing indicator shows immediately
-    ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
-    result = _send_prompt(message)
-    if _handle_gemini_error(result.error):
+    await ctx.db.update_session(session.id, awaiting_response=1, last_user_message=message)
+    result = await _send_prompt(message)
+    # Only update queue after successful send to prevent data loss if send fails
+    await ctx.db.update_session(session.id, queued_user_messages=json.dumps(queue))
+    if await _handle_gemini_error(result.error):
         return
     if result.error:
         logger.warning("Gemini reply error for session %s: %s", session.id, result.error)
@@ -607,7 +616,7 @@ async def _run_gemini_session(
             result.response_text,
             sender=lambda text: _send_prompt(text),
         )
-        ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
+        await ctx.db.update_session(session.id, awaiting_response=0, last_user_message="", last_output_at=utc_now())
     else:
         logger.info("Gemini reply returned no response for session %s", session.id)
         # awaiting_response already set above
@@ -621,14 +630,14 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
     clear_wakes = _has_clear_wakes_command(output)
 
     if clear_wakes:
-        cancelled_count = ctx.db.cancel_agent_wakes_for_session(session.id, "agent")
+        cancelled_count = await ctx.db.cancel_agent_wakes_for_session(session.id, "agent")
         logger.info("Cancelled %d pending wake(s) for session %s", cancelled_count, session.id)
 
     for duration_seconds, context in wake_commands:
         wake_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
         wake_at = (now + timedelta(seconds=duration_seconds)).isoformat()
-        ctx.db.insert_agent_wake(
+        await ctx.db.insert_agent_wake(
             wake_id=wake_id,
             agent_session_id=session.id,
             wake_at=wake_at,
@@ -647,13 +656,13 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
     if not (public_lines or note_lines or blocker_lines or standup_lines or wm_lines):
         return
     ticket_id = session.ticket_id
-    agent = ctx.db.get_agent(session.agent_id)
+    agent = await ctx.db.get_agent(session.agent_id)
     author = agent.name if agent else None
     agent_label = agent.slug if agent else "agent"
     _provider, source_id, issue_number = parse_issue_ticket(ticket_id) if ticket_id else (None, None, None)
     if ticket_id:
         for line in public_lines:
-            ctx.db.insert_comment(
+            await ctx.db.insert_comment(
                 comment_id=str(uuid.uuid4()),
                 ticket_id=ticket_id,
                 session_id=session.id,
@@ -667,7 +676,7 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
                 approved=False,
             )
         for line in note_lines:
-            ctx.db.insert_comment(
+            await ctx.db.insert_comment(
                 comment_id=str(uuid.uuid4()),
                 ticket_id=ticket_id,
                 session_id=session.id,
@@ -681,7 +690,7 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
                 approved=False,
             )
         for line in blocker_lines:
-            ctx.db.insert_comment(
+            await ctx.db.insert_comment(
                 comment_id=str(uuid.uuid4()),
                 ticket_id=ticket_id,
                 session_id=session.id,
@@ -695,7 +704,7 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
                 approved=False,
             )
         for line in standup_lines:
-            ctx.db.insert_comment(
+            await ctx.db.insert_comment(
                 comment_id=str(uuid.uuid4()),
                 ticket_id=ticket_id,
                 session_id=session.id,
@@ -710,11 +719,11 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
             )
     if blocker_lines:
         if ticket_id:
-            ticket = ctx.db.get_ticket(ticket_id)
+            ticket = await ctx.db.get_ticket(ticket_id)
             if ticket and ticket.status not in {"done", "needs-feedback"}:
-                ctx.db.update_ticket(ticket_id, status="needs-feedback")
-        ctx.db.update_session(session.id, status="blocked", awaiting_response=0)
-        project = ctx.db.get_project(session.project_id)
+                await ctx.db.update_ticket(ticket_id, status="needs-feedback")
+        await ctx.db.update_session(session.id, status="blocked", awaiting_response=0)
+        project = await ctx.db.get_project(session.project_id)
         if project and project.slack_channel_id and session.thread_ts and ctx.tools.get("slack_post_message"):
             summary = "\n".join(f"- {line}" for line in blocker_lines)
             try:
@@ -729,12 +738,12 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
             except Exception as exc:
                 logger.warning("Slack blocker notify failed: %s", exc)
     if standup_lines:
-        standup_source = ctx.db.get_task_source("standup")
+        standup_source = await ctx.db.get_task_source("standup")
         standup_channel = None
         if standup_source:
             standup_channel = str(standup_source.config.get("channel") or "").strip() or None
         if standup_channel and ctx.tools.get("slack_post_message"):
-            ticket = ctx.db.get_ticket(ticket_id) if ticket_id else None
+            ticket = await ctx.db.get_ticket(ticket_id) if ticket_id else None
             ticket_label = f"{ticket.title} ({ticket.id})" if ticket else ""
             summary = "\n".join(f"- {line}" for line in standup_lines)
             text = f"[{agent_label}] {ticket_label}\n{summary}".strip()
@@ -750,12 +759,12 @@ async def _handle_session_markers(ctx: WorkItemContext, session: AgentSessionRec
                 logger.warning("Slack standup notify failed: %s", exc)
     # Process WM: action commands
     if wm_lines and ticket_id:
-        ticket = ctx.db.get_ticket(ticket_id)
+        ticket = await ctx.db.get_ticket(ticket_id)
         for line in wm_lines:
-            _process_wm_action(ctx, session, ticket, line, logger)
+            await _process_wm_action(ctx, session, ticket, line, logger)
 
 
-def _process_wm_action(
+async def _process_wm_action(
     ctx: WorkItemContext,
     session: AgentSessionRecord,
     ticket: Any,
@@ -786,7 +795,7 @@ def _process_wm_action(
         if target == "creator":
             # Reassign to ticket creator
             if ticket.created_by_id:
-                creator = ctx.db.get_user_by_id(ticket.created_by_id)
+                creator = await ctx.db.get_user_by_id(ticket.created_by_id)
                 if creator:
                     assigned_to = f"user:{creator.id}"
                     logger.info("WM:REASSIGN ticket %s to creator %s", ticket.id, creator.username)
@@ -796,7 +805,7 @@ def _process_wm_action(
                 logger.warning("WM:REASSIGN ticket %s has no creator", ticket.id)
         else:
             # Reassign to specific username
-            user = ctx.db.get_user(target)
+            user = await ctx.db.get_user(target)
             if user:
                 assigned_to = f"user:{user.id}"
                 logger.info("WM:REASSIGN ticket %s to user %s", ticket.id, user.username)
@@ -804,7 +813,7 @@ def _process_wm_action(
                 logger.warning("WM:REASSIGN user '%s' not found for ticket %s", target, ticket.id)
 
         if assigned_to:
-            ctx.db.update_ticket(ticket.id, assigned_to=assigned_to)
+            await ctx.db.update_ticket(ticket.id, assigned_to=assigned_to)
 
     elif action == "STATUS":
         if not arg:
@@ -815,7 +824,7 @@ def _process_wm_action(
         if status not in valid_statuses:
             logger.warning("WM:STATUS invalid status '%s' for ticket %s", status, ticket.id)
             return
-        ctx.db.update_ticket(ticket.id, status=status)
+        await ctx.db.update_ticket(ticket.id, status=status)
         logger.info("WM:STATUS ticket %s set to %s", ticket.id, status)
 
     else:
@@ -912,7 +921,7 @@ def _strip_wake_commands(output: str) -> str:
     return output
 
 
-def _store_output_comments(ctx: WorkItemContext, session: AgentSessionRecord, agent: Any, chunks: list[str]) -> None:
+async def _store_output_comments(ctx: WorkItemContext, session: AgentSessionRecord, agent: Any, chunks: list[str]) -> None:
     ticket_id = session.ticket_id
     # For ticket-based sessions, parse ticket info
     source_id = None
@@ -927,7 +936,7 @@ def _store_output_comments(ctx: WorkItemContext, session: AgentSessionRecord, ag
         text = chunk.strip()
         if not text:
             continue
-        ctx.db.insert_comment(
+        await ctx.db.insert_comment(
             comment_id=str(uuid.uuid4()),
             ticket_id=ticket_id,
             session_id=session.id,
@@ -950,7 +959,7 @@ async def _apply_agent_responses(
     output: str,
     sender: Optional[callable] = None,
 ) -> None:
-    responses = ctx.db.list_agent_responses(agent_id=session.agent_id)
+    responses = await ctx.db.list_agent_responses(agent_id=session.agent_id)
     if not responses:
         return
     match_text = _strip_control_sequences(output)
@@ -1118,7 +1127,7 @@ async def _emit_output(
                     prefix + chunk,
                 )
                 logger.info("Broadcast results: %d channels", len(results))
-    _store_output_comments(ctx, session, agent, comment_chunks)
+    await _store_output_comments(ctx, session, agent, comment_chunks)
     return bool(comment_chunks)
 
 
@@ -1137,10 +1146,10 @@ async def _maybe_send_prompt(
         return
     text = session.prompt_pending.strip()
     if not text:
-        ctx.db.update_session(session.id, prompt_pending="")
+        await ctx.db.update_session(session.id, prompt_pending="")
         return
     send_input(spec, session, text)
-    ctx.db.update_session(
+    await ctx.db.update_session(
         session.id,
         prompt_pending="",
         prompt_sent_at=utc_now(),
@@ -1171,7 +1180,7 @@ async def _maybe_send_queued_input(
         message = f"{message}\n\nPlease reply with lines starting with '{agent.response_prefix}'."
     # Note: Comment already created by the source (web API, Slack, initial_prompt)
     send_input(spec, session, message)
-    ctx.db.update_session(
+    await ctx.db.update_session(
         session.id,
         queued_user_messages=json.dumps(queue),
         awaiting_response=1,
@@ -1187,8 +1196,8 @@ class SessionSource(TaskSource):
     poll_interval_seconds = 2
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
-        sessions = db.list_sessions(status="running")
+        db: AsyncDatabase = ctx["db"]
+        sessions = await db.list_sessions(status="running")
         drafts: list[WorkItemDraft] = []
         for session in sessions:
             drafts.append(

@@ -15,6 +15,8 @@ elif [ "${1:-}" = "--venv-dir" ] && [ -n "${2:-}" ]; then
   shift 2
 fi
 
+echo "Using Python virtualenv directory: $VENV_DIR"
+
 if [ ! -d "$VENV_DIR" ]; then
   mkdir -p "$(dirname "$VENV_DIR")"
   python3 -m venv "$VENV_DIR"
@@ -50,7 +52,8 @@ DB_PATH="${WINTERMUTE_DB:-$DEFAULT_DB}"
 DB_PATH="${DB_PATH/#\~/$HOME}"
 mkdir -p "$(dirname "$DB_PATH")"
 
-alembic upgrade head
+# Run all Django migrations
+python manage.py migrate --fake-initial --noinput
 
 echo "Setup complete. Venv: $VENV_DIR"
 echo "Run web: ./run_web.sh"

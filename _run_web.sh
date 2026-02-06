@@ -32,6 +32,11 @@ set -a
 source .env
 set +a
 
+# Set WINTERMUTE_DB if not already set
+if [ -z "${WINTERMUTE_DB:-}" ]; then
+  export WINTERMUTE_DB="${SCRIPT_DIR}/wintermute.db"
+fi
+
 PID_FILE="${WINTERMUTE_WEB_PID_FILE:-.runtime/web.pid}"
 mkdir -p "$(dirname "$PID_FILE")"
 echo "$$" > "$PID_FILE"
@@ -42,19 +47,7 @@ date -u +"%Y-%m-%dT%H:%M:%SZ" > "$STARTED_FILE"
 LOG_DIR="${WINTERMUTE_LOG_DIR:-.runtime/logs}"
 mkdir -p "$LOG_DIR"
 export WINTERMUTE_WEB_LOG_FILE="${WINTERMUTE_WEB_LOG_FILE:-$LOG_DIR/web.log}"
-LOG_CONFIG_TEMPLATE="uvicorn_log_config.ini"
-LOG_CONFIG_PATH="$LOG_DIR/uvicorn_log_config.ini"
-sed "s|__WINTERMUTE_WEB_LOG_FILE__|$WINTERMUTE_WEB_LOG_FILE|g" "$LOG_CONFIG_TEMPLATE" > "$LOG_CONFIG_PATH"
 
-RELOAD_FLAG=()
-if [ "${WINTERMUTE_WEB_RELOAD:-}" = "1" ]; then
-  RELOAD_FLAG=(--reload)
-fi
-
-exec python -m uvicorn wintermute.web.app:create_app \
-  --factory "${RELOAD_FLAG[@]}" \
-  --access-log \
-  --log-level info \
-  --log-config "$LOG_CONFIG_PATH" \
-  --host "${WINTERMUTE_WEB_HOST:-127.0.0.1}" \
-  --port "${WINTERMUTE_WEB_PORT:-8000}"
+# Use daphne for ASGI support (HTTP + WebSockets)
+# hupper provides auto-reload on code changes
+exec hupper -m daphne -b "${WINTERMUTE_WEB_HOST:-0.0.0.0}" -p "${WINTERMUTE_WEB_PORT:-8000}" config.asgi:application

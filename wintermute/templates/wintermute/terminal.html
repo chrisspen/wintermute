@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ agent.name }} - Terminal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        html, body {
+            height: 100%;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: #252526;
+            border-bottom: 1px solid #3c3c3c;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .header h1 {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: #2d2d2d;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4caf50;
+        }
+        .status-dot.disconnected {
+            background: #f44336;
+        }
+        .status-dot.connecting {
+            background: #ff9800;
+            animation: pulse 1s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .terminal-container {
+            flex: 1;
+            padding: 0;
+            overflow: hidden;
+        }
+        #terminal {
+            height: 100%;
+            width: 100%;
+        }
+        .header-right {
+            display: flex;
+            gap: 8px;
+        }
+        .btn {
+            padding: 6px 12px;
+            font-size: 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: #0e639c;
+            color: white;
+            transition: background 0.2s;
+        }
+        .btn:hover {
+            background: #1177bb;
+        }
+        .btn:disabled {
+            background: #3c3c3c;
+            cursor: not-allowed;
+        }
+        .btn-danger {
+            background: #c53030;
+        }
+        .btn-danger:hover {
+            background: #e53e3e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-left">
+                <h1>{{ agent.name }}</h1>
+                <span class="status">
+                    <span class="status-dot connecting" id="status-dot"></span>
+                    <span id="status-text">Connecting...</span>
+                </span>
+            </div>
+            <div class="header-right">
+                <button class="btn" id="reconnect-btn" disabled>Reconnect</button>
+                <button class="btn btn-danger" onclick="window.close()">Close</button>
+            </div>
+        </div>
+        <div class="terminal-container">
+            <div id="terminal"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+    <script>
+        const sessionId = "{{ session_id }}";
+        let ws = null;
+        let term = null;
+        let fitAddon = null;
+
+        function updateStatus(status) {
+            const dot = document.getElementById('status-dot');
+            const text = document.getElementById('status-text');
+            const reconnectBtn = document.getElementById('reconnect-btn');
+
+            dot.className = 'status-dot';
+            if (status === 'connected') {
+                dot.classList.add('connected');
+                text.textContent = 'Connected';
+                reconnectBtn.disabled = true;
+            } else if (status === 'connecting') {
+                dot.classList.add('connecting');
+                text.textContent = 'Connecting...';
+                reconnectBtn.disabled = true;
+            } else {
+                dot.classList.add('disconnected');
+                text.textContent = 'Disconnected';
+                reconnectBtn.disabled = false;
+            }
+        }
+
+        function connect() {
+            updateStatus('connecting');
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/terminal/${sessionId}/`;
+
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = function() {
+                updateStatus('connected');
+                term.focus();
+
+                // Send initial resize
+                const dimensions = fitAddon.proposeDimensions();
+                if (dimensions) {
+                    ws.send(JSON.stringify({
+                        type: 'resize',
+                        cols: dimensions.cols,
+                        rows: dimensions.rows
+                    }));
+                }
+            };
+
+            ws.onmessage = function(event) {
+                if (event.data instanceof ArrayBuffer) {
+                    // Binary data from terminal
+                    const decoder = new TextDecoder();
+                    term.write(decoder.decode(event.data));
+                } else {
+                    // JSON message
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === 'error') {
+                            term.writeln('\r\n\x1b[31mError: ' + msg.message + '\x1b[0m');
+                        } else if (msg.type === 'disconnect') {
+                            term.writeln('\r\n\x1b[33m' + msg.message + '\x1b[0m');
+                            updateStatus('disconnected');
+                        }
+                    } catch (e) {
+                        // Plain text
+                        term.write(event.data);
+                    }
+                }
+            };
+
+            ws.onclose = function() {
+                updateStatus('disconnected');
+                term.writeln('\r\n\x1b[33mConnection closed\x1b[0m');
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateStatus('disconnected');
+            };
+        }
+
+        function initTerminal() {
+            term = new Terminal({
+                cursorBlink: true,
+                fontSize: 14,
+                fontFamily: '"Cascadia Code", "Fira Code", Menlo, Monaco, monospace',
+                theme: {
+                    background: '#1e1e1e',
+                    foreground: '#d4d4d4',
+                    cursor: '#d4d4d4',
+                    cursorAccent: '#1e1e1e',
+                    selection: 'rgba(255, 255, 255, 0.3)',
+                    black: '#000000',
+                    red: '#cd3131',
+                    green: '#0dbc79',
+                    yellow: '#e5e510',
+                    blue: '#2472c8',
+                    magenta: '#bc3fbc',
+                    cyan: '#11a8cd',
+                    white: '#e5e5e5',
+                    brightBlack: '#666666',
+                    brightRed: '#f14c4c',
+                    brightGreen: '#23d18b',
+                    brightYellow: '#f5f543',
+                    brightBlue: '#3b8eea',
+                    brightMagenta: '#d670d6',
+                    brightCyan: '#29b8db',
+                    brightWhite: '#ffffff'
+                }
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+
+            const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+            term.loadAddon(webLinksAddon);
+
+            term.open(document.getElementById('terminal'));
+            fitAddon.fit();
+
+            // Handle terminal input
+            term.onData(function(data) {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'input',
+                        data: data
+                    }));
+                }
+            });
+
+            // Handle window resize
+            window.addEventListener('resize', function() {
+                fitAddon.fit();
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const dimensions = fitAddon.proposeDimensions();
+                    if (dimensions) {
+                        ws.send(JSON.stringify({
+                            type: 'resize',
+                            cols: dimensions.cols,
+                            rows: dimensions.rows
+                        }));
+                    }
+                }
+            });
+
+            // Reconnect button
+            document.getElementById('reconnect-btn').addEventListener('click', function() {
+                if (ws) {
+                    ws.close();
+                }
+                term.clear();
+                connect();
+            });
+
+            // Initial connection
+            connect();
+        }
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', initTerminal);
+    </script>
+</body>
+</html>

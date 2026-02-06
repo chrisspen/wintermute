@@ -28,9 +28,7 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
         """SlackAdapter should return success with message ID on success."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                return_value={"ok": True, "ts": "1234567890.123456", "channel": "C123"}
-            )
+            mock_client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "1234567890.123456", "channel": "C123"})
             mock_client_cls.return_value = mock_client
 
             adapter = SlackAdapter(bot_token="xoxb-test-token")
@@ -48,19 +46,15 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
         """SlackAdapter should pass thread_ts to API."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                return_value={
-                    "ok": True,
-                    "ts": "1234567890.123456",
-                    "thread_ts": "1234567890.000000",
-                }
-            )
+            mock_client.chat_postMessage = AsyncMock(return_value={
+                "ok": True,
+                "ts": "1234567890.123456",
+                "thread_ts": "1234567890.000000",
+            })
             mock_client_cls.return_value = mock_client
 
             adapter = SlackAdapter(bot_token="xoxb-test-token")
-            result = await adapter.send_message(
-                "C123", "Reply", thread_ts="1234567890.000000"
-            )
+            result = await adapter.send_message("C123", "Reply", thread_ts="1234567890.000000")
 
             self.assertTrue(result.success)
             self.assertEqual(result.thread_id, "1234567890.000000")
@@ -74,9 +68,7 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
         """SlackAdapter should return error on API failure."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                return_value={"ok": False, "error": "channel_not_found"}
-            )
+            mock_client.chat_postMessage = AsyncMock(return_value={"ok": False, "error": "channel_not_found"})
             mock_client_cls.return_value = mock_client
 
             adapter = SlackAdapter(bot_token="xoxb-test-token")
@@ -89,9 +81,7 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
         """SlackAdapter should handle exceptions gracefully."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                side_effect=Exception("Network error")
-            )
+            mock_client.chat_postMessage = AsyncMock(side_effect=Exception("Network error"))
             mock_client_cls.return_value = mock_client
 
             adapter = SlackAdapter(bot_token="xoxb-test-token")
@@ -104,15 +94,11 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
         """SlackAdapter.send_thread_reply should delegate to send_message."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                return_value={"ok": True, "ts": "1234567890.123456"}
-            )
+            mock_client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "1234567890.123456"})
             mock_client_cls.return_value = mock_client
 
             adapter = SlackAdapter(bot_token="xoxb-test-token")
-            result = await adapter.send_thread_reply(
-                "C123", "1234567890.000000", "Reply text"
-            )
+            result = await adapter.send_thread_reply("C123", "1234567890.000000", "Reply text")
 
             self.assertTrue(result.success)
             mock_client.chat_postMessage.assert_called_once_with(
@@ -160,23 +146,19 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
     """Tests for ChatDispatcher."""
 
     async def asyncSetUp(self) -> None:
+        from asgiref.sync import sync_to_async
+        from wintermute.models import Agent
+
         self.temp_db = tempfile.NamedTemporaryFile(delete=False)
         self.db = Database(self.temp_db.name)
         self.db.initialize()
-        # Create an agent for channel tests
-        self.db.insert_agent(
-            agent_id="agent-1",
+        # Create an agent for channel tests via Django ORM (wrapped for async)
+        self.agent = await sync_to_async(Agent.objects.create)(
+            id="agent-1",
             name="Test Agent",
             slug="test-agent",
             command="echo test",
             session_mode="tmux",
-            vm_target_id=None,
-            required_ssh_options=None,
-            env_vars=None,
-            mcp_config=None,
-            trust_level=None,
-            input_echo_prefix=None,
-            response_prefix=None,
         )
 
     async def asyncTearDown(self) -> None:
@@ -257,15 +239,16 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.success)
         # Either "adapter" or "token" depending on error path
-        self.assertTrue(
-            "adapter" in result.error.lower() or "token" in result.error.lower()
-        )
+        self.assertTrue("adapter" in result.error.lower() or "token" in result.error.lower())
 
     async def test_send_to_channel_success(self) -> None:
         """Dispatcher should send message via adapter when configured."""
-        # Add Slack credential
-        self.db.insert_credential(
-            cred_id="cred-1",
+        from asgiref.sync import sync_to_async
+        from wintermute.models import Credential
+
+        # Add Slack credential via Django ORM (wrapped for async)
+        await sync_to_async(Credential.objects.create)(
+            id="cred-1",
             provider="slack",
             name="bot_token",
             reference="xoxb-test-token",
@@ -284,9 +267,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                return_value={"ok": True, "ts": "1234567890.123456"}
-            )
+            mock_client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "1234567890.123456"})
             mock_client_cls.return_value = mock_client
 
             dispatcher = ChatDispatcher(self.db)
@@ -297,35 +278,38 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_broadcast_to_agent_channels(self) -> None:
         """Dispatcher should broadcast to all enabled agent channels."""
-        # Add Slack credential
-        self.db.insert_credential(
-            cred_id="cred-1",
+        from asgiref.sync import sync_to_async
+        from wintermute.models import Channel, Credential
+
+        # Add Slack credential via Django ORM (wrapped for async)
+        await sync_to_async(Credential.objects.create)(
+            id="cred-1",
             provider="slack",
             name="bot_token",
             reference="xoxb-test-token",
         )
 
-        # Add channels
-        self.db.insert_channel(
-            channel_id="ch-1",
-            agent_id="agent-1",
-            channel_type="slack",
+        # Add channels via Django ORM (wrapped for async)
+        await sync_to_async(Channel.objects.create)(
+            id="ch-1",
+            agent=self.agent,
+            type="slack",
             name="channel-1",
             external_channel_id="C123",
             enabled=True,
         )
-        self.db.insert_channel(
-            channel_id="ch-2",
-            agent_id="agent-1",
-            channel_type="slack",
+        await sync_to_async(Channel.objects.create)(
+            id="ch-2",
+            agent=self.agent,
+            type="slack",
             name="channel-2",
             external_channel_id="C456",
             enabled=True,
         )
-        self.db.insert_channel(
-            channel_id="ch-3",
-            agent_id="agent-1",
-            channel_type="slack",
+        await sync_to_async(Channel.objects.create)(
+            id="ch-3",
+            agent=self.agent,
+            type="slack",
             name="disabled-channel",
             external_channel_id="C789",
             enabled=False,
@@ -333,15 +317,11 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                return_value={"ok": True, "ts": "1234567890.123456"}
-            )
+            mock_client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "1234567890.123456"})
             mock_client_cls.return_value = mock_client
 
             dispatcher = ChatDispatcher(self.db)
-            results = await dispatcher.broadcast_to_agent_channels(
-                "agent-1", "Hello, world!"
-            )
+            results = await dispatcher.broadcast_to_agent_channels("agent-1", "Hello, world!")
 
             # Should only send to enabled channels (2)
             self.assertEqual(len(results), 2)
@@ -350,27 +330,30 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_broadcast_with_platform_filter(self) -> None:
         """Dispatcher should filter by platform when specified."""
-        # Add credentials
-        self.db.insert_credential(
-            cred_id="cred-1",
+        from asgiref.sync import sync_to_async
+        from wintermute.models import Channel, Credential
+
+        # Add credentials via Django ORM (wrapped for async)
+        await sync_to_async(Credential.objects.create)(
+            id="cred-1",
             provider="slack",
             name="bot_token",
             reference="xoxb-test-token",
         )
 
-        # Add mixed platform channels
-        self.db.insert_channel(
-            channel_id="ch-1",
-            agent_id="agent-1",
-            channel_type="slack",
+        # Add mixed platform channels via Django ORM (wrapped for async)
+        await sync_to_async(Channel.objects.create)(
+            id="ch-1",
+            agent=self.agent,
+            type="slack",
             name="slack-channel",
             external_channel_id="C123",
             enabled=True,
         )
-        self.db.insert_channel(
-            channel_id="ch-2",
-            agent_id="agent-1",
-            channel_type="telegram",
+        await sync_to_async(Channel.objects.create)(
+            id="ch-2",
+            agent=self.agent,
+            type="telegram",
             name="telegram-channel",
             external_channel_id="123456",
             enabled=True,
@@ -378,19 +361,55 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
             mock_client = MagicMock()
-            mock_client.chat_postMessage = AsyncMock(
-                return_value={"ok": True, "ts": "1234567890.123456"}
-            )
+            mock_client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "1234567890.123456"})
             mock_client_cls.return_value = mock_client
 
             dispatcher = ChatDispatcher(self.db)
-            results = await dispatcher.broadcast_to_agent_channels(
-                "agent-1", "Hello!", platform_filter="slack"
-            )
+            results = await dispatcher.broadcast_to_agent_channels("agent-1", "Hello!", platform_filter="slack")
 
             # Should only send to Slack channels (1)
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0][0].type, "slack")
+
+    async def test_broadcast_with_async_database(self) -> None:
+        """Dispatcher should work with AsyncDatabase (list_channels returns coroutine)."""
+        from asgiref.sync import sync_to_async
+        from wintermute.db import AsyncDatabase
+        from wintermute.models import Channel, Credential
+
+        # Create AsyncDatabase wrapper
+        async_db = AsyncDatabase(self.temp_db.name)
+
+        # Add Slack credential via Django ORM (wrapped for async)
+        await sync_to_async(Credential.objects.create)(
+            id="cred-async",
+            provider="slack",
+            name="bot_token",
+            reference="xoxb-test-token",
+        )
+
+        # Add channel via Django ORM (wrapped for async)
+        await sync_to_async(Channel.objects.create)(
+            id="ch-async",
+            agent=self.agent,
+            type="slack",
+            name="async-channel",
+            external_channel_id="C123",
+            enabled=True,
+        )
+
+        with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.chat_postMessage = AsyncMock(return_value={"ok": True, "ts": "1234567890.123456"})
+            mock_client_cls.return_value = mock_client
+
+            # Use AsyncDatabase with dispatcher
+            dispatcher = ChatDispatcher(async_db)
+            results = await dispatcher.broadcast_to_agent_channels("agent-1", "Hello from async!")
+
+            # Should handle coroutine result from list_channels
+            self.assertEqual(len(results), 1)
+            self.assertTrue(results[0][1].success)
 
 
 class MessageResultTests(unittest.TestCase):

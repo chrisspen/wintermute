@@ -10,10 +10,10 @@ import logging
 
 try:
     from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
+except ImportError: # pragma: no cover
     ZoneInfo = None
 
-from wintermute.db import Database, utc_now
+from wintermute.db import AsyncDatabase, utc_now
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 DEFAULT_STANDUP_TIME = "09:30"
@@ -57,12 +57,12 @@ class StandupWorkItem(WorkItem):
 
     async def resume(self, ctx: WorkItemContext) -> None:
         logger = logging.getLogger(__name__)
-        source = ctx.db.get_task_source(self.source_id)
+        source = await ctx.db.get_task_source(self.source_id)
         config = source.config if source else {}
         standup_channel = str(config.get("channel") or "").strip() or None
         last_run_at = str(config.get("last_run_at") or "").strip() or None
         now_iso = utc_now()
-        sessions = ctx.db.list_sessions(status="running")
+        sessions = await ctx.db.list_sessions(status="running")
         if standup_channel and ctx.tools.get("slack_post_message"):
             summary = _standup_summary_text(len(sessions), last_run_at, now_iso)
             try:
@@ -76,15 +76,15 @@ class StandupWorkItem(WorkItem):
             except Exception as exc:
                 logger.warning("Standup Slack intro failed: %s", exc)
         for session in sessions:
-            project = ctx.db.get_project(session.project_id)
-            ticket = ctx.db.get_ticket(session.ticket_id) if session.ticket_id else None
+            project = await ctx.db.get_project(session.project_id)
+            ticket = await ctx.db.get_ticket(session.ticket_id) if session.ticket_id else None
             prompt = _standup_prompt(session, project, ticket, last_run_at, now_iso)
-            if _queue_session_prompt(ctx.db, session, prompt):
+            if await _queue_session_prompt(ctx.db, session, prompt):
                 logger.info("Queued standup prompt for session %s", session.id)
         if source:
             new_config = dict(config or {})
             new_config["last_run_at"] = now_iso
-            ctx.db.upsert_task_source(
+            await ctx.db.upsert_task_source(
                 source.id,
                 source.enabled,
                 source.base_priority,
@@ -108,8 +108,8 @@ class StandupSource(TaskSource):
         return datetime.now(tz)
 
     async def poll(self, ctx: dict[str, Any]) -> list[WorkItemDraft]:
-        db: Database = ctx["db"]
-        source = db.get_task_source(self.id)
+        db: AsyncDatabase = ctx["db"]
+        source = await db.get_task_source(self.id)
         if not source or not source.enabled:
             return []
         config = source.config or {}
@@ -147,7 +147,7 @@ class StandupSource(TaskSource):
         )
 
 
-def _queue_session_prompt(db: Database, session: Any, prompt: str) -> bool:
+async def _queue_session_prompt(db: AsyncDatabase, session: Any, prompt: str) -> bool:
     raw_queue = session.queued_user_messages or "[]"
     try:
         queue = json.loads(raw_queue)
@@ -158,7 +158,7 @@ def _queue_session_prompt(db: Database, session: Any, prompt: str) -> bool:
     if prompt in queue:
         return False
     queue.append(prompt)
-    db.update_session(session.id, queued_user_messages=json.dumps(queue))
+    await db.update_session(session.id, queued_user_messages=json.dumps(queue))
     return True
 
 
@@ -190,12 +190,10 @@ def _standup_prompt(
             lines.append(f"Source: {ticket.source_url}")
     if session.repo_path:
         lines.append(f"Repo path: {session.repo_path}")
-    lines.extend(
-        [
-            "Please reply with lines starting with 'STANDUP:' that cover:",
-            "- what you completed in this window",
-            "- what you plan to do next",
-            "- blockers or questions (use BLOCKER: if you are stuck)",
-        ]
-    )
+    lines.extend([
+        "Please reply with lines starting with 'STANDUP:' that cover:",
+        "- what you completed in this window",
+        "- what you plan to do next",
+        "- blockers or questions (use BLOCKER: if you are stuck)",
+    ])
     return "\n".join(lines)
