@@ -115,6 +115,11 @@ class Ticket(models.Model):
         verbose_name = "Ticket"
         verbose_name_plural = "Tickets"
 
+    @property
+    def name(self):
+        """Return ticket name in PROJECT-COUNT format."""
+        return f"{self.project.symbol}-{self.count}"
+
     def __str__(self):
         return f"{self.project.symbol}-{self.count}: {self.title}"
 

@@ -10,6 +10,8 @@ import inspect
 from typing import Any, Optional, Union
 import logging
 
+from asgiref.sync import sync_to_async
+
 from wintermute.chat.adapters import (
     ChatPlatformAdapter,
     DiscordAdapter,
@@ -45,8 +47,8 @@ class ChatDispatcher:
         self._adapters: dict[str, ChatPlatformAdapter] = {}
         self._logger = logging.getLogger(__name__)
 
-    def _get_adapter(self, platform_type: str) -> Optional[ChatPlatformAdapter]:
-        """Get or create an adapter for the given platform type.
+    async def _get_adapter_async(self, platform_type: str) -> Optional[ChatPlatformAdapter]:
+        """Get or create an adapter for the given platform type (async version).
 
         Args:
             platform_type: Platform identifier (e.g., 'slack').
@@ -64,7 +66,7 @@ class ChatDispatcher:
             return None
 
         # Get platform-specific credentials
-        token = self._get_platform_token(platform_type)
+        token = await self._get_platform_token_async(platform_type)
         if not token:
             self._logger.warning(
                 "No token found for platform: %s (provider=%s, name=bot_token)",
@@ -82,8 +84,8 @@ class ChatDispatcher:
             self._logger.error("Failed to create %s adapter: %s", platform_type, exc)
             return None
 
-    def _get_platform_token(self, platform_type: str) -> Optional[str]:
-        """Get the bot token for a platform.
+    async def _get_platform_token_async(self, platform_type: str) -> Optional[str]:
+        """Get the bot token for a platform (async version).
 
         Args:
             platform_type: Platform identifier.
@@ -99,7 +101,13 @@ class ChatDispatcher:
         }
         token_name = token_names.get(platform_type, "bot_token")
 
-        cred = self._db.get_credential_by_name(platform_type, token_name)
+        # Support both sync Database and AsyncDatabase
+        if hasattr(self._db, '_sync_db'):
+            # AsyncDatabase
+            cred = await self._db.get_credential_by_name(platform_type, token_name)
+        else:
+            # Sync Database - wrap with sync_to_async
+            cred = await sync_to_async(self._db.get_credential_by_name)(platform_type, token_name)
         return cred.reference if cred else None
 
     async def send_to_channel(
@@ -125,7 +133,7 @@ class ChatDispatcher:
         if not channel.external_channel_id:
             return MessageResult(success=False, error="No external channel ID")
 
-        adapter = self._get_adapter(channel.type)
+        adapter = await self._get_adapter_async(channel.type)
         if not adapter:
             return MessageResult(
                 success=False,
@@ -155,12 +163,14 @@ class ChatDispatcher:
         Returns:
             List of (channel, result) tuples.
         """
-        channels_result = self._db.list_channels(agent_id=agent_id)
         # Support both sync Database and AsyncDatabase
-        if inspect.iscoroutine(channels_result):
-            channels = await channels_result
+        # AsyncDatabase has _sync_db attribute, sync Database does not
+        if hasattr(self._db, '_sync_db'):
+            # AsyncDatabase - call directly (returns coroutine)
+            channels = await self._db.list_channels(agent_id=agent_id)
         else:
-            channels = channels_result
+            # Sync Database - wrap with sync_to_async
+            channels = await sync_to_async(self._db.list_channels)(agent_id=agent_id)
         self._logger.info("Broadcasting to %d channels for agent %s", len(channels), agent_id)
         results: list[tuple[ChannelRecord, MessageResult]] = []
 

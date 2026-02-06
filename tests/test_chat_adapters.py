@@ -162,6 +162,13 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def asyncTearDown(self) -> None:
+        from asgiref.sync import sync_to_async
+        from wintermute.models import Agent, Channel, Credential
+
+        # Clean up test data
+        await sync_to_async(Channel.objects.all().delete)()
+        await sync_to_async(Credential.objects.all().delete)()
+        await sync_to_async(Agent.objects.all().delete)()
         self.temp_db.close()
 
     async def test_send_to_channel_disabled_channel(self) -> None:
@@ -292,7 +299,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
         # Add channels via Django ORM (wrapped for async)
         await sync_to_async(Channel.objects.create)(
             id="ch-1",
-            agent=self.agent,
+            agent_id=self.agent.id,
             type="slack",
             name="channel-1",
             external_channel_id="C123",
@@ -300,7 +307,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
         )
         await sync_to_async(Channel.objects.create)(
             id="ch-2",
-            agent=self.agent,
+            agent_id=self.agent.id,
             type="slack",
             name="channel-2",
             external_channel_id="C456",
@@ -308,7 +315,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
         )
         await sync_to_async(Channel.objects.create)(
             id="ch-3",
-            agent=self.agent,
+            agent_id=self.agent.id,
             type="slack",
             name="disabled-channel",
             external_channel_id="C789",
@@ -344,7 +351,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
         # Add mixed platform channels via Django ORM (wrapped for async)
         await sync_to_async(Channel.objects.create)(
             id="ch-1",
-            agent=self.agent,
+            agent_id=self.agent.id,
             type="slack",
             name="slack-channel",
             external_channel_id="C123",
@@ -352,7 +359,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
         )
         await sync_to_async(Channel.objects.create)(
             id="ch-2",
-            agent=self.agent,
+            agent_id=self.agent.id,
             type="telegram",
             name="telegram-channel",
             external_channel_id="123456",
@@ -391,7 +398,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
         # Add channel via Django ORM (wrapped for async)
         await sync_to_async(Channel.objects.create)(
             id="ch-async",
-            agent=self.agent,
+            agent_id=self.agent.id,
             type="slack",
             name="async-channel",
             external_channel_id="C123",

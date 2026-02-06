@@ -81,6 +81,76 @@ VMTargetRecord = VMTarget
 WorkItemRecord = WorkItem
 WorkItemRunRecord = WorkItemRun
 
+
+class ProjectAsIssueSource:
+    """Wrapper that adapts a Project to the IssueSource interface expected by sources."""
+
+    def __init__(self, project: Project):
+        self._project = project
+
+    @property
+    def id(self) -> str:
+        return self._project.id
+
+    @property
+    def project_id(self) -> str:
+        return self._project.id
+
+    @property
+    def enabled(self) -> int:
+        return self._project.source_enabled
+
+    @property
+    def token_id(self) -> Optional[str]:
+        return self._project.source_token_id
+
+    @property
+    def owner(self) -> str:
+        """Extract owner from source_repo (format: 'owner/repo')."""
+        source_repo = self._project.source_repo or ""
+        if "/" in source_repo:
+            return source_repo.split("/", 1)[0]
+        return ""
+
+    @property
+    def repo(self) -> str:
+        """Extract repo name from source_repo (format: 'owner/repo')."""
+        source_repo = self._project.source_repo or ""
+        if "/" in source_repo:
+            return source_repo.split("/", 1)[1]
+        return source_repo
+
+    @property
+    def state(self) -> str:
+        return self._project.issue_state or ""
+
+    @property
+    def labels(self) -> list[str]:
+        """Parse labels from JSON."""
+        labels_json = self._project.issue_labels_json or "[]"
+        try:
+            return json.loads(labels_json)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    @property
+    def poll_interval_seconds(self) -> int:
+        return self._project.poll_interval_seconds
+
+    @property
+    def auto_start(self) -> int:
+        return self._project.auto_start
+
+    @property
+    def agent_id(self) -> Optional[str]:
+        return self._project.source_agent_id
+
+    @property
+    def project_path(self) -> str:
+        """Full project path for GitLab (same as source_repo)."""
+        return self._project.source_repo or ""
+
+
 # Utility functions
 DEFAULT_DB_PATH_ENV = "WINTERMUTE_DB"
 
@@ -119,9 +189,26 @@ class Database:
     def __init__(self, db_path: Optional[str] = None):
         """Initialize database connection.
 
-        Note: db_path is ignored since Django manages the connection.
+        If db_path is provided, reconfigure Django to use that database.
+        This is primarily used for testing with temporary databases.
         """
         self.db_path = db_path or os.environ.get(DEFAULT_DB_PATH_ENV, "")
+
+        if db_path:
+            # Reconfigure Django to use the specified database
+            from django.conf import settings
+            from django.db import connection, connections
+
+            # Update the database path first
+            settings.DATABASES["default"]["NAME"] = db_path
+
+            # Close existing connections (handle both sync and async contexts)
+            try:
+                connection.close()
+                connections.close_all()
+            except Exception:
+                # In async context, connections might not be open
+                pass
 
     @contextmanager
     def session(self) -> Generator[Any, None, None]:
@@ -264,6 +351,46 @@ class Database:
     def list_projects(self) -> list[Project]:
         return list(Project.objects.all())
 
+    def insert_project(
+        self,
+        project_id: str,
+        name: str,
+        slug: str,
+        slack_channel_id: Optional[str] = None,
+        symbol: Optional[str] = None,
+        provider: Optional[str] = None,
+        source_token_id: Optional[str] = None,
+        source_repo: Optional[str] = None,
+        issue_state: Optional[str] = None,
+        source_enabled: bool = False,
+        poll_interval_seconds: int = 300,
+        repo_mode: Optional[str] = None,
+        repo_path: Optional[str] = None,
+        repo_url: Optional[str] = None,
+        max_repo_resources: int = 3,
+    ) -> Project:
+        """Insert a project with the given ID."""
+        now = utc_now()
+        return Project.objects.create(
+            id=project_id,
+            name=name,
+            slug=slug,
+            slack_channel_id=slack_channel_id,
+            symbol=symbol or slug.upper()[:4],
+            provider=provider,
+            source_token_id=source_token_id,
+            source_repo=source_repo,
+            issue_state=issue_state,
+            source_enabled=1 if source_enabled else 0,
+            poll_interval_seconds=poll_interval_seconds,
+            repo_mode=repo_mode,
+            repo_path=repo_path,
+            repo_url=repo_url,
+            max_repo_resources=max_repo_resources,
+            created_at=now,
+            updated_at=now,
+        )
+
     # ============ VM Targets ============
     def get_vm_target(self, vm_id: str) -> Optional[VMTarget]:
         try:
@@ -273,6 +400,34 @@ class Database:
 
     def list_vm_targets(self) -> list[VMTarget]:
         return list(VMTarget.objects.all())
+
+    def insert_vm_target(
+        self,
+        vm_id: str,
+        name: str,
+        host: str,
+        user: str,
+        port: int = 22,
+        required_reserve_memory_gb: int = 0,
+    ) -> VMTarget:
+        """Insert a VM target with the given ID."""
+        now = utc_now()
+        return VMTarget.objects.create(
+            id=vm_id,
+            name=name,
+            host=host,
+            user=user,
+            port=port,
+            required_reserve_memory_gb=required_reserve_memory_gb,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def update_vm_target(self, vm_id: str, **kwargs) -> bool:
+        """Update a VM target."""
+        kwargs["updated_at"] = utc_now()
+        updated = VMTarget.objects.filter(id=vm_id).update(**kwargs)
+        return updated > 0
 
     # ============ Agents ============
     def get_agent(self, agent_id: str) -> Optional[Agent]:
@@ -289,6 +444,66 @@ class Database:
 
     def list_agents(self) -> list[Agent]:
         return list(Agent.objects.all())
+
+    def insert_agent(
+        self,
+        agent_id: str,
+        name: str,
+        slug: str,
+        command: str,
+        session_mode: str = "tmux",
+        vm_target_id: Optional[str] = None,
+        required_ssh_options: Optional[str] = None,
+        env_vars: Optional[str] = None,
+        mcp_config: Optional[str] = None,
+        trust_level: Optional[str] = None,
+        input_echo_prefix: Optional[str] = None,
+        response_prefix: Optional[str] = None,
+        llm_base_url: Optional[str] = None,
+        llm_api_key: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        session_file_config_id: Optional[str] = None,
+        average_memory_usage_mb: int = 1000,
+        initial_prompt: Optional[str] = None,
+        working_directory: Optional[str] = None,
+        session_directory: Optional[str] = None,
+        autostart: bool = False,
+        health_command: Optional[str] = None,
+    ) -> Agent:
+        """Insert an agent with the given ID."""
+        now = utc_now()
+        return Agent.objects.create(
+            id=agent_id,
+            name=name,
+            slug=slug,
+            command=command,
+            session_mode=session_mode,
+            vm_target_id=vm_target_id,
+            required_ssh_options=required_ssh_options,
+            env_vars=env_vars,
+            mcp_config=mcp_config,
+            trust_level=trust_level,
+            input_echo_prefix=input_echo_prefix,
+            response_prefix=response_prefix,
+            llm_base_url=llm_base_url,
+            llm_api_key=llm_api_key,
+            llm_model=llm_model,
+            session_file_config_id=session_file_config_id,
+            average_memory_usage_mb=average_memory_usage_mb,
+            initial_prompt=initial_prompt,
+            working_directory=working_directory,
+            session_directory=session_directory,
+            autostart=autostart,
+            health_command=health_command,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def update_agent(self, agent_id: str, **kwargs) -> bool:
+        """Update an agent."""
+        kwargs["updated_at"] = utc_now()
+        updated = Agent.objects.filter(id=agent_id).update(**kwargs)
+        return updated > 0
 
     # ============ Agent Sessions ============
     def get_agent_session(self, session_id: str) -> Optional[AgentSession]:
@@ -315,6 +530,7 @@ class Database:
         thread_ts: Optional[str] = None,
         initial_prompt: Optional[str] = None,
         session_id: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> AgentSession:
         now = utc_now()
         return AgentSession.objects.create(
@@ -326,6 +542,7 @@ class Database:
             repo_path=repo_path,
             thread_ts=thread_ts,
             initial_prompt=initial_prompt,
+            workspace_path=workspace_path,
             last_output_offset=0,
             awaiting_response=0,
             awaiting_response_offset=0,
@@ -363,6 +580,10 @@ class Database:
             qs = qs.filter(status=status)
         return list(qs)
 
+    def list_auto_start_tickets(self) -> list[Ticket]:
+        """List tickets with auto_start enabled and open status."""
+        return list(Ticket.objects.filter(auto_start=True, status="open"))
+
     def create_ticket(
         self,
         project_id: str,
@@ -399,6 +620,41 @@ class Database:
         kwargs["updated_at"] = utc_now()
         updated = Ticket.objects.filter(id=ticket_id).update(**kwargs)
         return updated > 0
+
+    def insert_ticket(
+        self,
+        ticket_id: str,
+        project_id: str,
+        title: str,
+        status: str,
+        description: Optional[str] = None,
+        assigned_to: Optional[str] = None,
+        estimate: Optional[str] = None,
+        source_url: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        auto_start: int = 0,
+    ) -> Ticket:
+        """Insert a ticket with the given ID."""
+        now = utc_now()
+        # Get next count for this project
+        from django.db.models import Max
+        max_count = Ticket.objects.filter(project_id=project_id).aggregate(Max('count'))['count__max']
+        next_count = (max_count or 0) + 1
+        return Ticket.objects.create(
+            id=ticket_id,
+            project_id=project_id,
+            title=title,
+            status=status,
+            description=description,
+            assigned_to=assigned_to,
+            estimate=estimate,
+            source_url=source_url,
+            agent_id=agent_id,
+            auto_start=auto_start,
+            count=next_count,
+            created_at=now,
+            updated_at=now,
+        )
 
     # ============ Comments ============
     def get_comment(self, comment_id: str) -> Optional[Comment]:
@@ -527,23 +783,26 @@ class Database:
         except IssueSource.DoesNotExist:
             return None
 
-    def list_github_sources(self, enabled: Optional[bool] = None) -> list[IssueSource]:
-        """List GitHub issue sources."""
-        qs = IssueSource.objects.filter(provider='github')
+    def list_github_sources(self, enabled: Optional[bool] = None) -> list[ProjectAsIssueSource]:
+        """List GitHub issue sources (projects with provider='github')."""
+        qs = Project.objects.filter(provider='github')
         if enabled is not None:
-            qs = qs.filter(enabled=1 if enabled else 0)
-        return list(qs)
+            qs = qs.filter(source_enabled=1 if enabled else 0)
+        return [ProjectAsIssueSource(p) for p in qs]
 
-    def list_gitlab_sources(self, enabled: Optional[bool] = None) -> list[IssueSource]:
-        """List GitLab issue sources."""
-        qs = IssueSource.objects.filter(provider='gitlab')
+    def list_gitlab_sources(self, enabled: Optional[bool] = None) -> list[ProjectAsIssueSource]:
+        """List GitLab issue sources (projects with provider='gitlab')."""
+        qs = Project.objects.filter(provider='gitlab')
         if enabled is not None:
-            qs = qs.filter(enabled=1 if enabled else 0)
-        return list(qs)
+            qs = qs.filter(source_enabled=1 if enabled else 0)
+        return [ProjectAsIssueSource(p) for p in qs]
 
     # ============ Remote Tokens ============
-    def list_remote_tokens(self) -> list[RemoteToken]:
-        return list(RemoteToken.objects.all())
+    def list_remote_tokens(self, provider: Optional[str] = None) -> list[RemoteToken]:
+        qs = RemoteToken.objects.all()
+        if provider:
+            qs = qs.filter(provider=provider)
+        return list(qs)
 
     def get_remote_token(self, token_id: str) -> Optional[RemoteToken]:
         try:
@@ -564,6 +823,92 @@ class Database:
             return RemoteToken.objects.get(id=token_id, provider='gitlab')
         except RemoteToken.DoesNotExist:
             return None
+
+    def list_remote_tokens_by_provider(self, provider: Optional[str] = None) -> list[RemoteToken]:
+        """List remote tokens, optionally filtered by provider."""
+        qs = RemoteToken.objects.all()
+        if provider:
+            qs = qs.filter(provider=provider)
+        return list(qs)
+
+    def list_github_tokens(self) -> list[RemoteToken]:
+        """List all GitHub tokens."""
+        return list(RemoteToken.objects.filter(provider='github'))
+
+    def list_gitlab_tokens(self) -> list[RemoteToken]:
+        """List all GitLab tokens."""
+        return list(RemoteToken.objects.filter(provider='gitlab'))
+
+    def insert_remote_token(
+        self,
+        token_id: str,
+        provider: str,
+        token: str,
+        note: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_login: Optional[str] = None,
+    ) -> RemoteToken:
+        """Insert a remote token with the given ID."""
+        now = utc_now()
+        return RemoteToken.objects.create(
+            id=token_id,
+            provider=provider,
+            token=token,
+            note=note,
+            user_id=user_id,
+            user_login=user_login,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def insert_github_token(
+        self,
+        token_id: str,
+        token: str,
+        note: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_login: Optional[str] = None,
+    ) -> RemoteToken:
+        """Insert a GitHub token (alias for insert_remote_token with provider='github')."""
+        return self.insert_remote_token(token_id, 'github', token, note, user_id, user_login)
+
+    def insert_gitlab_token(
+        self,
+        token_id: str,
+        token: str,
+        note: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_login: Optional[str] = None,
+    ) -> RemoteToken:
+        """Insert a GitLab token (alias for insert_remote_token with provider='gitlab')."""
+        return self.insert_remote_token(token_id, 'gitlab', token, note, user_id, user_login)
+
+    def update_remote_token(self, token_id: str, **kwargs) -> bool:
+        """Update a remote token."""
+        kwargs["updated_at"] = utc_now()
+        updated = RemoteToken.objects.filter(id=token_id).update(**kwargs)
+        return updated > 0
+
+    def update_github_token(self, token_id: str, **kwargs) -> bool:
+        """Update a GitHub token."""
+        return self.update_remote_token(token_id, **kwargs)
+
+    def update_gitlab_token(self, token_id: str, **kwargs) -> bool:
+        """Update a GitLab token."""
+        return self.update_remote_token(token_id, **kwargs)
+
+    def delete_remote_token(self, token_id: str) -> bool:
+        """Delete a remote token."""
+        deleted, _ = RemoteToken.objects.filter(id=token_id).delete()
+        return deleted > 0
+
+    def delete_github_token(self, token_id: str) -> bool:
+        """Delete a GitHub token."""
+        return self.delete_remote_token(token_id)
+
+    def delete_gitlab_token(self, token_id: str) -> bool:
+        """Delete a GitLab token."""
+        return self.delete_remote_token(token_id)
 
     # ============ Agent Wakes ============
     def list_agent_wakes(self, session_id: Optional[str] = None, pending_only: bool = False) -> list[AgentWake]:
@@ -632,7 +977,14 @@ class Database:
     # ============ Channels ============
     def get_channel(self, channel_id: str) -> Optional[Channel]:
         try:
-            return Channel.objects.get(channel_id=channel_id)
+            return Channel.objects.get(id=channel_id)
+        except Channel.DoesNotExist:
+            return None
+
+    def get_channel_by_external_id(self, platform_type: str, external_channel_id: str) -> Optional[Channel]:
+        """Get a channel by its platform type and external channel ID."""
+        try:
+            return Channel.objects.get(type=platform_type, external_channel_id=external_channel_id)
         except Channel.DoesNotExist:
             return None
 
@@ -641,6 +993,56 @@ class Database:
         if agent_id:
             qs = qs.filter(agent_id=agent_id)
         return list(qs)
+
+    def delete_channel(self, channel_id: str) -> bool:
+        """Delete a channel by ID. Returns True if deleted, False if not found."""
+        deleted, _ = Channel.objects.filter(id=channel_id).delete()
+        return deleted > 0
+
+    def update_channel(
+        self,
+        channel_id: str,
+        name: Optional[str] = None,
+        external_channel_id: Optional[str] = None,
+        enabled: Optional[bool] = None,
+    ) -> Optional[Channel]:
+        """Update a channel's fields. Returns the updated channel or None if not found."""
+        try:
+            channel = Channel.objects.get(id=channel_id)
+        except Channel.DoesNotExist:
+            return None
+
+        if name is not None:
+            channel.name = name
+        if external_channel_id is not None:
+            channel.external_channel_id = external_channel_id
+        if enabled is not None:
+            channel.enabled = 1 if enabled else 0
+        channel.updated_at = utc_now()
+        channel.save()
+        return channel
+
+    def insert_channel(
+        self,
+        channel_id: str,
+        agent_id: str,
+        channel_type: str,
+        name: str,
+        external_channel_id: Optional[str] = None,
+        enabled: bool = True,
+    ) -> Channel:
+        """Insert a channel with the given ID."""
+        now = utc_now()
+        return Channel.objects.create(
+            id=channel_id,
+            agent_id=agent_id,
+            type=channel_type,
+            name=name,
+            external_channel_id=external_channel_id,
+            enabled=1 if enabled else 0,
+            created_at=now,
+            updated_at=now,
+        )
 
     # ============ Sprints ============
     def get_sprint(self, sprint_id: str) -> Optional[Sprint]:
@@ -695,21 +1097,93 @@ class Database:
         self,
         project: Any,
         session_id: str,
-        agent_id: str,
+        agent_id: Optional[str],
     ) -> tuple[Optional[RepoResource], Optional[str]]:
         """Acquire an available repo resource for a session.
 
         Returns (resource, error_message). If no available resource is found,
         returns (None, error_message).
+
+        For local/mirror mode projects, creates a resource if none exists. Only one
+        resource is allowed per project; if it's in use, returns error.
         """
         from django.db import transaction
+        import uuid
 
         now = utc_now()
         with transaction.atomic():
-            # Try to find an available resource for this project
-            resource = (RepoResource.objects.select_for_update().filter(project_id=project.id, status="available").first())
-            if not resource:
-                return None, "No available repo resources for this project"
+            # For local mode, special handling - only one resource allowed
+            if project.repo_mode == "local":
+                existing = RepoResource.objects.select_for_update().filter(project_id=project.id).first()
+                if existing:
+                    if existing.status == "in_use":
+                        return None, "local repo already in use"
+                    # Resource exists and is available
+                    resource = existing
+                else:
+                    # Create the local resource
+                    resource = RepoResource.objects.create(
+                        id=str(uuid.uuid4()),
+                        project_id=project.id,
+                        repo_mode="local",
+                        path=f"local:{project.id}",
+                        status="available",
+                        session_id=None,
+                        agent_id=None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+            elif project.repo_mode == "mirror":
+                # Mirror mode requires repo_path
+                if not project.repo_path:
+                    return None, "mirror path not configured"
+                existing = RepoResource.objects.select_for_update().filter(project_id=project.id).first()
+                if existing:
+                    if existing.status == "in_use":
+                        return None, "mirror repo already in use"
+                    resource = existing
+                else:
+                    resource = RepoResource.objects.create(
+                        id=str(uuid.uuid4()),
+                        project_id=project.id,
+                        repo_mode="mirror",
+                        path=project.repo_path,
+                        status="available",
+                        session_id=None,
+                        agent_id=None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+            elif project.repo_mode == "clone":
+                # Clone mode requires repo_path
+                if not project.repo_path:
+                    return None, "repo path not configured"
+                # Clone mode: try to find an available resource first, or create a new one up to max
+                resource = RepoResource.objects.select_for_update().filter(project_id=project.id, status="available").first()
+                if not resource:
+                    # Count existing resources for this project
+                    count = RepoResource.objects.filter(project_id=project.id).count()
+                    max_resources = getattr(project, 'max_repo_resources', 3) or 3
+                    if count >= max_resources:
+                        return None, "No available repo resources for this project"
+                    # Create a new clone resource with unique path based on session_id
+                    clone_path = f"{project.repo_path}/{session_id}"
+                    resource = RepoResource.objects.create(
+                        id=str(uuid.uuid4()),
+                        project_id=project.id,
+                        repo_mode="clone",
+                        path=clone_path,
+                        status="available",
+                        session_id=None,
+                        agent_id=None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+            else:
+                # For other modes, find an available resource
+                resource = (RepoResource.objects.select_for_update().filter(project_id=project.id, status="available").first())
+                if not resource:
+                    return None, "No available repo resources for this project"
 
             # Mark it as in use
             resource.status = "in_use"
@@ -751,6 +1225,38 @@ class Database:
         except MetricDefinition.DoesNotExist:
             return None
 
+    def insert_metric_definition(
+        self,
+        definition_id: str,
+        metric_type: str,
+        recording_frequency_minutes: int = 5,
+        enabled: bool = True,
+    ) -> MetricDefinition:
+        """Insert a metric definition with the given ID."""
+        now = utc_now()
+        return MetricDefinition.objects.create(
+            id=definition_id,
+            metric_type=metric_type,
+            recording_frequency_minutes=recording_frequency_minutes,
+            enabled=1 if enabled else 0,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def update_metric_definition(self, definition_id: str, **kwargs) -> bool:
+        """Update a metric definition."""
+        # Convert enabled bool to int if present
+        if "enabled" in kwargs:
+            kwargs["enabled"] = 1 if kwargs["enabled"] else 0
+        kwargs["updated_at"] = utc_now()
+        updated = MetricDefinition.objects.filter(id=definition_id).update(**kwargs)
+        return updated > 0
+
+    def delete_metric_definition(self, definition_id: str) -> bool:
+        """Delete a metric definition."""
+        deleted, _ = MetricDefinition.objects.filter(id=definition_id).delete()
+        return deleted > 0
+
     # ============ Agent Metrics Logs ============
     def create_agent_metrics_log(
         self,
@@ -769,6 +1275,79 @@ class Database:
             created_at=now,
         )
 
+    def insert_agent_metrics_log(
+        self,
+        log_id: str,
+        agent_id: str,
+        metric_definition_id: str,
+        value: float,
+        recorded_at: Optional[str] = None,
+    ) -> AgentMetricsLog:
+        """Insert an agent metrics log with the given ID."""
+        now = utc_now()
+        return AgentMetricsLog.objects.create(
+            id=log_id,
+            agent_id=agent_id,
+            metric_definition_id=metric_definition_id,
+            value=value,
+            recorded_at=recorded_at or now,
+            created_at=now,
+        )
+
+    def get_agent_metrics_log(self, log_id: str) -> Optional[AgentMetricsLog]:
+        """Get an agent metrics log by ID."""
+        try:
+            return AgentMetricsLog.objects.get(id=log_id)
+        except AgentMetricsLog.DoesNotExist:
+            return None
+
+    def list_agent_metrics_logs(
+        self,
+        agent_id: Optional[str] = None,
+        metric_definition_id: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> list[AgentMetricsLog]:
+        """List agent metrics logs with optional filters."""
+        qs = AgentMetricsLog.objects.all().order_by("-recorded_at")
+        if agent_id:
+            qs = qs.filter(agent_id=agent_id)
+        if metric_definition_id:
+            qs = qs.filter(metric_definition_id=metric_definition_id)
+        if limit:
+            qs = qs[:limit]
+        return list(qs)
+
+    def get_agent_average_memory_usage(self, agent_id: str) -> Optional[float]:
+        """Calculate average memory usage from metrics logs for an agent.
+
+        Returns None if no memory usage logs exist for the agent.
+        """
+        # Find the MEMORY_USAGE metric definition
+        memory_def = self.get_metric_definition_by_type("MEMORY_USAGE")
+        if not memory_def:
+            return None
+
+        # Get all memory logs for this agent
+        logs = self.list_agent_metrics_logs(agent_id=agent_id, metric_definition_id=memory_def.id)
+        if not logs:
+            return None
+
+        # Calculate average
+        total = sum(log.value for log in logs)
+        return total / len(logs)
+
+    def refresh_agent_average_memory_usage(self, agent_id: str) -> bool:
+        """Update an agent's average_memory_usage_mb field from metrics logs.
+
+        Returns True if the agent was updated, False otherwise.
+        """
+        avg = self.get_agent_average_memory_usage(agent_id)
+        if avg is None:
+            return False
+
+        # Update the agent's average_memory_usage_mb field
+        return self.update_agent(agent_id, average_memory_usage_mb=int(avg))
+
     # ============ Agent Responses ============
     def list_agent_responses(self, agent_id: Optional[str] = None) -> list[AgentResponse]:
         qs = AgentResponse.objects.all()
@@ -783,8 +1362,88 @@ class Database:
         except SessionFileConfig.DoesNotExist:
             return None
 
+    def list_session_file_configs(self) -> list[SessionFileConfig]:
+        """List all session file configs."""
+        return list(SessionFileConfig.objects.all())
+
+    def insert_session_file_config(
+        self,
+        config_id: str,
+        name: str,
+        description: Optional[str] = None,
+    ) -> SessionFileConfig:
+        """Insert a session file config with the given ID."""
+        now = utc_now()
+        return SessionFileConfig.objects.create(
+            id=config_id,
+            name=name,
+            description=description,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def update_session_file_config(self, config_id: str, **kwargs) -> bool:
+        """Update a session file config."""
+        kwargs["updated_at"] = utc_now()
+        updated = SessionFileConfig.objects.filter(id=config_id).update(**kwargs)
+        return updated > 0
+
+    def delete_session_file_config(self, config_id: str) -> bool:
+        """Delete a session file config."""
+        deleted, _ = SessionFileConfig.objects.filter(id=config_id).delete()
+        return deleted > 0
+
     def list_session_file_definitions(self, config_id: str) -> list[SessionFileDefinition]:
-        return list(SessionFileDefinition.objects.filter(config_id=config_id))
+        return list(SessionFileDefinition.objects.filter(config_id=config_id).order_by("sort_order"))
+
+    def get_session_file_definition(self, definition_id: str) -> Optional[SessionFileDefinition]:
+        """Get a session file definition by ID."""
+        try:
+            return SessionFileDefinition.objects.get(id=definition_id)
+        except SessionFileDefinition.DoesNotExist:
+            return None
+
+    def insert_session_file_definition(
+        self,
+        definition_id: str,
+        config_id: str,
+        filename: str,
+        default_content: str,
+        description: Optional[str] = None,
+        required: bool = False,
+        sync_on_exit: bool = True,
+        sort_order: int = 0,
+    ) -> SessionFileDefinition:
+        """Insert a session file definition with the given ID."""
+        now = utc_now()
+        return SessionFileDefinition.objects.create(
+            id=definition_id,
+            config_id=config_id,
+            filename=filename,
+            description=description,
+            default_content=default_content,
+            required=1 if required else 0,
+            sync_on_exit=1 if sync_on_exit else 0,
+            sort_order=sort_order,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def update_session_file_definition(self, definition_id: str, **kwargs) -> bool:
+        """Update a session file definition."""
+        # Convert booleans to int if present
+        if "required" in kwargs:
+            kwargs["required"] = 1 if kwargs["required"] else 0
+        if "sync_on_exit" in kwargs:
+            kwargs["sync_on_exit"] = 1 if kwargs["sync_on_exit"] else 0
+        kwargs["updated_at"] = utc_now()
+        updated = SessionFileDefinition.objects.filter(id=definition_id).update(**kwargs)
+        return updated > 0
+
+    def delete_session_file_definition(self, definition_id: str) -> bool:
+        """Delete a session file definition."""
+        deleted, _ = SessionFileDefinition.objects.filter(id=definition_id).delete()
+        return deleted > 0
 
     def get_session_file(self, file_id: str) -> Optional[SessionFile]:
         try:
@@ -792,19 +1451,46 @@ class Database:
         except SessionFile.DoesNotExist:
             return None
 
-    def list_session_files(self, session_id: str) -> list[SessionFile]:
-        return list(SessionFile.objects.filter(session_id=session_id))
+    def get_session_file_by_definition(self, agent_id: str, definition_id: str) -> Optional[SessionFile]:
+        """Get a session file for an agent by definition ID."""
+        try:
+            return SessionFile.objects.get(agent_id=agent_id, definition_id=definition_id)
+        except SessionFile.DoesNotExist:
+            return None
 
-    def create_session_file(
+    def list_session_files(self, agent_id: str) -> list[SessionFile]:
+        """List all session files for an agent."""
+        return list(SessionFile.objects.filter(agent_id=agent_id))
+
+    def insert_session_file(
         self,
-        session_id: str,
+        file_id: str,
+        agent_id: str,
         definition_id: str,
         content: str,
     ) -> SessionFile:
+        """Insert a session file with the given ID."""
+        now = utc_now()
+        return SessionFile.objects.create(
+            id=file_id,
+            agent_id=agent_id,
+            definition_id=definition_id,
+            content=content,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def create_session_file(
+        self,
+        agent_id: str,
+        definition_id: str,
+        content: str,
+    ) -> SessionFile:
+        """Create a session file with auto-generated ID."""
         now = utc_now()
         return SessionFile.objects.create(
             id=generate_uuid(),
-            session_id=session_id,
+            agent_id=agent_id,
             definition_id=definition_id,
             content=content,
             created_at=now,
@@ -815,6 +1501,16 @@ class Database:
         kwargs["updated_at"] = utc_now()
         updated = SessionFile.objects.filter(id=file_id).update(**kwargs)
         return updated > 0
+
+    def delete_session_file(self, file_id: str) -> bool:
+        """Delete a session file."""
+        deleted, _ = SessionFile.objects.filter(id=file_id).delete()
+        return deleted > 0
+
+    def delete_session_files_for_agent(self, agent_id: str) -> int:
+        """Delete all session files for an agent. Returns count deleted."""
+        deleted, _ = SessionFile.objects.filter(agent_id=agent_id).delete()
+        return deleted
 
     # ============ Credentials ============
     def get_credential(self, cred_id: str) -> Optional[Credential]:
@@ -841,8 +1537,49 @@ class Database:
 
     # ============ Supervisor Methods ============
     def initialize(self) -> None:
-        """Initialize database. With Django, this is a no-op since migrations handle schema."""
-        pass
+        """Initialize database schema.
+
+        For test databases, this creates all tables. For production,
+        migrations should be used instead.
+        """
+        import asyncio
+
+        # Check if we're in an async context
+        try:
+            loop = asyncio.get_running_loop()
+            # We're in async context, need to run sync code in a thread
+            from asgiref.sync import sync_to_async
+            # Can't use sync_to_async directly in sync method, so use thread pool
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                executor.submit(self._create_tables).result()
+        except RuntimeError:
+            # No event loop, we're in sync context
+            self._create_tables()
+
+    def _create_tables(self) -> None:
+        """Create database tables from models (internal method)."""
+        from django.db import connection
+
+        # Create tables directly from models (for test databases)
+        with connection.schema_editor() as schema_editor:
+            from django.apps import apps
+
+            # Get all models from wintermute app and create tables
+            app_config = apps.get_app_config('wintermute')
+            for model in app_config.get_models():
+                try:
+                    schema_editor.create_model(model)
+                except Exception:
+                    # Table might already exist
+                    pass
+
+            # Also need auth token table
+            try:
+                from rest_framework.authtoken.models import Token
+                schema_editor.create_model(Token)
+            except Exception:
+                pass
 
     def insert_work_item_if_absent(
         self,
@@ -941,12 +1678,14 @@ class Database:
     def insert_session(
         self,
         session_id: str,
-        project_id: str,
+        project_id: Optional[str],
         agent_id: str,
         ticket_id: Optional[str] = None,
         status: str = "running",
         repo_path: Optional[str] = None,
         thread_ts: Optional[str] = None,
+        initial_prompt: Optional[str] = None,
+        workspace_path: Optional[str] = None,
     ) -> AgentSession:
         """Alias for create_agent_session for backwards compatibility."""
         return self.create_agent_session(
@@ -957,6 +1696,8 @@ class Database:
             status=status,
             repo_path=repo_path,
             thread_ts=thread_ts,
+            initial_prompt=initial_prompt,
+            workspace_path=workspace_path,
         )
 
     def update_supervisor_state(
@@ -994,14 +1735,6 @@ class Database:
         from django.db.models import Max
         result = RemoteToken.objects.filter(provider='gitlab').aggregate(Max('updated_at'))
         return result.get('updated_at__max')
-
-    def list_github_tokens(self) -> list[RemoteToken]:
-        """List all GitHub tokens."""
-        return list(RemoteToken.objects.filter(provider='github'))
-
-    def list_gitlab_tokens(self) -> list[RemoteToken]:
-        """List all GitLab tokens."""
-        return list(RemoteToken.objects.filter(provider='gitlab'))
 
     # ============ Sprint Methods ============
     def insert_sprint(
@@ -1069,25 +1802,6 @@ class Database:
         """Delete a repo resource."""
         deleted, _ = RepoResource.objects.filter(id=resource_id).delete()
         return deleted > 0
-
-    # ============ Metrics ============
-    def insert_agent_metrics_log(
-        self,
-        log_id: str,
-        agent_id: str,
-        metric_definition_id: str,
-        value: float,
-    ) -> AgentMetricsLog:
-        """Insert an agent metrics log entry."""
-        now = utc_now()
-        return AgentMetricsLog.objects.create(
-            id=log_id,
-            agent_id=agent_id,
-            metric_definition_id=metric_definition_id,
-            value=value,
-            recorded_at=now,
-            created_at=now,
-        )
 
 
 # Backwards compatible aliases for deprecated classes
@@ -1300,14 +2014,14 @@ class AsyncDatabase:
     async def get_gitlab_source(self, source_id: str) -> Optional[IssueSource]:
         return await sync_to_async(self._sync_db.get_gitlab_source)(source_id)
 
-    async def list_github_sources(self, enabled: Optional[bool] = None) -> list[IssueSource]:
+    async def list_github_sources(self, enabled: Optional[bool] = None) -> list[ProjectAsIssueSource]:
         return await sync_to_async(self._sync_db.list_github_sources)(enabled)
 
-    async def list_gitlab_sources(self, enabled: Optional[bool] = None) -> list[IssueSource]:
+    async def list_gitlab_sources(self, enabled: Optional[bool] = None) -> list[ProjectAsIssueSource]:
         return await sync_to_async(self._sync_db.list_gitlab_sources)(enabled)
 
-    async def list_remote_tokens(self) -> list[RemoteToken]:
-        return await sync_to_async(self._sync_db.list_remote_tokens)()
+    async def list_remote_tokens(self, provider: Optional[str] = None) -> list[RemoteToken]:
+        return await sync_to_async(self._sync_db.list_remote_tokens)(provider)
 
     async def get_remote_token(self, token_id: str) -> Optional[RemoteToken]:
         return await sync_to_async(self._sync_db.get_remote_token)(token_id)

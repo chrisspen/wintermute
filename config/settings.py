@@ -89,6 +89,9 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": DB_PATH,
+        "TEST": {
+            "NAME": "/tmp/wintermute_test.db",
+        },
     }
 }
 

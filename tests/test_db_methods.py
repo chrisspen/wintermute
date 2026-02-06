@@ -1,7 +1,7 @@
 """Tests for Database methods - insert_comment, upsert_supervisor_state, and AsyncDatabase."""
 
 import uuid
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase
 from asgiref.sync import sync_to_async, async_to_sync
 
 from wintermute.db import AsyncDatabase, Database
@@ -153,7 +153,7 @@ class UpsertSupervisorStateTests(TestCase):
         self.assertEqual(state.status, "stopped")
 
 
-class AsyncDatabaseTests(TransactionTestCase):
+class AsyncDatabaseTests(TestCase):
     """Tests for AsyncDatabase wrapper."""
 
     def setUp(self) -> None:
@@ -209,7 +209,7 @@ class AsyncDatabaseTests(TransactionTestCase):
             # Add a channel
             await sync_to_async(Channel.objects.create)(
                 id="ch-1",
-                agent=agent,
+                agent_id=agent.id,
                 type="slack",
                 name="test-channel",
                 external_channel_id="C123",
