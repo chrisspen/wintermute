@@ -11,7 +11,7 @@ import urllib.parse
 
 import aiohttp
 
-from wintermute.db import AsyncDatabase
+from wintermute.services.database import AsyncDatabase
 from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,

@@ -14,7 +14,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Optional
 
 from wintermute import __version__
-from wintermute.db import AsyncDatabase, Database, WorkItemRecord, utc_now
+from wintermute.models import WorkItem as WorkItemRecord
+from wintermute.utils import utc_now
+from wintermute import services as db
+from wintermute.services.database import AsyncDatabase
 from wintermute.executor import Executor
 from wintermute.sources.base import TaskSource, WorkItemContext, WorkItemBlocked
 from wintermute.sources.demo import DemoSource

@@ -9,9 +9,8 @@ import urllib.parse
 
 import aiohttp
 
-from wintermute.db import Database
+from wintermute.services.database import Database
 from wintermute.tools.base import Tool, ToolDefinition
-
 
 GITLAB_PROVIDER = "gitlab"
 GITLAB_TOKEN_NAME = "token"
@@ -48,9 +47,7 @@ class GitLabToolBase(Tool):
         }
         url = f"{self.api_base}{path}"
         async with aiohttp.ClientSession() as session:
-            async with session.request(
-                method, url, headers=headers, params=params, json=json_body
-            ) as response:
+            async with session.request(method, url, headers=headers, params=params, json=json_body) as response:
                 payload = await response.json()
                 if response.status >= 400:
                     message = "GitLab API error"
@@ -88,12 +85,28 @@ class GitLabListIssuesTool(GitLabToolBase):
         input_schema={
             "type": "object",
             "properties": {
-                "token_id": {"type": "string"},
-                "project_id": {"type": "string"},
-                "state": {"type": "string", "enum": ["open", "opened", "closed", "all"]},
-                "labels": {"type": "array", "items": {"type": "string"}},
-                "per_page": {"type": "integer"},
-                "page": {"type": "integer"},
+                "token_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["open", "opened", "closed", "all"]
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "per_page": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
             },
             "required": ["token_id", "project_id"],
         },
@@ -136,9 +149,15 @@ class GitLabGetIssueTool(GitLabToolBase):
         input_schema={
             "type": "object",
             "properties": {
-                "token_id": {"type": "string"},
-                "project_id": {"type": "string"},
-                "issue_iid": {"type": "integer"},
+                "token_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "issue_iid": {
+                    "type": "integer"
+                },
             },
             "required": ["token_id", "project_id", "issue_iid"],
         },
@@ -168,10 +187,18 @@ class GitLabCommentIssueTool(GitLabToolBase):
         input_schema={
             "type": "object",
             "properties": {
-                "token_id": {"type": "string"},
-                "project_id": {"type": "string"},
-                "issue_iid": {"type": "integer"},
-                "body": {"type": "string"},
+                "token_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "issue_iid": {
+                    "type": "integer"
+                },
+                "body": {
+                    "type": "string"
+                },
             },
             "required": ["token_id", "project_id", "issue_iid", "body"],
         },

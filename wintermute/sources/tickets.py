@@ -8,7 +8,8 @@ import re
 from typing import Any, Optional
 import uuid
 
-from wintermute.db import AsyncDatabase, TicketRecord
+from wintermute.models import Ticket as TicketRecord
+from wintermute.services.database import AsyncDatabase
 from wintermute.prompts import render_prompt_template
 from wintermute.runner import (
     build_ssh_spec,

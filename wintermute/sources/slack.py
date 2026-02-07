@@ -14,7 +14,8 @@ from slack_sdk.socket_mode.aiohttp import SocketModeClient
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
-from wintermute.db import AsyncDatabase, utc_now
+from wintermute.services.database import AsyncDatabase
+from wintermute.utils import utc_now
 from wintermute.runner import build_ssh_spec, check_vm_memory_available, ensure_repo, is_codex_command, send_input, set_codex_trust, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 

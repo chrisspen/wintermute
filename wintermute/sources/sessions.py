@@ -12,7 +12,9 @@ import os
 
 import uuid
 
-from wintermute.db import AsyncDatabase, AgentSessionRecord, utc_now
+from wintermute.models import AgentSession as AgentSessionRecord
+from wintermute.services.database import AsyncDatabase
+from wintermute.utils import utc_now
 from wintermute.claude_client import close_claude_process, poll_claude, run_claude_prompt
 from wintermute.gemini_client import close_gemini_process, poll_gemini, run_gemini_prompt
 from wintermute.mcp_client import close_mcp_process, poll_codex_mcp, run_codex_mcp

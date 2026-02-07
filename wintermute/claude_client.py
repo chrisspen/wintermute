@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from wintermute.db import AgentRecord
+from wintermute.models import Agent as AgentRecord
 from wintermute.runner import SSHSpec
 
 

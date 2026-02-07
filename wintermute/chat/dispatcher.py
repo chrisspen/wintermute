@@ -19,7 +19,8 @@ from wintermute.chat.adapters import (
     SlackAdapter,
     TelegramAdapter,
 )
-from wintermute.db import ChannelRecord, Database
+from wintermute.models import Channel as ChannelRecord
+from wintermute.services.database import Database
 
 
 class ChatDispatcher:

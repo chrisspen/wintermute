@@ -1,24 +1,23 @@
 """Unit tests for SessionFileConfig, SessionFileDefinition, SessionFile, and Channel CRUD operations."""
 
-import os
-import tempfile
-import unittest
 import uuid
 
-from wintermute.db import Database
+import pytest
+
+from wintermute.models import Agent, AgentSession, Channel, SessionFile, SessionFileConfig, SessionFileDefinition, VMTarget
+from wintermute.services.database import Database
 
 
-class SessionFileConfigCRUDTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestSessionFileConfigCRUD:
     """Tests for SessionFileConfig CRUD operations."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
+    def teardown_method(self) -> None:
+        SessionFileDefinition.objects.all().delete()
+        SessionFileConfig.objects.all().delete()
 
     def test_insert_session_file_config(self) -> None:
         config_id = str(uuid.uuid4())
@@ -28,12 +27,12 @@ class SessionFileConfigCRUDTests(unittest.TestCase):
             description="A test config",
         )
         config = self.db.get_session_file_config(config_id)
-        self.assertIsNotNone(config)
-        self.assertEqual(config.name, "Test Config")
-        self.assertEqual(config.description, "A test config")
+        assert config is not None
+        assert config.name == "Test Config"
+        assert config.description == "A test config"
 
     def test_list_session_file_configs(self) -> None:
-        # There's a default config created by the migration
+        # There may be a default config created by the migration
         configs = self.db.list_session_file_configs()
         initial_count = len(configs)
 
@@ -43,7 +42,7 @@ class SessionFileConfigCRUDTests(unittest.TestCase):
             name="New Config",
         )
         configs = self.db.list_session_file_configs()
-        self.assertEqual(len(configs), initial_count + 1)
+        assert len(configs) == initial_count + 1
 
     def test_update_session_file_config(self) -> None:
         config_id = str(uuid.uuid4())
@@ -57,8 +56,8 @@ class SessionFileConfigCRUDTests(unittest.TestCase):
             description="Updated description",
         )
         config = self.db.get_session_file_config(config_id)
-        self.assertEqual(config.name, "Updated Name")
-        self.assertEqual(config.description, "Updated description")
+        assert config.name == "Updated Name"
+        assert config.description == "Updated description"
 
     def test_delete_session_file_config(self) -> None:
         config_id = str(uuid.uuid4())
@@ -68,16 +67,15 @@ class SessionFileConfigCRUDTests(unittest.TestCase):
         )
         self.db.delete_session_file_config(config_id)
         config = self.db.get_session_file_config(config_id)
-        self.assertIsNone(config)
+        assert config is None
 
 
-class SessionFileDefinitionCRUDTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestSessionFileDefinitionCRUD:
     """Tests for SessionFileDefinition CRUD operations."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
         # Create a config to attach definitions to
         self.config_id = str(uuid.uuid4())
         self.db.insert_session_file_config(
@@ -85,9 +83,9 @@ class SessionFileDefinitionCRUDTests(unittest.TestCase):
             name="Test Config",
         )
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
+    def teardown_method(self) -> None:
+        SessionFileDefinition.objects.all().delete()
+        SessionFileConfig.objects.all().delete()
 
     def test_insert_session_file_definition(self) -> None:
         def_id = str(uuid.uuid4())
@@ -102,12 +100,12 @@ class SessionFileDefinitionCRUDTests(unittest.TestCase):
             sort_order=0,
         )
         definition = self.db.get_session_file_definition(def_id)
-        self.assertIsNotNone(definition)
-        self.assertEqual(definition.filename, "TEST.md")
-        self.assertEqual(definition.description, "A test file")
-        self.assertEqual(definition.default_content, "# Test\n\nContent here.")
-        self.assertTrue(definition.required)
-        self.assertTrue(definition.sync_on_exit)
+        assert definition is not None
+        assert definition.filename == "TEST.md"
+        assert definition.description == "A test file"
+        assert definition.default_content == "# Test\n\nContent here."
+        assert definition.required
+        assert definition.sync_on_exit
 
     def test_list_session_file_definitions(self) -> None:
         # Add two definitions
@@ -120,10 +118,10 @@ class SessionFileDefinitionCRUDTests(unittest.TestCase):
                 sort_order=i,
             )
         definitions = self.db.list_session_file_definitions(self.config_id)
-        self.assertEqual(len(definitions), 2)
+        assert len(definitions) == 2
         # Should be ordered by sort_order
-        self.assertEqual(definitions[0].filename, "FILE0.md")
-        self.assertEqual(definitions[1].filename, "FILE1.md")
+        assert definitions[0].filename == "FILE0.md"
+        assert definitions[1].filename == "FILE1.md"
 
     def test_update_session_file_definition(self) -> None:
         def_id = str(uuid.uuid4())
@@ -140,9 +138,9 @@ class SessionFileDefinitionCRUDTests(unittest.TestCase):
             required=True,
         )
         definition = self.db.get_session_file_definition(def_id)
-        self.assertEqual(definition.filename, "UPDATED.md")
-        self.assertEqual(definition.default_content, "Updated content")
-        self.assertTrue(definition.required)
+        assert definition.filename == "UPDATED.md"
+        assert definition.default_content == "Updated content"
+        assert definition.required
 
     def test_delete_session_file_definition(self) -> None:
         def_id = str(uuid.uuid4())
@@ -154,16 +152,15 @@ class SessionFileDefinitionCRUDTests(unittest.TestCase):
         )
         self.db.delete_session_file_definition(def_id)
         definition = self.db.get_session_file_definition(def_id)
-        self.assertIsNone(definition)
+        assert definition is None
 
 
-class SessionFileCRUDTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestSessionFileCRUD:
     """Tests for SessionFile (per-agent) CRUD operations."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
         # Create config and definition
         self.config_id = str(uuid.uuid4())
         self.db.insert_session_file_config(
@@ -194,9 +191,11 @@ class SessionFileCRUDTests(unittest.TestCase):
             response_prefix=None,
         )
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
+    def teardown_method(self) -> None:
+        SessionFile.objects.all().delete()
+        SessionFileDefinition.objects.all().delete()
+        SessionFileConfig.objects.all().delete()
+        Agent.objects.all().delete()
 
     def test_insert_session_file(self) -> None:
         file_id = str(uuid.uuid4())
@@ -207,10 +206,10 @@ class SessionFileCRUDTests(unittest.TestCase):
             content="# State\n\nMy state content.",
         )
         session_file = self.db.get_session_file(file_id)
-        self.assertIsNotNone(session_file)
-        self.assertEqual(session_file.agent_id, self.agent_id)
-        self.assertEqual(session_file.definition_id, self.definition_id)
-        self.assertEqual(session_file.content, "# State\n\nMy state content.")
+        assert session_file is not None
+        assert session_file.agent_id == self.agent_id
+        assert session_file.definition_id == self.definition_id
+        assert session_file.content == "# State\n\nMy state content."
 
     def test_get_session_file_by_definition(self) -> None:
         file_id = str(uuid.uuid4())
@@ -220,11 +219,9 @@ class SessionFileCRUDTests(unittest.TestCase):
             definition_id=self.definition_id,
             content="Test content",
         )
-        session_file = self.db.get_session_file_by_definition(
-            self.agent_id, self.definition_id
-        )
-        self.assertIsNotNone(session_file)
-        self.assertEqual(session_file.id, file_id)
+        session_file = self.db.get_session_file_by_definition(self.agent_id, self.definition_id)
+        assert session_file is not None
+        assert session_file.id == file_id
 
     def test_list_session_files(self) -> None:
         # Create another definition
@@ -249,7 +246,7 @@ class SessionFileCRUDTests(unittest.TestCase):
             content="TODO content",
         )
         files = self.db.list_session_files(self.agent_id)
-        self.assertEqual(len(files), 2)
+        assert len(files) == 2
 
     def test_update_session_file(self) -> None:
         file_id = str(uuid.uuid4())
@@ -261,7 +258,7 @@ class SessionFileCRUDTests(unittest.TestCase):
         )
         self.db.update_session_file(file_id=file_id, content="Updated content")
         session_file = self.db.get_session_file(file_id)
-        self.assertEqual(session_file.content, "Updated content")
+        assert session_file.content == "Updated content"
 
     def test_delete_session_file(self) -> None:
         file_id = str(uuid.uuid4())
@@ -273,7 +270,7 @@ class SessionFileCRUDTests(unittest.TestCase):
         )
         self.db.delete_session_file(file_id)
         session_file = self.db.get_session_file(file_id)
-        self.assertIsNone(session_file)
+        assert session_file is None
 
     def test_delete_session_files_for_agent(self) -> None:
         # Create multiple files
@@ -292,19 +289,18 @@ class SessionFileCRUDTests(unittest.TestCase):
                 content=f"Content {i}",
             )
         files = self.db.list_session_files(self.agent_id)
-        self.assertGreater(len(files), 0)
+        assert len(files) > 0
         self.db.delete_session_files_for_agent(self.agent_id)
         files = self.db.list_session_files(self.agent_id)
-        self.assertEqual(len(files), 0)
+        assert len(files) == 0
 
 
-class ChannelCRUDTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestChannelCRUD:
     """Tests for Channel CRUD operations."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
         # Create an agent
         self.agent_id = str(uuid.uuid4())
         self.db.insert_agent(
@@ -322,9 +318,9 @@ class ChannelCRUDTests(unittest.TestCase):
             response_prefix=None,
         )
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
+    def teardown_method(self) -> None:
+        Channel.objects.all().delete()
+        Agent.objects.all().delete()
 
     def test_insert_channel(self) -> None:
         channel_id = str(uuid.uuid4())
@@ -337,12 +333,12 @@ class ChannelCRUDTests(unittest.TestCase):
             enabled=True,
         )
         channel = self.db.get_channel(channel_id)
-        self.assertIsNotNone(channel)
-        self.assertEqual(channel.agent_id, self.agent_id)
-        self.assertEqual(channel.type, "slack")
-        self.assertEqual(channel.name, "agent/vm")
-        self.assertEqual(channel.external_channel_id, "C12345")
-        self.assertTrue(channel.enabled)
+        assert channel is not None
+        assert channel.agent_id == self.agent_id
+        assert channel.type == "slack"
+        assert channel.name == "agent/vm"
+        assert channel.external_channel_id == "C12345"
+        assert channel.enabled
 
     def test_list_channels_for_agent(self) -> None:
         # Create channels for our agent
@@ -354,7 +350,7 @@ class ChannelCRUDTests(unittest.TestCase):
                 name=f"channel{i}",
             )
         channels = self.db.list_channels(agent_id=self.agent_id)
-        self.assertEqual(len(channels), 2)
+        assert len(channels) == 2
 
     def test_list_all_channels(self) -> None:
         # Create another agent with channels
@@ -386,7 +382,7 @@ class ChannelCRUDTests(unittest.TestCase):
             name="channel2",
         )
         channels = self.db.list_channels()
-        self.assertEqual(len(channels), 2)
+        assert len(channels) == 2
 
     def test_get_channel_by_external_id(self) -> None:
         channel_id = str(uuid.uuid4())
@@ -398,8 +394,8 @@ class ChannelCRUDTests(unittest.TestCase):
             external_channel_id="C99999",
         )
         channel = self.db.get_channel_by_external_id("slack", "C99999")
-        self.assertIsNotNone(channel)
-        self.assertEqual(channel.id, channel_id)
+        assert channel is not None
+        assert channel.id == channel_id
 
     def test_update_channel(self) -> None:
         channel_id = str(uuid.uuid4())
@@ -417,9 +413,9 @@ class ChannelCRUDTests(unittest.TestCase):
             enabled=False,
         )
         channel = self.db.get_channel(channel_id)
-        self.assertEqual(channel.name, "updated")
-        self.assertEqual(channel.external_channel_id, "C_UPDATED")
-        self.assertFalse(channel.enabled)
+        assert channel.name == "updated"
+        assert channel.external_channel_id == "C_UPDATED"
+        assert not channel.enabled
 
     def test_delete_channel(self) -> None:
         channel_id = str(uuid.uuid4())
@@ -431,16 +427,15 @@ class ChannelCRUDTests(unittest.TestCase):
         )
         self.db.delete_channel(channel_id)
         channel = self.db.get_channel(channel_id)
-        self.assertIsNone(channel)
+        assert channel is None
 
 
-class AgentSessionStandaloneTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestAgentSessionStandalone:
     """Tests for standalone agent sessions (no project_id)."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
         # Create an agent
         self.agent_id = str(uuid.uuid4())
         self.db.insert_agent(
@@ -467,16 +462,17 @@ class AgentSessionStandaloneTests(unittest.TestCase):
             port=22,
         )
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
+    def teardown_method(self) -> None:
+        AgentSession.objects.all().delete()
+        VMTarget.objects.all().delete()
+        Agent.objects.all().delete()
 
     def test_insert_standalone_session(self) -> None:
         """Test that agent sessions can be created without a project_id."""
         session_id = str(uuid.uuid4())
         self.db.insert_session(
             session_id=session_id,
-            project_id=None,  # No project - standalone session
+            project_id=None, # No project - standalone session
             agent_id=self.agent_id,
             ticket_id=None,
             status="running",
@@ -486,12 +482,12 @@ class AgentSessionStandaloneTests(unittest.TestCase):
             workspace_path="/tmp/workspace",
         )
         session = self.db.get_session(session_id)
-        self.assertIsNotNone(session)
-        self.assertEqual(session.agent_id, self.agent_id)
-        self.assertIsNone(session.project_id)
-        self.assertEqual(session.initial_prompt, "Hello, agent!")
-        self.assertEqual(session.workspace_path, "/tmp/workspace")
+        assert session is not None
+        assert session.agent_id == self.agent_id
+        assert session.project_id is None
+        assert session.initial_prompt == "Hello, agent!"
+        assert session.workspace_path == "/tmp/workspace"
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__])

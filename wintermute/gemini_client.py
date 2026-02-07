@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from wintermute.db import AgentRecord
+from wintermute.models import Agent as AgentRecord
 from wintermute.runner import SSHSpec
 
 
@@ -155,10 +155,14 @@ def _run_gemini_process(
     ssh_cmd = [
         "ssh",
         "-T",
-        "-o", "RequestTTY=no",
-        "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=10",
-        "-p", str(spec.port),
+        "-o",
+        "RequestTTY=no",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-p",
+        str(spec.port),
         *spec.options,
         f"{spec.user}@{spec.host}",
         f"cd {shlex.quote(cwd)} && bash -lc {shlex.quote(shell_cmd)}",

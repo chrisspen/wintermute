@@ -7,9 +7,8 @@ from typing import Any, Optional
 
 import aiohttp
 
-from wintermute.db import Database
+from wintermute.services.database import Database
 from wintermute.tools.base import Tool, ToolDefinition
-
 
 GITHUB_PROVIDER = "github"
 GITHUB_TOKEN_NAME = "token"
@@ -42,9 +41,7 @@ class GitHubToolBase(Tool):
         }
         url = f"{self.api_base}{path}"
         async with aiohttp.ClientSession() as session:
-            async with session.request(
-                method, url, headers=headers, params=params, json=json_body
-            ) as response:
+            async with session.request(method, url, headers=headers, params=params, json=json_body) as response:
                 payload = await response.json()
                 if response.status >= 400:
                     message = payload.get("message", "GitHub API error")
@@ -80,13 +77,31 @@ class GitHubListIssuesTool(GitHubToolBase):
         input_schema={
             "type": "object",
             "properties": {
-                "token_id": {"type": "string"},
-                "owner": {"type": "string"},
-                "repo": {"type": "string"},
-                "state": {"type": "string", "enum": ["open", "closed", "all"]},
-                "labels": {"type": "array", "items": {"type": "string"}},
-                "per_page": {"type": "integer"},
-                "page": {"type": "integer"},
+                "token_id": {
+                    "type": "string"
+                },
+                "owner": {
+                    "type": "string"
+                },
+                "repo": {
+                    "type": "string"
+                },
+                "state": {
+                    "type": "string",
+                    "enum": ["open", "closed", "all"]
+                },
+                "labels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "per_page": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
             },
             "required": ["token_id", "owner", "repo"],
         },
@@ -126,10 +141,18 @@ class GitHubGetIssueTool(GitHubToolBase):
         input_schema={
             "type": "object",
             "properties": {
-                "token_id": {"type": "string"},
-                "owner": {"type": "string"},
-                "repo": {"type": "string"},
-                "issue_number": {"type": "integer"},
+                "token_id": {
+                    "type": "string"
+                },
+                "owner": {
+                    "type": "string"
+                },
+                "repo": {
+                    "type": "string"
+                },
+                "issue_number": {
+                    "type": "integer"
+                },
             },
             "required": ["token_id", "owner", "repo", "issue_number"],
         },
@@ -159,11 +182,21 @@ class GitHubCommentIssueTool(GitHubToolBase):
         input_schema={
             "type": "object",
             "properties": {
-                "token_id": {"type": "string"},
-                "owner": {"type": "string"},
-                "repo": {"type": "string"},
-                "issue_number": {"type": "integer"},
-                "body": {"type": "string"},
+                "token_id": {
+                    "type": "string"
+                },
+                "owner": {
+                    "type": "string"
+                },
+                "repo": {
+                    "type": "string"
+                },
+                "issue_number": {
+                    "type": "integer"
+                },
+                "body": {
+                    "type": "string"
+                },
             },
             "required": ["token_id", "owner", "repo", "issue_number", "body"],
         },

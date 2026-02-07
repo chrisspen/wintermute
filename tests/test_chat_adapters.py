@@ -1,29 +1,33 @@
 """Tests for chat platform adapters and dispatcher."""
 
-import tempfile
-import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from asgiref.sync import sync_to_async
+
 from wintermute.chat.adapters import (
-    ChatPlatformAdapter,
     DiscordAdapter,
     MessageResult,
     SlackAdapter,
     TelegramAdapter,
 )
 from wintermute.chat.dispatcher import ChatDispatcher
-from wintermute.db import Database, ChannelRecord
+from wintermute.models import Agent, Channel, Credential
+from wintermute.models import Channel as ChannelRecord
+from wintermute.services.database import AsyncDatabase, Database
 
 
-class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
+class TestSlackAdapter:
     """Tests for SlackAdapter."""
 
+    @pytest.mark.asyncio
     async def test_platform_type_is_slack(self) -> None:
         """SlackAdapter should return 'slack' as platform type."""
         with patch("slack_sdk.web.async_client.AsyncWebClient"):
             adapter = SlackAdapter(bot_token="xoxb-test-token")
-            self.assertEqual(adapter.platform_type, "slack")
+            assert adapter.platform_type == "slack"
 
+    @pytest.mark.asyncio
     async def test_send_message_success(self) -> None:
         """SlackAdapter should return success with message ID on success."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
@@ -34,14 +38,15 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
             adapter = SlackAdapter(bot_token="xoxb-test-token")
             result = await adapter.send_message("C123", "Hello, world!")
 
-            self.assertTrue(result.success)
-            self.assertEqual(result.message_id, "1234567890.123456")
+            assert result.success
+            assert result.message_id == "1234567890.123456"
             mock_client.chat_postMessage.assert_called_once_with(
                 channel="C123",
                 text="Hello, world!",
                 thread_ts=None,
             )
 
+    @pytest.mark.asyncio
     async def test_send_message_with_thread(self) -> None:
         """SlackAdapter should pass thread_ts to API."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
@@ -56,14 +61,15 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
             adapter = SlackAdapter(bot_token="xoxb-test-token")
             result = await adapter.send_message("C123", "Reply", thread_ts="1234567890.000000")
 
-            self.assertTrue(result.success)
-            self.assertEqual(result.thread_id, "1234567890.000000")
+            assert result.success
+            assert result.thread_id == "1234567890.000000"
             mock_client.chat_postMessage.assert_called_once_with(
                 channel="C123",
                 text="Reply",
                 thread_ts="1234567890.000000",
             )
 
+    @pytest.mark.asyncio
     async def test_send_message_api_error(self) -> None:
         """SlackAdapter should return error on API failure."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
@@ -74,9 +80,10 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
             adapter = SlackAdapter(bot_token="xoxb-test-token")
             result = await adapter.send_message("C123", "Hello")
 
-            self.assertFalse(result.success)
-            self.assertEqual(result.error, "channel_not_found")
+            assert not result.success
+            assert result.error == "channel_not_found"
 
+    @pytest.mark.asyncio
     async def test_send_message_exception(self) -> None:
         """SlackAdapter should handle exceptions gracefully."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
@@ -87,9 +94,10 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
             adapter = SlackAdapter(bot_token="xoxb-test-token")
             result = await adapter.send_message("C123", "Hello")
 
-            self.assertFalse(result.success)
-            self.assertIn("Network error", result.error)
+            assert not result.success
+            assert "Network error" in result.error
 
+    @pytest.mark.asyncio
     async def test_send_thread_reply_uses_send_message(self) -> None:
         """SlackAdapter.send_thread_reply should delegate to send_message."""
         with patch("slack_sdk.web.async_client.AsyncWebClient") as mock_client_cls:
@@ -100,7 +108,7 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
             adapter = SlackAdapter(bot_token="xoxb-test-token")
             result = await adapter.send_thread_reply("C123", "1234567890.000000", "Reply text")
 
-            self.assertTrue(result.success)
+            assert result.success
             mock_client.chat_postMessage.assert_called_once_with(
                 channel="C123",
                 text="Reply text",
@@ -108,52 +116,53 @@ class SlackAdapterTests(unittest.IsolatedAsyncioTestCase):
             )
 
 
-class TelegramAdapterTests(unittest.IsolatedAsyncioTestCase):
+class TestTelegramAdapter:
     """Tests for TelegramAdapter (placeholder)."""
 
+    @pytest.mark.asyncio
     async def test_platform_type_is_telegram(self) -> None:
         """TelegramAdapter should return 'telegram' as platform type."""
         adapter = TelegramAdapter(bot_token="test-token")
-        self.assertEqual(adapter.platform_type, "telegram")
+        assert adapter.platform_type == "telegram"
 
+    @pytest.mark.asyncio
     async def test_send_message_returns_not_implemented(self) -> None:
         """TelegramAdapter should return not implemented error."""
         adapter = TelegramAdapter(bot_token="test-token")
         result = await adapter.send_message("123456", "Hello")
 
-        self.assertFalse(result.success)
-        self.assertIn("not implemented", result.error.lower())
+        assert not result.success
+        assert "not implemented" in result.error.lower()
 
 
-class DiscordAdapterTests(unittest.IsolatedAsyncioTestCase):
+class TestDiscordAdapter:
     """Tests for DiscordAdapter (placeholder)."""
 
+    @pytest.mark.asyncio
     async def test_platform_type_is_discord(self) -> None:
         """DiscordAdapter should return 'discord' as platform type."""
         adapter = DiscordAdapter(bot_token="test-token")
-        self.assertEqual(adapter.platform_type, "discord")
+        assert adapter.platform_type == "discord"
 
+    @pytest.mark.asyncio
     async def test_send_message_returns_not_implemented(self) -> None:
         """DiscordAdapter should return not implemented error."""
         adapter = DiscordAdapter(bot_token="test-token")
         result = await adapter.send_message("123456", "Hello")
 
-        self.assertFalse(result.success)
-        self.assertIn("not implemented", result.error.lower())
+        assert not result.success
+        assert "not implemented" in result.error.lower()
 
 
-class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
+@pytest.mark.django_db(transaction=True)
+class TestChatDispatcher:
     """Tests for ChatDispatcher."""
 
-    async def asyncSetUp(self) -> None:
-        from asgiref.sync import sync_to_async
-        from wintermute.models import Agent
-
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
-        # Create an agent for channel tests via Django ORM (wrapped for async)
-        self.agent = await sync_to_async(Agent.objects.create)(
+    def setup_method(self) -> None:
+        """Set up test fixtures."""
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
+        # Create an agent for channel tests
+        self.agent = Agent.objects.create(
             id="agent-1",
             name="Test Agent",
             slug="test-agent",
@@ -161,16 +170,13 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             session_mode="tmux",
         )
 
-    async def asyncTearDown(self) -> None:
-        from asgiref.sync import sync_to_async
-        from wintermute.models import Agent, Channel, Credential
+    def teardown_method(self) -> None:
+        """Clean up test data."""
+        Channel.objects.all().delete()
+        Credential.objects.all().delete()
+        Agent.objects.all().delete()
 
-        # Clean up test data
-        await sync_to_async(Channel.objects.all().delete)()
-        await sync_to_async(Credential.objects.all().delete)()
-        await sync_to_async(Agent.objects.all().delete)()
-        self.temp_db.close()
-
+    @pytest.mark.asyncio
     async def test_send_to_channel_disabled_channel(self) -> None:
         """Dispatcher should return error for disabled channel."""
         dispatcher = ChatDispatcher(self.db)
@@ -187,9 +193,10 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         result = await dispatcher.send_to_channel(channel, "Hello")
 
-        self.assertFalse(result.success)
-        self.assertIn("disabled", result.error.lower())
+        assert not result.success
+        assert "disabled" in result.error.lower()
 
+    @pytest.mark.asyncio
     async def test_send_to_channel_no_external_id(self) -> None:
         """Dispatcher should return error for channel without external ID."""
         dispatcher = ChatDispatcher(self.db)
@@ -206,9 +213,10 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         result = await dispatcher.send_to_channel(channel, "Hello")
 
-        self.assertFalse(result.success)
-        self.assertIn("external", result.error.lower())
+        assert not result.success
+        assert "external" in result.error.lower()
 
+    @pytest.mark.asyncio
     async def test_send_to_channel_unknown_platform(self) -> None:
         """Dispatcher should return error for unknown platform type."""
         dispatcher = ChatDispatcher(self.db)
@@ -225,9 +233,10 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         result = await dispatcher.send_to_channel(channel, "Hello")
 
-        self.assertFalse(result.success)
-        self.assertIn("adapter", result.error.lower())
+        assert not result.success
+        assert "adapter" in result.error.lower()
 
+    @pytest.mark.asyncio
     async def test_send_to_channel_no_token(self) -> None:
         """Dispatcher should return error when platform token is not configured."""
         dispatcher = ChatDispatcher(self.db)
@@ -244,16 +253,14 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
 
         result = await dispatcher.send_to_channel(channel, "Hello")
 
-        self.assertFalse(result.success)
+        assert not result.success
         # Either "adapter" or "token" depending on error path
-        self.assertTrue("adapter" in result.error.lower() or "token" in result.error.lower())
+        assert "adapter" in result.error.lower() or "token" in result.error.lower()
 
+    @pytest.mark.asyncio
     async def test_send_to_channel_success(self) -> None:
         """Dispatcher should send message via adapter when configured."""
-        from asgiref.sync import sync_to_async
-        from wintermute.models import Credential
-
-        # Add Slack credential via Django ORM (wrapped for async)
+        # Add Slack credential
         await sync_to_async(Credential.objects.create)(
             id="cred-1",
             provider="slack",
@@ -280,15 +287,13 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             dispatcher = ChatDispatcher(self.db)
             result = await dispatcher.send_to_channel(channel, "Hello")
 
-            self.assertTrue(result.success)
+            assert result.success
             mock_client.chat_postMessage.assert_called_once()
 
+    @pytest.mark.asyncio
     async def test_broadcast_to_agent_channels(self) -> None:
         """Dispatcher should broadcast to all enabled agent channels."""
-        from asgiref.sync import sync_to_async
-        from wintermute.models import Channel, Credential
-
-        # Add Slack credential via Django ORM (wrapped for async)
+        # Add Slack credential
         await sync_to_async(Credential.objects.create)(
             id="cred-1",
             provider="slack",
@@ -296,7 +301,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             reference="xoxb-test-token",
         )
 
-        # Add channels via Django ORM (wrapped for async)
+        # Add channels
         await sync_to_async(Channel.objects.create)(
             id="ch-1",
             agent_id=self.agent.id,
@@ -331,16 +336,14 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             results = await dispatcher.broadcast_to_agent_channels("agent-1", "Hello, world!")
 
             # Should only send to enabled channels (2)
-            self.assertEqual(len(results), 2)
+            assert len(results) == 2
             for channel, result in results:
-                self.assertTrue(result.success)
+                assert result.success
 
+    @pytest.mark.asyncio
     async def test_broadcast_with_platform_filter(self) -> None:
         """Dispatcher should filter by platform when specified."""
-        from asgiref.sync import sync_to_async
-        from wintermute.models import Channel, Credential
-
-        # Add credentials via Django ORM (wrapped for async)
+        # Add credentials
         await sync_to_async(Credential.objects.create)(
             id="cred-1",
             provider="slack",
@@ -348,7 +351,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             reference="xoxb-test-token",
         )
 
-        # Add mixed platform channels via Django ORM (wrapped for async)
+        # Add mixed platform channels
         await sync_to_async(Channel.objects.create)(
             id="ch-1",
             agent_id=self.agent.id,
@@ -375,19 +378,16 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             results = await dispatcher.broadcast_to_agent_channels("agent-1", "Hello!", platform_filter="slack")
 
             # Should only send to Slack channels (1)
-            self.assertEqual(len(results), 1)
-            self.assertEqual(results[0][0].type, "slack")
+            assert len(results) == 1
+            assert results[0][0].type == "slack"
 
+    @pytest.mark.asyncio
     async def test_broadcast_with_async_database(self) -> None:
         """Dispatcher should work with AsyncDatabase (list_channels returns coroutine)."""
-        from asgiref.sync import sync_to_async
-        from wintermute.db import AsyncDatabase
-        from wintermute.models import Channel, Credential
-
         # Create AsyncDatabase wrapper
-        async_db = AsyncDatabase(self.temp_db.name)
+        async_db = AsyncDatabase(":memory:")
 
-        # Add Slack credential via Django ORM (wrapped for async)
+        # Add Slack credential
         await sync_to_async(Credential.objects.create)(
             id="cred-async",
             provider="slack",
@@ -395,7 +395,7 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             reference="xoxb-test-token",
         )
 
-        # Add channel via Django ORM (wrapped for async)
+        # Add channel
         await sync_to_async(Channel.objects.create)(
             id="ch-async",
             agent_id=self.agent.id,
@@ -415,28 +415,28 @@ class ChatDispatcherTests(unittest.IsolatedAsyncioTestCase):
             results = await dispatcher.broadcast_to_agent_channels("agent-1", "Hello from async!")
 
             # Should handle coroutine result from list_channels
-            self.assertEqual(len(results), 1)
-            self.assertTrue(results[0][1].success)
+            assert len(results) == 1
+            assert results[0][1].success
 
 
-class MessageResultTests(unittest.TestCase):
+class TestMessageResult:
     """Tests for MessageResult dataclass."""
 
     def test_success_result(self) -> None:
         """MessageResult should store success state."""
         result = MessageResult(success=True, message_id="123", thread_id="456")
-        self.assertTrue(result.success)
-        self.assertEqual(result.message_id, "123")
-        self.assertEqual(result.thread_id, "456")
-        self.assertIsNone(result.error)
+        assert result.success
+        assert result.message_id == "123"
+        assert result.thread_id == "456"
+        assert result.error is None
 
     def test_error_result(self) -> None:
         """MessageResult should store error state."""
         result = MessageResult(success=False, error="Something went wrong")
-        self.assertFalse(result.success)
-        self.assertIsNone(result.message_id)
-        self.assertEqual(result.error, "Something went wrong")
+        assert not result.success
+        assert result.message_id is None
+        assert result.error == "Something went wrong"
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__])

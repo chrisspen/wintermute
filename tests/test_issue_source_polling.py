@@ -3,19 +3,20 @@
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from asgiref.sync import async_to_sync, sync_to_async
-from django.test import TestCase
 
-from wintermute.db import AsyncDatabase, Database
+from wintermute.services.database import AsyncDatabase, Database
 from wintermute.models import Project, RemoteToken
 from wintermute.sources.github import GitHubIssuesSource
 from wintermute.sources.gitlab import GitLabIssuesSource
 
 
-class GitHubIssuesSourcePollTests(TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestGitHubIssuesSourcePoll:
 
-    def setUp(self) -> None:
-        # Django TestCase uses test database automatically
+    def setup_method(self) -> None:
+        # pytest-django handles test database isolation
         # Use AsyncDatabase since sources expect async interface
         self.db = AsyncDatabase(":memory:") # Path ignored, uses Django's test DB
         # Create token required for projects with sources
@@ -51,11 +52,11 @@ class GitHubIssuesSourcePollTests(TestCase):
 
                 # First poll should happen
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 1)
+                assert mock_fetch.call_count == 1
 
                 # Immediate second poll should be skipped (within 30s interval)
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 1)
+                assert mock_fetch.call_count == 1
 
         async_to_sync(run_test)()
 
@@ -83,12 +84,12 @@ class GitHubIssuesSourcePollTests(TestCase):
 
                 # First poll
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 1)
+                assert mock_fetch.call_count == 1
 
                 # Manually set last_poll to 61 seconds ago (project ID is now the source ID)
                 source._last_poll["proj-2"] = datetime.now(timezone.utc).timestamp() - 61
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 2)
+                assert mock_fetch.call_count == 2
 
         async_to_sync(run_test)()
 
@@ -128,13 +129,13 @@ class GitHubIssuesSourcePollTests(TestCase):
 
                 # First poll - both should be called
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 2)
+                assert mock_fetch.call_count == 2
 
                 # Set fast source to 11 seconds ago (past interval), slow source stays at 0
                 source._last_poll["proj-fast"] = datetime.now(timezone.utc).timestamp() - 11
                 await source.poll(ctx)
                 # Only fast should be polled again
-                self.assertEqual(mock_fetch.call_count, 3)
+                assert mock_fetch.call_count == 3
 
         async_to_sync(run_test)()
 
@@ -165,9 +166,10 @@ class GitHubIssuesSourcePollTests(TestCase):
         async_to_sync(run_test)()
 
 
-class GitLabIssuesSourcePollTests(TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestGitLabIssuesSourcePoll:
 
-    def setUp(self) -> None:
+    def setup_method(self) -> None:
         self.db = AsyncDatabase(":memory:")
         RemoteToken.objects.create(
             id="gl-tok-1",
@@ -200,20 +202,19 @@ class GitLabIssuesSourcePollTests(TestCase):
 
                 # First poll should happen
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 1)
+                assert mock_fetch.call_count == 1
 
                 # Immediate second poll should be skipped
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 1)
+                assert mock_fetch.call_count == 1
 
                 # After interval elapsed
                 source._last_poll["proj-gl-1"] = datetime.now(timezone.utc).timestamp() - 46
                 await source.poll(ctx)
-                self.assertEqual(mock_fetch.call_count, 2)
+                assert mock_fetch.call_count == 2
 
         async_to_sync(run_test)()
 
 
 if __name__ == "__main__":
-    import unittest
-    unittest.main()
+    pytest.main([__file__])

@@ -1,27 +1,25 @@
 """Tests for error handling in sources and related code."""
 
-import os
-import tempfile
-import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
+import pytest
 from asgiref.sync import async_to_sync
 
-from wintermute.db import AsyncDatabase, ChannelRecord, Database
-from wintermute.models import RemoteToken
+from wintermute.models import Agent, Channel, Project, RemoteToken
+from wintermute.models import Channel as ChannelRecord
+from wintermute.services.database import AsyncDatabase, Database
 from wintermute.sources.gitlab import GitLabIssuesSource
 
 
-class GitLabAPIErrorHandlingTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestGitLabAPIErrorHandling:
     """Tests for GitLab source handling API errors gracefully."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db_sync = Database(self.temp_db.name)
-        self.db_sync.initialize()
-        self.db = AsyncDatabase(self.temp_db.name)
+    def setup_method(self) -> None:
+        self.db_sync = Database(":memory:") # Path ignored, uses Django's test DB
+        self.db = AsyncDatabase(":memory:")
 
         # Create token required for projects with sources
         self.token_id = f"gl-tok-{uuid.uuid4()}"
@@ -51,9 +49,9 @@ class GitLabAPIErrorHandlingTests(unittest.TestCase):
 
         async_to_sync(create_project)()
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
+    def teardown_method(self) -> None:
+        Project.objects.all().delete()
+        RemoteToken.objects.all().delete()
 
     def test_handles_500_html_response(self) -> None:
         """GitLab source should not crash when API returns 500 with HTML error page."""
@@ -87,9 +85,9 @@ class GitLabAPIErrorHandlingTests(unittest.TestCase):
                         labels=[],
                     )
                     # Should return empty list on error
-                    self.assertEqual(result, [])
+                    assert result == []
                 except aiohttp.ContentTypeError:
-                    self.fail("GitLab source crashed on HTML error response - should handle gracefully")
+                    pytest.fail("GitLab source crashed on HTML error response - should handle gracefully")
 
         async_to_sync(run_test)()
 
@@ -118,7 +116,7 @@ class GitLabAPIErrorHandlingTests(unittest.TestCase):
                     state="opened",
                     labels=[],
                 )
-                self.assertEqual(result, [])
+                assert result == []
 
         async_to_sync(run_test)()
 
@@ -160,12 +158,12 @@ class GitLabAPIErrorHandlingTests(unittest.TestCase):
                 try:
                     await source.poll(ctx)
                 except aiohttp.ContentTypeError:
-                    self.fail("Poll should handle errors from individual sources gracefully")
+                    pytest.fail("Poll should handle errors from individual sources gracefully")
 
         async_to_sync(run_test)()
 
 
-class ChannelRecordAttributeTests(unittest.TestCase):
+class TestChannelRecordAttribute:
     """Tests to verify ChannelRecord attributes are used correctly."""
 
     def test_channel_record_has_type_attribute(self) -> None:
@@ -181,10 +179,10 @@ class ChannelRecordAttributeTests(unittest.TestCase):
             updated_at="2024-01-01T00:00:00Z",
         )
         # Should have 'type' attribute
-        self.assertEqual(record.type, "slack")
+        assert record.type == "slack"
 
         # Should NOT have 'channel_type' attribute
-        self.assertFalse(hasattr(record, "channel_type"))
+        assert not hasattr(record, "channel_type")
 
     def test_channel_record_type_values(self) -> None:
         """ChannelRecord type can hold various channel types."""
@@ -199,21 +197,20 @@ class ChannelRecordAttributeTests(unittest.TestCase):
                 created_at="2024-01-01T00:00:00Z",
                 updated_at="2024-01-01T00:00:00Z",
             )
-            self.assertEqual(record.type, channel_type)
+            assert record.type == channel_type
 
 
-class SessionsChannelDispatchTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestSessionsChannelDispatch:
     """Tests for channel dispatch in sessions.py using correct attributes."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db_sync = Database(self.temp_db.name)
-        self.db_sync.initialize()
-        self.db = AsyncDatabase(self.temp_db.name)
+    def setup_method(self) -> None:
+        self.db_sync = Database(":memory:") # Path ignored, uses Django's test DB
+        self.db = AsyncDatabase(":memory:")
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-        os.unlink(self.temp_db.name)
+    def teardown_method(self) -> None:
+        Channel.objects.all().delete()
+        Agent.objects.all().delete()
 
     def test_slack_channel_dispatch_uses_type_attribute(self) -> None:
         """Verify sessions code uses channel.type not channel.channel_type."""
@@ -249,18 +246,18 @@ class SessionsChannelDispatchTests(unittest.TestCase):
 
             # Verify channel is retrieved correctly
             channels = await self.db.list_channels(agent_id=agent_id)
-            self.assertEqual(len(channels), 1)
+            assert len(channels) == 1
             channel = channels[0]
 
             # This is what the sessions.py code should use
-            self.assertEqual(channel.type, "slack")
+            assert channel.type == "slack"
 
             # This would fail - verifying the bug is fixed
-            with self.assertRaises(AttributeError):
+            with pytest.raises(AttributeError):
                 _ = channel.channel_type
 
         async_to_sync(run_test)()
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__])

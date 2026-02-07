@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd "$SCRIPT_DIR"
+
+# Determine venv: WINTERMUTE_VENV > WINTERMUTE_AGENT_NAME > default
+DEFAULT_VENV="$HOME/pyenv/wintermute"
+if [ -n "${WINTERMUTE_VENV:-}" ]; then
+  VENV_DIR="$WINTERMUTE_VENV"
+elif [ -n "${WINTERMUTE_AGENT_NAME:-}" ]; then
+  VENV_DIR="$HOME/pyenv/wintermute-${WINTERMUTE_AGENT_NAME}"
+else
+  VENV_DIR="$DEFAULT_VENV"
+fi
+
+# Fallback: if default doesn't exist, try to find any wintermute-* venv
+if [ ! -d "$VENV_DIR" ]; then
+  for v in "$HOME/pyenv/wintermute-"*; do
+    if [ -d "$v" ]; then
+      VENV_DIR="$v"
+      break
+    fi
+  done
+fi
+
+if [ ! -d "$VENV_DIR" ]; then
+  echo "Error: No venv found. Run ./setup.sh first." >&2
+  exit 1
+fi
+
+# Source .env if it exists
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+fi
+
+# Run manage.py with the venv's python
+exec "$VENV_DIR/bin/python" manage.py "$@"

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any
 
-from wintermute.db import AsyncDatabase
+from wintermute.services.database import AsyncDatabase
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 from wintermute.tickets import parse_issue_ticket
 

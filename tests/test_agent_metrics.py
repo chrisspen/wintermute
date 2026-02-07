@@ -1,23 +1,20 @@
 """Tests for agent metrics and memory management functionality."""
 
-import tempfile
-import unittest
 import uuid
 from unittest.mock import patch, MagicMock
 
-from wintermute.db import Database, VMTargetRecord, AgentRecord
+import pytest
+
+from wintermute.models import Agent as AgentRecord, VMTarget as VMTargetRecord
+from wintermute.services.database import Database
 
 
-class MetricDefinitionCRUDTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestMetricDefinitionCRUD:
     """Tests for MetricDefinition CRUD operations."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
-
-    def tearDown(self) -> None:
-        self.temp_db.close()
+    def setup_method(self) -> None:
+        self.db = Database()
 
     def test_create_metric_definition(self) -> None:
         """Should create a metric definition."""
@@ -29,10 +26,10 @@ class MetricDefinitionCRUDTests(unittest.TestCase):
             enabled=True,
         )
         defn = self.db.get_metric_definition(definition_id)
-        self.assertIsNotNone(defn)
-        self.assertEqual(defn.metric_type, "MEMORY_USAGE")
-        self.assertEqual(defn.recording_frequency_minutes, 5)
-        self.assertTrue(defn.enabled)
+        assert defn is not None
+        assert defn.metric_type == "MEMORY_USAGE"
+        assert defn.recording_frequency_minutes == 5
+        assert defn.enabled
 
     def test_get_metric_definition(self) -> None:
         """Should get a metric definition by ID."""
@@ -44,10 +41,10 @@ class MetricDefinitionCRUDTests(unittest.TestCase):
             enabled=False,
         )
         fetched = self.db.get_metric_definition(definition_id)
-        self.assertIsNotNone(fetched)
-        self.assertEqual(fetched.metric_type, "CPU_USAGE")
-        self.assertEqual(fetched.recording_frequency_minutes, 10)
-        self.assertFalse(fetched.enabled)
+        assert fetched is not None
+        assert fetched.metric_type == "CPU_USAGE"
+        assert fetched.recording_frequency_minutes == 10
+        assert not fetched.enabled
 
     def test_list_metric_definitions(self) -> None:
         """Should list all metric definitions."""
@@ -64,7 +61,7 @@ class MetricDefinitionCRUDTests(unittest.TestCase):
             enabled=False,
         )
         definitions = self.db.list_metric_definitions()
-        self.assertEqual(len(definitions), 2)
+        assert len(definitions) == 2
 
     def test_update_metric_definition(self) -> None:
         """Should update a metric definition."""
@@ -82,9 +79,9 @@ class MetricDefinitionCRUDTests(unittest.TestCase):
             enabled=False,
         )
         updated = self.db.get_metric_definition(definition_id)
-        self.assertEqual(updated.metric_type, "DISK_USAGE")
-        self.assertEqual(updated.recording_frequency_minutes, 15)
-        self.assertFalse(updated.enabled)
+        assert updated.metric_type == "DISK_USAGE"
+        assert updated.recording_frequency_minutes == 15
+        assert not updated.enabled
 
     def test_delete_metric_definition(self) -> None:
         """Should delete a metric definition."""
@@ -96,16 +93,15 @@ class MetricDefinitionCRUDTests(unittest.TestCase):
             enabled=True,
         )
         self.db.delete_metric_definition(definition_id)
-        self.assertIsNone(self.db.get_metric_definition(definition_id))
+        assert self.db.get_metric_definition(definition_id) is None
 
 
-class AgentMetricsLogCRUDTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestAgentMetricsLogCRUD:
     """Tests for AgentMetricsLog CRUD operations."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database()
         # Create test agent and metric definition
         self.agent_id = str(uuid.uuid4())
         self.db.insert_agent(
@@ -130,9 +126,6 @@ class AgentMetricsLogCRUDTests(unittest.TestCase):
             enabled=True,
         )
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-
     def test_create_agent_metrics_log(self) -> None:
         """Should create an agent metrics log entry."""
         log_id = str(uuid.uuid4())
@@ -143,10 +136,10 @@ class AgentMetricsLogCRUDTests(unittest.TestCase):
             value=512.5,
         )
         log = self.db.get_agent_metrics_log(log_id)
-        self.assertIsNotNone(log)
-        self.assertEqual(log.agent_id, self.agent_id)
-        self.assertEqual(log.metric_definition_id, self.metric_def_id)
-        self.assertEqual(log.value, 512.5)
+        assert log is not None
+        assert log.agent_id == self.agent_id
+        assert log.metric_definition_id == self.metric_def_id
+        assert log.value == 512.5
 
     def test_list_agent_metrics_logs(self) -> None:
         """Should list agent metrics logs."""
@@ -163,7 +156,7 @@ class AgentMetricsLogCRUDTests(unittest.TestCase):
             value=600.0,
         )
         logs = self.db.list_agent_metrics_logs()
-        self.assertEqual(len(logs), 2)
+        assert len(logs) == 2
 
     def test_list_agent_metrics_logs_by_agent(self) -> None:
         """Should filter metrics logs by agent ID."""
@@ -195,8 +188,8 @@ class AgentMetricsLogCRUDTests(unittest.TestCase):
             value=300.0,
         )
         logs = self.db.list_agent_metrics_logs(agent_id=self.agent_id)
-        self.assertEqual(len(logs), 1)
-        self.assertEqual(logs[0].agent_id, self.agent_id)
+        assert len(logs) == 1
+        assert logs[0].agent_id == self.agent_id
 
     def test_list_agent_metrics_logs_with_limit(self) -> None:
         """Should respect limit parameter."""
@@ -208,16 +201,15 @@ class AgentMetricsLogCRUDTests(unittest.TestCase):
                 value=float(i * 100),
             )
         logs = self.db.list_agent_metrics_logs(limit=5)
-        self.assertEqual(len(logs), 5)
+        assert len(logs) == 5
 
 
-class AgentAverageMemoryUsageTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestAgentAverageMemoryUsage:
     """Tests for agent average memory usage calculation."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database()
         # Create test agent
         self.agent_id = str(uuid.uuid4())
         self.db.insert_agent(
@@ -243,13 +235,10 @@ class AgentAverageMemoryUsageTests(unittest.TestCase):
             enabled=True,
         )
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-
     def test_get_agent_average_memory_usage_no_logs(self) -> None:
         """Should return None when no metrics logs exist."""
         avg = self.db.get_agent_average_memory_usage(self.agent_id)
-        self.assertIsNone(avg)
+        assert avg is None
 
     def test_get_agent_average_memory_usage_with_logs(self) -> None:
         """Should calculate average from metrics logs."""
@@ -272,7 +261,7 @@ class AgentAverageMemoryUsageTests(unittest.TestCase):
             value=800.0,
         )
         avg = self.db.get_agent_average_memory_usage(self.agent_id)
-        self.assertEqual(avg, 600.0) # (400 + 600 + 800) / 3
+        assert avg == 600.0 # (400 + 600 + 800) / 3
 
     def test_refresh_agent_average_memory_usage(self) -> None:
         """Should update agent's average_memory_usage_mb field."""
@@ -290,24 +279,20 @@ class AgentAverageMemoryUsageTests(unittest.TestCase):
         )
         self.db.refresh_agent_average_memory_usage(self.agent_id)
         agent = self.db.get_agent(self.agent_id)
-        self.assertEqual(agent.average_memory_usage_mb, 600)
+        assert agent.average_memory_usage_mb == 600
 
     def test_agent_default_average_memory_usage(self) -> None:
         """Agent should have default average_memory_usage_mb of 1000."""
         agent = self.db.get_agent(self.agent_id)
-        self.assertEqual(agent.average_memory_usage_mb, 1000)
+        assert agent.average_memory_usage_mb == 1000
 
 
-class VMTargetReserveMemoryTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestVMTargetReserveMemory:
     """Tests for VM target required_reserve_memory_gb field."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
-
-    def tearDown(self) -> None:
-        self.temp_db.close()
+    def setup_method(self) -> None:
+        self.db = Database()
 
     def test_vm_target_default_reserve_memory(self) -> None:
         """VM target should have default required_reserve_memory_gb of 0.0."""
@@ -320,7 +305,7 @@ class VMTargetReserveMemoryTests(unittest.TestCase):
             port=22,
         )
         vm = self.db.get_vm_target(vm_id)
-        self.assertEqual(vm.required_reserve_memory_gb, 0.0)
+        assert vm.required_reserve_memory_gb == 0.0
 
     def test_update_vm_target_reserve_memory(self) -> None:
         """Should update required_reserve_memory_gb field."""
@@ -341,19 +326,11 @@ class VMTargetReserveMemoryTests(unittest.TestCase):
             required_reserve_memory_gb=2.5,
         )
         vm = self.db.get_vm_target(vm_id)
-        self.assertEqual(vm.required_reserve_memory_gb, 2.5)
+        assert vm.required_reserve_memory_gb == 2.5
 
 
-class MemoryCheckTests(unittest.TestCase):
+class TestMemoryCheck:
     """Tests for memory availability check functions."""
-
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
-
-    def tearDown(self) -> None:
-        self.temp_db.close()
 
     @patch("wintermute.runner.subprocess.run")
     def test_check_vm_memory_available_sufficient(self, mock_run: MagicMock) -> None:
@@ -406,8 +383,8 @@ class MemoryCheckTests(unittest.TestCase):
 
         # 8000 - 1000 = 7000 > 2048 (2 GB), so should be OK
         ok, error = check_vm_memory_available(spec, vm, agent)
-        self.assertTrue(ok)
-        self.assertEqual(error, "")
+        assert ok
+        assert error == ""
 
     @patch("wintermute.runner.subprocess.run")
     def test_check_vm_memory_available_insufficient(self, mock_run: MagicMock) -> None:
@@ -460,9 +437,9 @@ class MemoryCheckTests(unittest.TestCase):
 
         # 2500 - 1000 = 1500 < 2048 (2 GB), so should fail
         ok, error = check_vm_memory_available(spec, vm, agent)
-        self.assertFalse(ok)
-        self.assertIn("Insufficient memory", error)
-        self.assertIn("Test VM", error)
+        assert not ok
+        assert "Insufficient memory" in error
+        assert "Test VM" in error
 
     @patch("wintermute.runner.subprocess.run")
     def test_check_vm_memory_available_ssh_failure(self, mock_run: MagicMock) -> None:
@@ -515,8 +492,8 @@ class MemoryCheckTests(unittest.TestCase):
 
         # When SSH fails, should allow start (return True)
         ok, error = check_vm_memory_available(spec, vm, agent)
-        self.assertTrue(ok)
-        self.assertEqual(error, "")
+        assert ok
+        assert error == ""
 
     @patch("wintermute.runner.subprocess.run")
     def test_check_vm_memory_available_zero_reserve(self, mock_run: MagicMock) -> None:
@@ -562,11 +539,11 @@ class MemoryCheckTests(unittest.TestCase):
         )
 
         ok, error = check_vm_memory_available(spec, vm, agent)
-        self.assertTrue(ok)
-        self.assertEqual(error, "")
+        assert ok
+        assert error == ""
         # Should not have called SSH
         mock_run.assert_not_called()
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__])

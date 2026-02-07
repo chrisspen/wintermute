@@ -21,7 +21,7 @@ try:
 except ImportError: # pragma: no cover - py<3.11
     import tomli as toml
 
-from wintermute.db import AgentRecord
+from wintermute.models import Agent as AgentRecord
 from wintermute.runner import SSHSpec
 
 

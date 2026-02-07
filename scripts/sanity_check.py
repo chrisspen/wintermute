@@ -12,7 +12,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from wintermute.db import Database
+from wintermute.services.database import Database
 from wintermute.runner import build_ssh_spec, command_exists
 
 
@@ -86,9 +86,7 @@ def main() -> int:
                 continue
             if project_vm.repo_mode == "clone":
                 if not project_vm.repo_url or not project_vm.repo_path:
-                    errors.append(
-                        f"Project {project.name} VM mapping missing clone repo_url or repo_path."
-                    )
+                    errors.append(f"Project {project.name} VM mapping missing clone repo_url or repo_path.")
             elif project_vm.repo_mode == "mirror":
                 if not project_vm.repo_path:
                     errors.append(f"Project {project.name} VM mapping missing repo_path.")
@@ -102,9 +100,7 @@ def main() -> int:
             else:
                 spec = build_ssh_spec(vm, agent.required_ssh_options)
                 if not command_exists(spec, command):
-                    warnings.append(
-                        f"Command '{command}' not found on {vm.host} for agent {agent.name}."
-                    )
+                    warnings.append(f"Command '{command}' not found on {vm.host} for agent {agent.name}.")
 
     if warnings:
         print("WARNINGS:")

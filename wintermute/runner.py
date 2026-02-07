@@ -13,7 +13,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Optional
 
-from wintermute.db import AgentRecord, AgentSessionRecord, ProjectRecord, VMTargetRecord
+from wintermute.models import Agent as AgentRecord, AgentSession as AgentSessionRecord, Project as ProjectRecord, VMTarget as VMTargetRecord
 
 
 @dataclass(frozen=True)

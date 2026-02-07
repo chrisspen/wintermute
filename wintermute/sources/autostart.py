@@ -10,7 +10,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from wintermute.db import AsyncDatabase, utc_now
+from wintermute.services.database import AsyncDatabase
+from wintermute.utils import utc_now
 from wintermute.runner import build_ssh_spec, ensure_vm_tools, check_vm_memory_available, start_session
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 

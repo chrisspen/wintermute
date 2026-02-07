@@ -9,7 +9,13 @@ sys.path.insert(0, os.path.abspath(os.getcwd()))
 from alembic import context # pylint: disable=no-name-in-module
 from sqlalchemy import engine_from_config, pool
 
-from wintermute.db import Base
+# Note: Wintermute now uses Django ORM with Django migrations.
+# Alembic/SQLAlchemy is no longer used. This file is kept for historical reference.
+try:
+    from sqlalchemy.orm import declarative_base
+    Base = declarative_base()
+except ImportError:
+    Base = None
 
 config = context.config
 if config.config_file_name is not None:

@@ -1,176 +1,142 @@
 """Tests for Agent LLM configuration."""
 
-import tempfile
-import unittest
+import pytest
 
-from wintermute.db import Database
+from wintermute.models import Agent
 from wintermute.executor import Executor
+from wintermute.utils import utc_now
 
 
-class AgentLLMConfigTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+@pytest.mark.django_db
+class TestAgentLLMConfig:
+    """Tests for Agent LLM configuration."""
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
-
-    def test_insert_agent_with_llm_config(self) -> None:
+    def test_insert_agent_with_llm_config(self):
         """Agent can be created with LLM configuration."""
-        self.db.insert_agent(
-            agent_id="agent-1",
+        now = utc_now()
+        agent = Agent.objects.create(
+            id="agent-1",
             name="Test Agent",
             slug="test-agent",
             command="claude",
             session_mode="claude",
-            vm_target_id=None,
-            required_ssh_options=None,
-            env_vars=None,
-            mcp_config=None,
-            trust_level=None,
-            input_echo_prefix=None,
-            response_prefix=None,
             llm_base_url="http://localhost:11434/v1",
             llm_api_key="test-key",
             llm_model="llama3.2",
+            created_at=now,
+            updated_at=now,
         )
-        agent = self.db.get_agent("agent-1")
-        self.assertIsNotNone(agent)
-        self.assertEqual(agent.llm_base_url, "http://localhost:11434/v1")
-        self.assertEqual(agent.llm_api_key, "test-key")
-        self.assertEqual(agent.llm_model, "llama3.2")
+        assert agent.llm_base_url == "http://localhost:11434/v1"
+        assert agent.llm_api_key == "test-key"
+        assert agent.llm_model == "llama3.2"
 
-    def test_insert_agent_without_llm_config(self) -> None:
+    def test_insert_agent_without_llm_config(self):
         """Agent can be created without LLM configuration (defaults to None)."""
-        self.db.insert_agent(
-            agent_id="agent-2",
+        now = utc_now()
+        agent = Agent.objects.create(
+            id="agent-2",
             name="No LLM Agent",
             slug="no-llm-agent",
             command="claude",
             session_mode="claude",
-            vm_target_id=None,
-            required_ssh_options=None,
-            env_vars=None,
-            mcp_config=None,
-            trust_level=None,
-            input_echo_prefix=None,
-            response_prefix=None,
+            created_at=now,
+            updated_at=now,
         )
-        agent = self.db.get_agent("agent-2")
-        self.assertIsNotNone(agent)
-        self.assertIsNone(agent.llm_base_url)
-        self.assertIsNone(agent.llm_api_key)
-        self.assertIsNone(agent.llm_model)
+        assert agent.llm_base_url is None
+        assert agent.llm_api_key is None
+        assert agent.llm_model is None
 
-    def test_update_agent_llm_config(self) -> None:
+    def test_update_agent_llm_config(self):
         """Agent LLM configuration can be updated."""
-        self.db.insert_agent(
-            agent_id="agent-3",
+        now = utc_now()
+        agent = Agent.objects.create(
+            id="agent-3",
             name="Update Agent",
             slug="update-agent",
             command="claude",
             session_mode="claude",
-            vm_target_id=None,
-            required_ssh_options=None,
-            env_vars=None,
-            mcp_config=None,
-            trust_level=None,
-            input_echo_prefix=None,
-            response_prefix=None,
+            created_at=now,
+            updated_at=now,
         )
-        self.db.update_agent(
-            "agent-3",
-            llm_base_url="https://api.openai.com/v1",
-            llm_api_key="sk-test",
-            llm_model="gpt-4",
-        )
-        agent = self.db.get_agent("agent-3")
-        self.assertEqual(agent.llm_base_url, "https://api.openai.com/v1")
-        self.assertEqual(agent.llm_api_key, "sk-test")
-        self.assertEqual(agent.llm_model, "gpt-4")
+        agent.llm_base_url = "https://api.openai.com/v1"
+        agent.llm_api_key = "sk-test"
+        agent.llm_model = "gpt-4"
+        agent.save()
 
-    def test_list_agents_includes_llm_config(self) -> None:
+        agent.refresh_from_db()
+        assert agent.llm_base_url == "https://api.openai.com/v1"
+        assert agent.llm_api_key == "sk-test"
+        assert agent.llm_model == "gpt-4"
+
+    def test_list_agents_includes_llm_config(self):
         """list_agents returns agents with LLM configuration."""
-        self.db.insert_agent(
-            agent_id="agent-4",
+        now = utc_now()
+        Agent.objects.create(
+            id="agent-4",
             name="Listed Agent",
             slug="listed-agent",
             command="claude",
             session_mode="claude",
-            vm_target_id=None,
-            required_ssh_options=None,
-            env_vars=None,
-            mcp_config=None,
-            trust_level=None,
-            input_echo_prefix=None,
-            response_prefix=None,
             llm_base_url="http://example.com/v1",
             llm_api_key="key123",
             llm_model="model-x",
+            created_at=now,
+            updated_at=now,
         )
-        agents = self.db.list_agents()
+        agents = list(Agent.objects.all())
         agent = next((a for a in agents if a.id == "agent-4"), None)
-        self.assertIsNotNone(agent)
-        self.assertEqual(agent.llm_base_url, "http://example.com/v1")
-        self.assertEqual(agent.llm_api_key, "key123")
-        self.assertEqual(agent.llm_model, "model-x")
+        assert agent is not None
+        assert agent.llm_base_url == "http://example.com/v1"
+        assert agent.llm_api_key == "key123"
+        assert agent.llm_model == "model-x"
 
-    def test_get_agent_by_slug_includes_llm_config(self) -> None:
+    def test_get_agent_by_slug_includes_llm_config(self):
         """get_agent_by_slug returns agent with LLM configuration."""
-        self.db.insert_agent(
-            agent_id="agent-5",
+        now = utc_now()
+        Agent.objects.create(
+            id="agent-5",
             name="Slug Agent",
             slug="slug-agent",
             command="claude",
             session_mode="claude",
-            vm_target_id=None,
-            required_ssh_options=None,
-            env_vars=None,
-            mcp_config=None,
-            trust_level=None,
-            input_echo_prefix=None,
-            response_prefix=None,
             llm_base_url="http://slug.example.com/v1",
             llm_api_key="slug-key",
             llm_model="slug-model",
+            created_at=now,
+            updated_at=now,
         )
-        agent = self.db.get_agent_by_slug("slug-agent")
-        self.assertIsNotNone(agent)
-        self.assertEqual(agent.llm_base_url, "http://slug.example.com/v1")
-        self.assertEqual(agent.llm_api_key, "slug-key")
-        self.assertEqual(agent.llm_model, "slug-model")
+        agent = Agent.objects.filter(slug="slug-agent").first()
+        assert agent is not None
+        assert agent.llm_base_url == "http://slug.example.com/v1"
+        assert agent.llm_api_key == "slug-key"
+        assert agent.llm_model == "slug-model"
 
 
-class ExecutorOverrideTests(unittest.TestCase):
-    def test_executor_uses_defaults(self) -> None:
+class TestExecutorOverrides:
+    """Tests for Executor override parameters."""
+
+    def test_executor_uses_defaults(self):
         """Executor uses its own defaults when no overrides provided."""
         executor = Executor(
             base_url="http://default.example.com/v1",
             api_key="default-key",
             model="default-model",
         )
-        # We can't easily test the actual call without mocking, but we can verify
-        # the executor stores the defaults
-        self.assertEqual(executor.base_url, "http://default.example.com/v1")
-        self.assertEqual(executor.api_key, "default-key")
-        self.assertEqual(executor.model, "default-model")
+        assert executor.base_url == "http://default.example.com/v1"
+        assert executor.api_key == "default-key"
+        assert executor.model == "default-model"
 
-    def test_executor_signature_accepts_overrides(self) -> None:
+    def test_executor_signature_accepts_overrides(self):
         """Executor.decide_next_action accepts override parameters."""
+        import inspect
+
         executor = Executor(
             base_url="http://default.example.com/v1",
             api_key="default-key",
             model="default-model",
         )
-        # Verify the method signature accepts the new parameters
-        import inspect
         sig = inspect.signature(executor.decide_next_action)
         param_names = list(sig.parameters.keys())
-        self.assertIn("base_url", param_names)
-        self.assertIn("api_key", param_names)
-        self.assertIn("model", param_names)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert "base_url" in param_names
+        assert "api_key" in param_names
+        assert "model" in param_names

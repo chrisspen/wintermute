@@ -13,7 +13,8 @@ try:
 except ImportError: # pragma: no cover
     ZoneInfo = None
 
-from wintermute.db import AsyncDatabase, utc_now
+from wintermute.services.database import AsyncDatabase
+from wintermute.utils import utc_now
 from wintermute.sources.base import TaskSource, WorkItem, WorkItemContext, WorkItemDraft
 
 DEFAULT_STANDUP_TIME = "09:30"

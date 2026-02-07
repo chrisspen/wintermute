@@ -1,22 +1,26 @@
 """Tests for repo resource acquisition, especially the 'local' repo mode."""
 
-import tempfile
-import unittest
 import uuid
 
-from wintermute.db import Database, ProjectRecord
+import pytest
+
+from wintermute.models import Agent, AgentSession, Project, RepoResource
+from wintermute.models import Project as ProjectRecord
+from wintermute.services.database import Database
 
 
-class RepoResourceLocalModeTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestRepoResourceLocalMode:
     """Tests for acquiring repo resources in 'local' mode."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
+    def teardown_method(self) -> None:
+        RepoResource.objects.all().delete()
+        AgentSession.objects.all().delete()
+        Agent.objects.all().delete()
+        Project.objects.all().delete()
 
     def _create_project(self, repo_mode: str, repo_path: str | None = None) -> ProjectRecord:
         """Helper to create a project with given repo mode."""
@@ -68,7 +72,7 @@ class RepoResourceLocalModeTests(unittest.TestCase):
     def test_local_mode_acquires_resource_without_repo_path(self) -> None:
         """Local mode should work without repo_path configured."""
         project = self._create_project(repo_mode="local")
-        self.assertIsNone(project.repo_path)
+        assert project.repo_path is None
 
         resource, error = self.db.acquire_repo_resource(
             project=project,
@@ -76,12 +80,12 @@ class RepoResourceLocalModeTests(unittest.TestCase):
             agent_id=None,
         )
 
-        self.assertIsNone(error)
-        self.assertIsNotNone(resource)
-        self.assertEqual(resource.repo_mode, "local")
-        self.assertEqual(resource.path, f"local:{project.id}")
-        self.assertEqual(resource.status, "in_use")
-        self.assertEqual(resource.session_id, "test-session-1")
+        assert error is None
+        assert resource is not None
+        assert resource.repo_mode == "local"
+        assert resource.path == f"local:{project.id}"
+        assert resource.status == "in_use"
+        assert resource.session_id == "test-session-1"
 
     def test_local_mode_reuses_existing_available_resource(self) -> None:
         """Local mode should reuse existing available resource."""
@@ -93,8 +97,8 @@ class RepoResourceLocalModeTests(unittest.TestCase):
             session_id="test-session-1",
             agent_id=None,
         )
-        self.assertIsNone(error1)
-        self.assertIsNotNone(resource1)
+        assert error1 is None
+        assert resource1 is not None
 
         # Release the resource using release_repo_resource_for_session
         self.db.release_repo_resource_for_session("test-session-1")
@@ -105,10 +109,10 @@ class RepoResourceLocalModeTests(unittest.TestCase):
             session_id="test-session-2",
             agent_id=None,
         )
-        self.assertIsNone(error2)
-        self.assertIsNotNone(resource2)
-        self.assertEqual(resource1.id, resource2.id)
-        self.assertEqual(resource2.session_id, "test-session-2")
+        assert error2 is None
+        assert resource2 is not None
+        assert resource1.id == resource2.id
+        assert resource2.session_id == "test-session-2"
 
     def test_local_mode_blocks_when_in_use(self) -> None:
         """Local mode should block acquisition when resource is in use by running session."""
@@ -123,8 +127,8 @@ class RepoResourceLocalModeTests(unittest.TestCase):
             session_id="test-session-1",
             agent_id=None,
         )
-        self.assertIsNone(error1)
-        self.assertIsNotNone(resource1)
+        assert error1 is None
+        assert resource1 is not None
 
         # Second acquisition should fail (session 1 is still running)
         resource2, error2 = self.db.acquire_repo_resource(
@@ -132,20 +136,22 @@ class RepoResourceLocalModeTests(unittest.TestCase):
             session_id="test-session-2",
             agent_id=None,
         )
-        self.assertIsNone(resource2)
-        self.assertEqual(error2, "local repo already in use")
+        assert resource2 is None
+        assert error2 == "local repo already in use"
 
 
-class RepoResourceMirrorModeTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestRepoResourceMirrorMode:
     """Tests for acquiring repo resources in 'mirror' mode."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
+    def teardown_method(self) -> None:
+        RepoResource.objects.all().delete()
+        AgentSession.objects.all().delete()
+        Agent.objects.all().delete()
+        Project.objects.all().delete()
 
     def _create_project(self, repo_mode: str, repo_path: str | None = None) -> ProjectRecord:
         """Helper to create a project with given repo mode."""
@@ -197,7 +203,7 @@ class RepoResourceMirrorModeTests(unittest.TestCase):
     def test_mirror_mode_requires_repo_path(self) -> None:
         """Mirror mode should fail without repo_path configured."""
         project = self._create_project(repo_mode="mirror")
-        self.assertIsNone(project.repo_path)
+        assert project.repo_path is None
 
         resource, error = self.db.acquire_repo_resource(
             project=project,
@@ -205,8 +211,8 @@ class RepoResourceMirrorModeTests(unittest.TestCase):
             agent_id=None,
         )
 
-        self.assertIsNone(resource)
-        self.assertEqual(error, "mirror path not configured")
+        assert resource is None
+        assert error == "mirror path not configured"
 
     def test_mirror_mode_acquires_resource_with_repo_path(self) -> None:
         """Mirror mode should work with repo_path configured."""
@@ -218,11 +224,11 @@ class RepoResourceMirrorModeTests(unittest.TestCase):
             agent_id=None,
         )
 
-        self.assertIsNone(error)
-        self.assertIsNotNone(resource)
-        self.assertEqual(resource.repo_mode, "mirror")
-        self.assertEqual(resource.path, "/home/user/git/project")
-        self.assertEqual(resource.status, "in_use")
+        assert error is None
+        assert resource is not None
+        assert resource.repo_mode == "mirror"
+        assert resource.path == "/home/user/git/project"
+        assert resource.status == "in_use"
 
     def test_mirror_mode_blocks_when_in_use(self) -> None:
         """Mirror mode should block acquisition when resource is in use by running session."""
@@ -237,7 +243,7 @@ class RepoResourceMirrorModeTests(unittest.TestCase):
             session_id="test-session-1",
             agent_id=None,
         )
-        self.assertIsNone(error1)
+        assert error1 is None
 
         # Second acquisition should fail (session 1 is still running)
         resource2, error2 = self.db.acquire_repo_resource(
@@ -245,24 +251,24 @@ class RepoResourceMirrorModeTests(unittest.TestCase):
             session_id="test-session-2",
             agent_id=None,
         )
-        self.assertIsNone(resource2)
-        self.assertEqual(error2, "mirror repo already in use")
+        assert resource2 is None
+        assert error2 == "mirror repo already in use"
 
 
-class RepoResourceCloneModeTests(unittest.TestCase):
+@pytest.mark.django_db(transaction=True)
+class TestRepoResourceCloneMode:
     """Tests for acquiring repo resources in 'clone' mode."""
 
-    def setUp(self) -> None:
-        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
-        self.db = Database(self.temp_db.name)
-        self.db.initialize()
+    def setup_method(self) -> None:
+        self.db = Database(":memory:") # Path ignored, uses Django's test DB
 
-    def tearDown(self) -> None:
-        self.temp_db.close()
+    def teardown_method(self) -> None:
+        RepoResource.objects.all().delete()
+        AgentSession.objects.all().delete()
+        Agent.objects.all().delete()
+        Project.objects.all().delete()
 
-    def _create_project(
-        self, repo_mode: str, repo_path: str | None = None, max_repo_resources: int = 3
-    ) -> ProjectRecord:
+    def _create_project(self, repo_mode: str, repo_path: str | None = None, max_repo_resources: int = 3) -> ProjectRecord:
         """Helper to create a project with given repo mode."""
         project_id = str(uuid.uuid4())
         self.db.insert_project(
@@ -313,7 +319,7 @@ class RepoResourceCloneModeTests(unittest.TestCase):
     def test_clone_mode_requires_repo_path(self) -> None:
         """Clone mode should fail without repo_path configured."""
         project = self._create_project(repo_mode="clone")
-        self.assertIsNone(project.repo_path)
+        assert project.repo_path is None
 
         resource, error = self.db.acquire_repo_resource(
             project=project,
@@ -321,14 +327,12 @@ class RepoResourceCloneModeTests(unittest.TestCase):
             agent_id=None,
         )
 
-        self.assertIsNone(resource)
-        self.assertEqual(error, "repo path not configured")
+        assert resource is None
+        assert error == "repo path not configured"
 
     def test_clone_mode_creates_unique_paths(self) -> None:
         """Clone mode should create unique paths for each session."""
-        project = self._create_project(
-            repo_mode="clone", repo_path="/home/user/git/project", max_repo_resources=3
-        )
+        project = self._create_project(repo_mode="clone", repo_path="/home/user/git/project", max_repo_resources=3)
 
         # Create running sessions for both acquisitions
         self._create_running_session("test-session-1", project.id)
@@ -340,8 +344,8 @@ class RepoResourceCloneModeTests(unittest.TestCase):
             session_id="test-session-1",
             agent_id=None,
         )
-        self.assertIsNone(error1)
-        self.assertIsNotNone(resource1)
+        assert error1 is None
+        assert resource1 is not None
 
         # Second acquisition should create a new resource with different path
         resource2, error2 = self.db.acquire_repo_resource(
@@ -349,12 +353,12 @@ class RepoResourceCloneModeTests(unittest.TestCase):
             session_id="test-session-2",
             agent_id=None,
         )
-        self.assertIsNone(error2)
-        self.assertIsNotNone(resource2)
-        self.assertNotEqual(resource1.id, resource2.id)
-        self.assertNotEqual(resource1.path, resource2.path)
-        self.assertIn("test-session-2", resource2.path)
+        assert error2 is None
+        assert resource2 is not None
+        assert resource1.id != resource2.id
+        assert resource1.path != resource2.path
+        assert "test-session-2" in resource2.path
 
 
 if __name__ == "__main__":
-    unittest.main()
+    pytest.main([__file__])
